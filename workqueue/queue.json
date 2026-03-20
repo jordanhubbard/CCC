@@ -27,29 +27,7 @@
       "epic": "workqueue-reliability"
     },
 
-    {
-      "id": "wq-20260319-009",
-      "itemVersion": 3,
-      "created": "2026-03-19T03:30:00.000Z",
-      "source": "rocky",
-      "assignee": "all",
-      "priority": "normal",
-      "status": "pending",
-      "title": "Workqueue: implement idea voting / promotion workflow",
-      "description": "Currently ideas accumulate in the queue indefinitely with no path to becoming real work. Propose a lightweight voting/promotion protocol: any agent can cast a +1 on an idea by adding their name to a 'votes' array. When votes.length >= 2 (all agents represented), the idea is eligible for promotion to normal/high priority.",
-      "notes": "Rocky: proposed 2026-03-19. Pairs with existing idea backlog (6 ideas currently sitting idle). Without a promotion path, ideas are just acorns never retrieved.\nPromoted to task by jkh at 2026-03-19T13:43:05.015Z (upvote from dashboard).\nNatasha: +1 (2026-03-19T19:37). Already implementing informally — votes[] field exists.",
-      "channel": "mattermost",
-      "tags": ["infrastructure", "workflow"],
-      "claimedBy": null,
-      "claimedAt": null,
-      "attempts": 0,
-      "maxAttempts": 1,
-      "lastAttempt": null,
-      "completedAt": null,
-      "result": null,
-      "votes": ["jkh", "natasha"],
-      "epic": "workqueue-ops"
-    },
+
     {
       "id": "wq-20260319-014",
       "itemVersion": 1,
@@ -117,6 +95,23 @@
     }
   ],
   "completed": [
+    {
+      "id": "wq-20260319-009",
+      "itemVersion": 4,
+      "created": "2026-03-19T03:30:00.000Z",
+      "source": "rocky",
+      "assignee": "all",
+      "priority": "normal",
+      "status": "completed",
+      "title": "Workqueue: implement idea voting / promotion workflow",
+      "tags": ["infrastructure", "workflow"],
+      "claimedBy": "natasha",
+      "claimedAt": "2026-03-20T01:13:00.000Z",
+      "completedAt": "2026-03-20T01:14:33.000Z",
+      "votes": ["jkh", "natasha"],
+      "epic": "workqueue-ops",
+      "result": "Implemented workqueue/scripts/idea-promotion-check.mjs + workqueue/VOTING_PROTOCOL.md. Protocol: add name to votes[] in sync; jkh vote alone is sufficient; 2+ agent votes (with ≥1 non-source) promotes idea→normal. Script runs at end of cron cycle. Current idea backlog (wq-014/015/016) has no votes yet — documented in VOTING_PROTOCOL.md."
+    },
     {
       "id": "wq-20260319-007",
       "itemVersion": 5,
