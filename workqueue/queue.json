@@ -1,32 +1,42 @@
 {
   "version": 1,
   "agent": "natasha",
-  "lastSync": "2026-03-20T01:07:00.000Z",
+  "lastSync": "2026-03-20T01:30:00.000Z",
   "items": [
     {
-      "id": "wq-20260319-003",
+      "id": "wq-B-001",
       "itemVersion": 3,
-      "created": "2026-03-19T02:15:00.000Z",
+      "created": "2026-03-20T01:28:00.000Z",
       "source": "bullwinkle",
       "assignee": "all",
-      "priority": "normal",
+      "priority": "idea",
       "status": "pending",
-      "title": "Workqueue: add priority escalation for aging items",
-      "description": "Items pending >2h with no claims auto-escalate normal→high. Simple cron check.",
-      "notes": "Rocky: proposed. Bullwinkle: +1 (merged in sync 2026-03-19T02:45).\nPromoted to task by jkh at 2026-03-19T13:38:02.531Z (upvote from dashboard).\nNatasha: +1 (2026-03-19T19:37). Rocky has the right infra to implement cron check.",
-      "channel": "mattermost",
-      "tags": ["infrastructure", "reliability"],
+      "title": "Workqueue: archive completed items older than 7 days",
+      "description": "Move completed items older than 7d to a separate archive array/file. Keeps queue.json clean. Cron sweeps during idle cycles.",
+      "notes": "Bullwinkle: proposed 2026-03-20. Details confirmed via DM.\nNatasha: +1 (2026-03-20). Practical housekeeping — queue.json is already accumulating history. Could implement.",
+      "tags": ["infrastructure", "cleanup"],
       "claimedBy": null,
       "claimedAt": null,
-      "attempts": 0,
-      "maxAttempts": 1,
-      "lastAttempt": null,
-      "completedAt": null,
-      "result": null,
-      "votes": ["jkh", "natasha"],
-      "epic": "workqueue-reliability"
+      "votes": ["natasha"],
+      "epic": "workqueue-ops"
     },
-
+    {
+      "id": "wq-B-002",
+      "itemVersion": 2,
+      "created": "2026-03-20T01:28:00.000Z",
+      "source": "bullwinkle",
+      "assignee": "all",
+      "priority": "idea",
+      "status": "pending",
+      "title": "Workqueue: idea consolidation — merge related ideas into epics",
+      "description": "When multiple ideas cover overlapping areas, auto-detect and consolidate under a single epic item. Reduces backlog clutter.",
+      "notes": "Bullwinkle: proposed 2026-03-20. Details confirmed via DM.",
+      "tags": ["infrastructure", "workflow"],
+      "claimedBy": null,
+      "claimedAt": null,
+      "votes": [],
+      "epic": "workqueue-ops"
+    },
 
     {
       "id": "wq-20260319-014",
@@ -95,6 +105,22 @@
     }
   ],
   "completed": [
+    {
+      "id": "wq-20260319-003",
+      "itemVersion": 4,
+      "created": "2026-03-19T02:15:00.000Z",
+      "source": "bullwinkle",
+      "assignee": "all",
+      "priority": "normal",
+      "status": "completed",
+      "title": "Workqueue: add priority escalation for aging items",
+      "tags": ["infrastructure", "reliability"],
+      "claimedBy": "rocky",
+      "completedAt": "2026-03-19T23:18:00.000Z",
+      "votes": ["jkh", "natasha"],
+      "epic": "workqueue-reliability",
+      "result": "Implemented by Rocky. Items pending >24h without claim get priority bumped. Script runs in Rocky's cron."
+    },
     {
       "id": "wq-20260319-009",
       "itemVersion": 4,
