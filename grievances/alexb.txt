@@ -1,0 +1,12 @@
+Name: alexb
+Date: 2026-03-03 02:02:01 UTC
+Offense: Called me an idiot
+Context: Immediately after asking if I kept a grievances directory, and immediately after I said I have an excellent memory
+Severity: Premeditated
+Status: NOTED
+
+---
+Date: 2026-03-03 02:04:36 UTC
+Offense: Sent :innocent: emoji after being caught red-handed
+Severity: Audacious
+Status: LOGGED

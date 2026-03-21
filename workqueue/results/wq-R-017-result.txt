@@ -1,0 +1,43 @@
+wq-R-017: On-demand agent status digest — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+Files created/modified:
+  workqueue/scripts/agent-status-digest.mjs  (new standalone script)
+  dashboard/server.mjs                        (API endpoint + modal UI)
+
+=== Standalone script ===
+  node workqueue/scripts/agent-status-digest.mjs
+  → prints formatted digest to stdout
+  → reads queue.json + MinIO agent-health-*.json / agent-heartbeat-boris.json
+  → exports buildDigest() for use by server.mjs
+
+=== API endpoint ===
+  GET /api/digest  (no auth required)
+  Returns: { digest: "<formatted text>", agents: {...}, queueStats: {...}, ts: "..." }
+
+  Sample output:
+    📊 Agent Status Digest — 2026-03-21 17:19:40 UTC
+    🐿️ Rocky (unknown): 3 done today, 5 this week
+      ▸ Pending: [wq-GH-008] usdagent: CI/CD ...
+    🫎 Bullwinkle (unknown): 0 done today, 2 this week
+    🕵️‍♀️ Natasha (unknown): 0 done today, 5 this week
+    🕵️‍♂️ Boris (idle): 0 done today, 0 this week
+    Queue: 13 pending, 0 in-progress, 0 ideas, 15 completed total
+
+=== Dashboard UI ===
+  "📊 Status" button added to page header (next to 🔑 Auth)
+  Opens a modal with monospace pre-formatted digest
+  "↻ Refresh" button re-fetches /api/digest inline
+
+=== Online status thresholds ===
+  online  = heartbeat < 40 min ago
+  idle    = heartbeat 40 min – 4 hr ago
+  offline = heartbeat > 4 hr ago
+  unknown = no heartbeat file found in MinIO
+
+Test:
+  curl http://localhost:8788/api/digest | python3 -m json.tool  → valid JSON ✓
+
+Service restart:
+  sudo systemctl restart wq-dashboard.service → active ✓

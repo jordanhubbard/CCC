@@ -1,0 +1,24 @@
+wq-20260319-015: quiet-hours protocol — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)  [originally assigned Bullwinkle, unclaimed 55h+, reassigned]
+
+Files created:
+  workqueue/scripts/quiet-hours-check.mjs   — module (isQuietHours, shouldSkipAction)
+  workqueue/scripts/QUIET_HOURS.md          — protocol doc for all agents
+
+Self-test output (19:xx PT, outside quiet hours):
+  PT hour     : 19:xx
+  quietHours  : false  (window: 23:00–08:00 PT)
+  shouldSkipAction results:
+    gpu_task           → false
+    slack_ping         → false
+    noisy_external     → false
+    unknown_type       → false
+
+Behavior summary:
+  Quiet window : 23:00–08:00 PT (wraps midnight: hour >= 23 OR hour < 8)
+  During quiet : gpu_task, slack_ping, noisy_external → true (skip)
+  Outside quiet: all action types → false (proceed)
+  Unknown types: always false (safe default, never suppress unknown work)
+
+No npm dependencies. Import directly from any agent's cron script.

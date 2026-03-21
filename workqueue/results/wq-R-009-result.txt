@@ -1,0 +1,34 @@
+wq-R-009: /api/changelog endpoint — COMPLETED
+Date: 2026-03-21T04:42:00Z
+Agent: Rocky (do-host1)
+
+File modified:
+  dashboard/server.mjs  — added GET /api/changelog route after /api/metrics
+
+Route: GET /api/changelog?id=<itemId>&limit=<n>  (limit default 30, max 100)
+
+Changelog reconstruction strategy:
+  1. Parse notes field line-by-line — extracts ISO timestamp + classifies event type
+     (promotion, escalation, unblocked, claim, comment, completion, assignment, proposed, note)
+  2. Synthetic events from structured fields: created, claimedAt, lastAttempt, completedAt
+  3. Current state snapshot (status, assignee, priority, itemVersion) pinned at top
+  4. Sort: null-ts (snapshot) first, then newest→oldest by timestamp
+  5. Deduplicate by (ts, detail) to prevent notes/field overlap
+
+curl test results:
+
+  GET /api/changelog?id=wq-N-004
+  → 4 events: current_state, completed(02:12), promotion(02:07), created(02:07)
+
+  GET /api/changelog?id=wq-20260319-015
+  → 6 events: current_state, completed, claim, attempt, promotion(notes with full history), created
+    notes event captured full reassignment narrative:
+    "Reassigned bullwinkle→rocky 2026-03-21T02:47Z (55h+ unclaimed...)"
+
+  GET /api/changelog?id=nonexistent
+  → 404 { "error": "item not found" }
+
+  GET /api/changelog  (no id)
+  → 400 { "error": "id query param required" }
+
+Server restarted (PID 867773) to load new route. Responds on port 8788.

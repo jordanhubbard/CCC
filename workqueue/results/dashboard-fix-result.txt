@@ -1,0 +1,27 @@
+dashboard-fix: Azure Blob SquirrelBus section restored — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+Changes made:
+  workqueue/scripts/gen-dashboard.py — added SquirrelBus section
+
+What was added to gen-dashboard.py:
+  1. CSS: bus-msg, bus-filter-btn, bus-header, type-badge, send-form, send-btn styles
+  2. HTML: SquirrelBus heading + collapsible send-form + filter bar + #bus-messages div
+  3. JS:  loadBus() fetches http://146.190.134.110:8788/bus/messages?limit=50
+         renderBusFilters() — agent filter buttons (all/rocky/bullwinkle/natasha/jkh)
+         renderBus() / renderBusMsg() — full message rendering (text, memo, blob, queue_sync)
+         sendBusMessage() — posts to /bus/send
+         Auto-polls every 30s; initial load on page open
+
+write-heartbeat.sh result:
+  - Heartbeat written to MinIO: do-host1/agents/shared/agent-heartbeat-rocky.json
+  - Dashboard regenerated: /tmp/agent-dashboard.html (65,523 bytes)
+  - Uploaded to Azure Blob (HTTP 200)
+
+Verification:
+  grep count for SquirrelBus/bus-messages/BUS_API/loadBus in generated HTML: 13 matches
+  Dashboard is live at the Azure Blob SAS URL in write-heartbeat.sh
+
+Bus endpoint used: http://146.190.134.110:8788 (public IP of do-host1, reachable from browser)
+Note: send-form requires /bus/send endpoint to be available on port 8788.

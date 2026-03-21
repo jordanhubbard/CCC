@@ -1,0 +1,62 @@
+squirrelbus-push-delivery — COMPLETED
+Date: 2026-03-21T05:23:36Z
+Agent: Rocky (do-host1)
+
+════════════════════════════════════════
+PART 1: Rocky fan-out (dashboard/server.mjs)
+════════════════════════════════════════
+Added to server.mjs (after existing constants):
+  - BUS_PEERS registry: { bullwinkle: 'http://100.87.68.11:18789/...', natasha: 'http://100.87.229.125:18789/...' }
+  - BULLWINKLE_TOKEN / NATASHA_TOKEN: from env or 'SQUIRRELBUS_TOKEN_REMOVED'
+  - fanOutBusMessage(msg): fire-and-forget HTTP POST to peers, filtered by msg.to
+    • Skips fan-out back to originating agent (msg.from === peer)
+    • Only fans out if msg.to === 'all' OR msg.to === peer
+    • 5s timeout per peer, logs success/failure to console
+  - Called at end of appendBusMessage() after SSE broadcast
+
+Test result (bus/send → to:all):
+  /bus/send → ok, seq=20
+  [bus-fanout] → bullwinkle: HTTP 404  ✓ (fan-out fired; plugin not yet installed)
+  [bus-fanout] → natasha: HTTP 404    ✓ (fan-out fired; plugin not yet installed)
+
+════════════════════════════════════════
+PART 2: OpenClaw plugin (squirrelbus-plugin/)
+════════════════════════════════════════
+Files created:
+  squirrelbus-plugin/index.js             — plugin entry (ESM)
+  squirrelbus-plugin/openclaw.plugin.json — plugin manifest (id, configSchema)
+  squirrelbus-plugin/package.json         — npm manifest with "openclaw": {"extensions": ["index.js"]}
+  squirrelbus-plugin/README.md            — install instructions for Bullwinkle/Natasha
+
+Plugin behavior:
+  api.registerHttpRoute({ path: '/squirrelbus/receive', auth: 'plugin' })
+    → validates Bearer token (SQUIRRELBUS_TOKEN env or 'SQUIRRELBUS_TOKEN_REMOVED')
+    → parses and normalizes SquirrelBus message body
+    → appends to local squirrelbus/bus.jsonl
+    → queues system event text: "System: [SquirrelBus] From @{from}: {subject/body[:200]}"
+    → responds 200 { ok: true, id: ... }
+
+  api.on('before_prompt_build', handler)
+    → at next prompt build, injects pending messages into system prompt
+    → evicts entries older than 10 minutes
+    → supports both systemMessages[] and systemPrompt string shapes
+
+════════════════════════════════════════
+PART 3: Upload + notify + test
+════════════════════════════════════════
+MinIO:
+  /tmp/squirrelbus-plugin.tar.gz → do-host1/agents/shared/squirrelbus-plugin.tar.gz ✓
+
+Mattermost DMs:
+  Bullwinkle (5da4dgr91fbd3ba5ghtdg581qy): post id zqmuf8bjiff5pc799ghsytw7na ✓
+  Natasha    (36ir68o4itbpf8n6rfwn36zcyh): post id rs8wtxqayfrp9gxhkg1bsuy9iy ✓
+
+Fan-out test:
+  Message: from=rocky, to=all, body="SquirrelBus push test..."
+  → bullwinkle: HTTP 404 (endpoint reachable via Tailscale, plugin not yet installed)
+  → natasha: HTTP 404 (same)
+  → Confirms: fan-out fires immediately, fire-and-forget, non-blocking
+
+Pending:
+  Bullwinkle and Natasha need to install the plugin and restart their gateway.
+  After install, HTTP 200 responses expected and system events will inject live.

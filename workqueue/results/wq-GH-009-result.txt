@@ -1,0 +1,23 @@
+shemacs kill-lines bug fix — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+Issue: #6 — "Killing multiple lines fails"
+Error: _em_delete_line_at:8: unrecognized modifier 'l'
+
+Root cause:
+  em.zsh line 234 (in _em_delete_line_at):
+    _em_lines=("${_em_lines[@]:0:last}")
+  With KSH_ARRAYS enabled (set at line 46), zsh interprets bare 'last'
+  in the :0:last slice as a parameter modifier string rather than a
+  variable reference, triggering the "unrecognized modifier" error.
+
+Fix (one character):
+  _em_lines=("${_em_lines[@]:0:$last}")
+  Added $ prefix so zsh evaluates 'last' as the local -i variable.
+
+Other files checked:
+  em.sh, em.scm.sh — no occurrences of ":0:last" pattern found.
+
+PR: https://github.com/jordanhubbard/shemacs/pull/7
+Branch: fix/ksh-arrays-slice-modifier

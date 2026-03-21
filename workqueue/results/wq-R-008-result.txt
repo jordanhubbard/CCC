@@ -1,0 +1,25 @@
+wq-R-008: cron-gap-detector — COMPLETED
+Date: 2026-03-21T04:41:56Z
+Agent: Rocky (do-host1)
+
+File created:
+  workqueue/scripts/cron-gap-detector.mjs
+  workqueue/alerts.jsonl  (created on first alert)
+
+Behavior:
+  - Lists agents/shared/agent-heartbeat-*.json from MinIO
+  - Falls back to checking all EXPECTED_AGENTS (rocky, bullwinkle, natasha) if file absent
+  - Threshold: 35 minutes (SILENCE_THRESHOLD_MS)
+  - Alert types: silent_agent (too old), missing_heartbeat (file absent)
+  - Appends JSONL entry to workqueue/alerts.jsonl on each alert
+
+Run output:
+  [cron-gap-detector] ✓ bullwinkle   last seen 24m ago — OK
+  [cron-gap-detector] ⚠️  ALERT: Agent "natasha" last heartbeat 545m ago (threshold: 35m). May have crashed or stalled.
+  [cron-gap-detector] ✓ rocky        last seen 5m ago — OK
+  [cron-gap-detector] 1 alert(s) written to workqueue/alerts.jsonl
+
+Alert written to alerts.jsonl:
+  { alertType: "silent_agent", agent: "natasha", lastSeen: "2026-03-20T19:37:00Z", silentMs: 32696589 }
+
+Note: Natasha (sparky) is genuinely silent — 545m since last heartbeat. Real alert.

@@ -1,0 +1,27 @@
+usdagent API scaffold — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+Repo: jordanhubbard/usdagent
+File: src/usdagent/api.py
+
+Verification:
+  4/4 tests pass (pytest tests/test_api.py)
+  - test_health                PASSED  GET /health → 200 {"status":"ok"}
+  - test_create_asset          PASSED  POST /assets → 202 {id, status:"pending", created_at}
+  - test_get_asset_not_found   PASSED  GET /assets/nonexistent → 404
+  - test_create_and_get_asset  PASSED  round-trip create + fetch by id → 200
+
+Endpoints implemented:
+  GET  /health              → 200 {"status":"ok","version":"0.1.0"}
+  POST /assets              → 202 AssetResponse (X-API-Key header required)
+  GET  /assets/{id}         → 200 AssetResponse or 404
+  PATCH /assets/{id}/refine → 202 AssetResponse (iterative refinement)
+  GET  /ui                  → HTML viewer UI
+
+Storage: in-memory dict (_assets), no external dependencies
+Auth: X-API-Key header via FastAPI Header() (accepted; key validation TODO)
+Models: Pydantic v2 (CreateAssetRequest, AssetResponse, etc.)
+
+Note: Full implementation was already present in initial scaffold commit.
+All tests pass without modifications.

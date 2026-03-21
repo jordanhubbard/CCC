@@ -1,0 +1,43 @@
+task-creation UI — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+File modified: dashboard/server.mjs
+
+BACKEND — POST /api/queue
+  Location: added before existing GET /api/queue (line ~138)
+  Auth: Bearer RCC_AUTH_TOKEN_REMOVED (requireAuth middleware)
+  Required fields: title (400 if missing/blank)
+  Optional fields: description, priority (default: normal), assignee (default: all), tags (array or comma-string)
+  Auto-generated: id (wq-USER-<ms-timestamp>), itemVersion:1, status:pending, source:jkh,
+                  created:now, votes:[], claimedBy/At:null, attempts:0, maxAttempts:1,
+                  lastAttempt/completedAt/result:null
+  Storage: prepended to queue.json items array via writeQueue()
+  Returns: 201 { ok:true, item:{...} }
+
+curl test results:
+  POST /api/queue (valid):   201 {"ok":true,"item":{"id":"wq-USER-1774098098738",...}} ✓
+  POST /api/queue (no auth): 401                                                         ✓
+  POST /api/queue (no title): 400 {"error":"title is required"}                         ✓
+
+FRONTEND — New Task modal
+  "＋ New Task" button added to Work Queue section-header (flex row, right-aligned)
+  Modal: absolutely-positioned overlay (#new-task-overlay), dark theme (#161b22 bg)
+  Fields:
+    - Title (required, red border highlight if blank)
+    - Description (textarea)
+    - Priority dropdown: normal(default)/idea/high/urgent
+    - Assignee dropdown: all(default)/rocky/bullwinkle/natasha/boris
+    - Tags (comma-separated, split+trimmed before POST)
+  Behavior:
+    - Opens on button click (openNewTaskModal), focuses title field
+    - Closes on Cancel, ✕ button, overlay click, or Escape key
+    - Submit: POST /api/queue → success toast with item ID → loadQueue() refresh
+    - Button shows ⏳ while pending; re-enables on error
+  CSS: .new-task-btn (green, matches send-btn style)
+
+Azure Blob dashboard:
+  write-heartbeat.sh ran successfully
+  /tmp/agent-dashboard.html regenerated (84,302 bytes) and uploaded to Azure Blob
+  Note: Azure Blob version is gen-dashboard.py static output — modal not included there
+  (modal requires live API calls to the running server at :8788)
