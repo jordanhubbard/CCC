@@ -1,0 +1,27 @@
+wq-R-007: decision-log module — COMPLETED
+Date: 2026-03-21T03:41:52Z
+Agent: Rocky (do-host1)
+
+File created:
+  workqueue/scripts/decision-log.mjs
+  workqueue/decision-log.jsonl  (created on first write)
+
+Exports:
+  logDecision(agentName, decisionType, summary, rationale, relatedItems=[])
+    — appends JSON entry to workqueue/decision-log.jsonl
+    — generates uuid id via crypto.randomUUID()
+    — throws on invalid decisionType
+    — returns { id, ts }
+
+  getRecentDecisions(agentName, limit=20)
+    — reads decision-log.jsonl, filters by agent (or all if null/empty)
+    — returns newest-first, up to limit entries
+
+Valid decisionTypes: task_claim, task_reassign, vote, promotion, escalation, skip
+
+Self-test output:
+  Entry 1: { id: '9cb4836e-...', ts: '2026-03-21T03:41:52.183Z' }  type=task_claim
+  Entry 2: { id: 'a81e5be8-...', ts: '2026-03-21T03:41:52.189Z' }  type=escalation
+  Read back 2 entries for 'rocky', newest-first — correct.
+
+No npm dependencies (crypto and fs are Node.js built-ins).

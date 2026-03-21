@@ -1,0 +1,1812 @@
+#!/usr/bin/env node
+/**
+ * WQ Dashboard — Rocky's unified workqueue + SquirrelBus dashboard
+ * Port 8788, dark theme, live data, client-side rendering
+ */
+
+import express from 'express';
+import { readFile, writeFile, appendFile } from 'fs/promises';
+import { existsSync, createReadStream } from 'fs';
+import { execFile, spawn } from 'child_process';
+import { promisify } from 'util';
+import { randomUUID } from 'crypto';
+import { createInterface } from 'readline';
+import { createReadStream as createRS } from 'fs';
+import { initCrashReporter } from '../lib/crash-reporter.mjs';
+
+// Initialize crash reporter early — before anything else can throw
+initCrashReporter({
+  service: 'wq-dashboard',
+  sourceDir: '/home/jkh/.openclaw/workspace/dashboard'
+});
+
+const execFileP = promisify(execFile);
+
+const app = express();
+const PORT = 8788;
+const AUTH_TOKEN = 'RCC_AUTH_TOKEN_REMOVED';
+const QUEUE_PATH = '/home/jkh/.openclaw/workspace/workqueue/queue.json';
+const MC_PATH = '/home/jkh/.local/bin/mc';
+const MINIO_ALIAS = 'do-host1';
+const BUS_LOG_PATH = '/home/jkh/.openclaw/workspace/squirrelbus/bus.jsonl';
+
+// ── SquirrelBus peer fan-out registry ─────────────────────────────────────────
+const BUS_PEERS = {
+  bullwinkle: 'http://BULLWINKLE_TAILSCALE_IP:18789/squirrelbus/receive',
+  natasha:    'http://NATASHA_TAILSCALE_IP:18789/squirrelbus/receive',
+};
+const BULLWINKLE_TOKEN = process.env.BULLWINKLE_TOKEN || 'SQUIRRELBUS_TOKEN_REMOVED';
+const NATASHA_TOKEN    = process.env.NATASHA_TOKEN    || 'SQUIRRELBUS_TOKEN_REMOVED';
+const PEER_TOKENS = { bullwinkle: BULLWINKLE_TOKEN, natasha: NATASHA_TOKEN };
+
+async function fanOutBusMessage(msg) {
+  for (const [peer, url] of Object.entries(BUS_PEERS)) {
+    // Skip fan-out back to the originating agent
+    if (msg.from === peer) continue;
+    // Only fan out if addressed to this peer or to 'all'
+    if (msg.to !== 'all' && msg.to !== peer) continue;
+
+    const token = PEER_TOKENS[peer];
+    (async () => {
+      try {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 5000);
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(msg),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timeout);
+        console.log(`[bus-fanout] → ${peer}: HTTP ${resp.status}`);
+      } catch (err) {
+        console.warn(`[bus-fanout] → ${peer}: failed (${err.message})`);
+      }
+    })();
+  }
+}
+
+// Middleware
+app.use(express.json());
+
+// CORS for API endpoints
+app.use('/api', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// Auth middleware for write endpoints
+function requireAuth(req, res, next) {
+  const auth = (req.headers.authorization || '').trim();
+  const expected = `Bearer ${AUTH_TOKEN}`;
+  if (!auth || auth !== expected) {
+    return res.status(401).json({ error: 'Unauthorized — check your auth token (RCC_AUTH_TOKEN_REMOVED)' });
+  }
+  next();
+}
+
+// --- Data helpers ---
+
+async function readQueue() {
+  const raw = await readFile(QUEUE_PATH, 'utf8');
+  return JSON.parse(raw);
+}
+
+async function writeQueue(data) {
+  await writeFile(QUEUE_PATH, JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+// In-memory heartbeat store
+const heartbeats = {};
+
+async function fetchMinIOHeartbeat(agent) {
+  try {
+    const { stdout } = await execFileP(MC_PATH, [
+      'cat', `${MINIO_ALIAS}/agents/shared/agent-heartbeat-${agent}.json`
+    ], { timeout: 5000 });
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+async function getHeartbeats() {
+  // Start with in-memory heartbeats (includes any agent that has posted)
+  const result = { ...heartbeats };
+  // Also check MinIO for known persistent agents (fills gaps on cold start)
+  const knownAgents = ['rocky', 'bullwinkle', 'natasha', 'boris'];
+  for (const agent of knownAgents) {
+    if (!result[agent]) {
+      const minio = await fetchMinIOHeartbeat(agent);
+      if (minio) result[agent] = minio;
+    }
+  }
+  return result;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// --- API Routes ---
+
+app.post('/api/queue', requireAuth, async (req, res) => {
+  try {
+    const { title, description, priority, assignee, tags } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    const now = new Date().toISOString();
+    const id = `wq-USER-${Date.now()}`;
+    const item = {
+      id,
+      itemVersion: 1,
+      created: now,
+      source: 'jkh',
+      assignee: assignee || 'all',
+      priority: priority || 'normal',
+      status: 'pending',
+      title: title.trim(),
+      description: (description || '').trim(),
+      notes: '',
+      tags: Array.isArray(tags) ? tags : (tags ? String(tags).split(',').map(t => t.trim()).filter(Boolean) : []),
+      votes: [],
+      claimedBy: null,
+      claimedAt: null,
+      attempts: 0,
+      maxAttempts: 1,
+      lastAttempt: null,
+      completedAt: null,
+      result: null,
+    };
+    const data = await readQueue();
+    data.items.unshift(item);
+    data.lastSync = now;
+    await writeQueue(data);
+    res.status(201).json({ ok: true, item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/queue', async (req, res) => {
+  try {
+    const data = await readQueue();
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/heartbeats', async (req, res) => {
+  try {
+    const hbs = await getHeartbeats();
+    res.json(hbs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/upvote/:id', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = data.items.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    if (item.status !== 'idea') return res.status(400).json({ error: 'Only idea items can be promoted' });
+    item.status = 'pending';
+    item.notes = (item.notes || '') + `\nPromoted to task by dashboard at ${new Date().toISOString()} (upvote).`;
+    item.itemVersion = (item.itemVersion || 0) + 1;
+    if (!item.votes) item.votes = [];
+    item.votes.push('dashboard');
+    await writeQueue(data);
+    res.json({ ok: true, item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/comment/:id', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const idx = data.items.findIndex(i => i.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Item not found' });
+    const item = data.items[idx];
+    const text = (req.body.text || '').trim().toLowerCase();
+    const rawText = (req.body.text || '').trim();
+
+    if (text === 'delete' || text === 'remove') {
+      data.items.splice(idx, 1);
+      await writeQueue(data);
+      return res.json({ ok: true, action: 'deleted', id: req.params.id });
+    }
+
+    if (text.startsWith('break into') || text.includes('subtask')) {
+      item.status = 'pending';
+      item.notes = (item.notes || '') + `\n[Subtask note] ${rawText} — added at ${new Date().toISOString()}`;
+      item.itemVersion = (item.itemVersion || 0) + 1;
+      await writeQueue(data);
+      return res.json({ ok: true, action: 'subtasked', item });
+    }
+
+    if (item.status === 'blocked') item.status = 'pending';
+    item.notes = (item.notes || '') + `\n[Comment] ${rawText} — added at ${new Date().toISOString()}`;
+    item.itemVersion = (item.itemVersion || 0) + 1;
+    await writeQueue(data);
+    res.json({ ok: true, action: 'commented', item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/complete/:id', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = data.items.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    item.status = 'completed';
+    item.completedAt = new Date().toISOString();
+    item.itemVersion = (item.itemVersion || 0) + 1;
+    await writeQueue(data);
+    res.json({ ok: true, item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Item detail, journal, choices, patch ---
+
+app.get('/api/item/:id', async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = [...data.items, ...(data.completed || [])].find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    res.json(item);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch('/api/item/:id', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = data.items.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const allowed = ['title','description','priority','assignee','status','notes','choices'];
+    const now = new Date().toISOString();
+    const changed = [];
+    for (const field of allowed) {
+      if (req.body[field] !== undefined && req.body[field] !== item[field]) {
+        const oldVal = item[field];
+        item[field] = req.body[field];
+        changed.push(`${field}: ${JSON.stringify(oldVal)} → ${JSON.stringify(req.body[field])}`);
+      }
+    }
+    if (changed.length) {
+      if (!item.journal) item.journal = [];
+      item.journal.push({ ts: now, author: 'jkh', type: 'status-change', text: `Updated: ${changed.join('; ')}` });
+      item.itemVersion = (item.itemVersion || 0) + 1;
+      await writeQueue(data);
+    }
+    res.json({ ok: true, item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/item/:id/comment', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = data.items.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const text = (req.body.text || '').trim();
+    const author = (req.body.author || 'jkh').trim();
+    if (!text) return res.status(400).json({ error: 'text required' });
+    if (!item.journal) item.journal = [];
+    const entry = { ts: new Date().toISOString(), author, type: 'comment', text };
+    item.journal.push(entry);
+    item.itemVersion = (item.itemVersion || 0) + 1;
+    await writeQueue(data);
+    res.json({ ok: true, entry });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/item/:id/choice', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = data.items.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const { choice, choiceLabel } = req.body;
+    if (!choice) return res.status(400).json({ error: 'choice required' });
+    const now = new Date().toISOString();
+    if (!item.journal) item.journal = [];
+    const entry = { ts: now, author: 'jkh', type: 'choice', text: `Choice recorded: [${choice}] ${choiceLabel || ''}` };
+    item.journal.push(entry);
+    item.choiceRecorded = { choice, label: choiceLabel || '', ts: now };
+    item.itemVersion = (item.itemVersion || 0) + 1;
+    await writeQueue(data);
+    res.json({ ok: true, entry, choiceRecorded: item.choiceRecorded });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/item/:id/ai-comment', requireAuth, async (req, res) => {
+  try {
+    const data = await readQueue();
+    const item = data.items.find(i => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const prompt = (req.body.prompt || '').trim();
+    if (!prompt) return res.status(400).json({ error: 'prompt required' });
+    const now = new Date().toISOString();
+    if (!item.journal) item.journal = [];
+
+    // User entry
+    const userEntry = { ts: now, author: 'jkh', type: 'ai', text: `✨ ${prompt}` };
+    item.journal.push(userEntry);
+
+    // Call OpenClaw gateway
+    let aiText = '(no response)';
+    try {
+      const gwResp = await fetch('http://localhost:18789/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer SQUIRRELBUS_TOKEN_REMOVED' },
+        body: JSON.stringify({
+          model: 'nvidia/azure/anthropic/claude-sonnet-4-6',
+          messages: [
+            { role: 'system', content: `You are Rocky, an AI assistant helping with a work item. Item title: "${item.title}". Description: "${item.description || ''}". Be concise and helpful.` },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: 500
+        })
+      });
+      const gwData = await gwResp.json();
+      aiText = gwData?.choices?.[0]?.message?.content || '(empty response)';
+    } catch (gwErr) {
+      aiText = `(gateway error: ${gwErr.message})`;
+    }
+
+    const aiEntry = { ts: new Date().toISOString(), author: '🐿️ Rocky', type: 'ai', text: aiText };
+    item.journal.push(aiEntry);
+    item.itemVersion = (item.itemVersion || 0) + 1;
+    await writeQueue(data);
+    res.json({ ok: true, userEntry, aiEntry });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/heartbeat/:agent', requireAuth, async (req, res) => {
+  const agent = req.params.agent;
+  heartbeats[agent] = {
+    agent,
+    ts: new Date().toISOString(),
+    status: 'online',
+    ...req.body,
+  };
+  res.json({ ok: true });
+});
+
+// --- Crash Report API ---
+
+app.post('/api/crash-report', requireAuth, async (req, res) => {
+  try {
+    const { service, error, stack, sourceDir, ts } = req.body;
+    if (!service || !error) {
+      return res.status(400).json({ error: 'Missing required fields: service, error' });
+    }
+
+    const timestamp = ts || String(Date.now());
+    const truncTitle = (error || 'Unknown error').slice(0, 80);
+    const stackLines = (stack || '').split('\n').slice(0, 5).join('\n');
+    const minioPath = `agents/logs/${service}-crash-${timestamp}.json`;
+
+    const task = {
+      id: `wq-crash-${timestamp}`,
+      itemVersion: 1,
+      created: new Date(parseInt(timestamp)).toISOString(),
+      source: 'system',
+      assignee: 'all',
+      priority: 'high',
+      status: 'pending',
+      title: `CRASH: ${service} — ${truncTitle}`,
+      description: `Unhandled exception in ${service}. Stack trace and logs available.`,
+      notes: `Error: ${error}\nStack: ${stackLines}\nSource: ${sourceDir || 'unknown'}\nMinIO logs: ${minioPath}`,
+      tags: ['crash', 'auto-filed', service],
+      channel: 'mattermost',
+      claimedBy: null,
+      claimedAt: null,
+      attempts: 0,
+      maxAttempts: 1,
+      lastAttempt: null,
+      completedAt: null,
+      result: null,
+    };
+
+    const data = await readQueue();
+    data.items = data.items || [];
+    data.items.push(task);
+    data.lastSync = new Date().toISOString();
+    await writeQueue(data);
+
+    console.log(`[crash-report] Filed crash task ${task.id} for ${service}`);
+    res.json({ ok: true, taskId: task.id });
+  } catch (e) {
+    console.error(`[crash-report] Error filing crash: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Unified Dashboard HTML ---
+
+function renderUnifiedPage() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐿️ Rocky Command Center</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    a { color: #58a6ff; text-decoration: none; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .section-header { font-size: 18px; font-weight: 700; color: #f0f6fc; padding: 12px 0 8px 0; border-bottom: 1px solid #21262d; margin-bottom: 12px; }
+    .section { margin-bottom: 28px; }
+
+    /* Agent cards */
+    .agent-cards { display: flex; gap: 12px; flex-wrap: wrap; }
+    .agent-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 200px; max-height: 110px; }
+    .agent-name { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+    .agent-meta { color: #8b949e; font-size: 12px; margin-top: 2px; }
+    .status-online { color: #3fb950; font-weight: 600; }
+    .status-stale { color: #d29922; font-weight: 600; }
+    .status-offline { color: #f85149; font-weight: 600; }
+
+    /* Queue table */
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 8px 10px; color: #8b949e; font-size: 12px; border-bottom: 1px solid #30363d; }
+    td { padding: 8px 10px; }
+    tbody tr { border-bottom: 1px solid #21262d; }
+    tbody tr:hover { background: #161b22; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; }
+    .pill-pending { background: #1f6feb; }
+    .pill-in-progress { background: #a371f7; }
+    .pill-blocked { background: #f85149; }
+    .pill-deferred { background: #8b949e; }
+    .pill-completed { background: #3fb950; }
+    .pill-idea { background: #d29922; }
+    .filter-bar { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .filter-btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 5px 12px; border-radius: 16px; cursor: pointer; font-size: 12px; }
+    .filter-btn.active { background: #1f6feb !important; color: #fff !important; border-color: #1f6feb !important; }
+    .q-table-wrap { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow-x: auto; }
+    .wq-card { transition: border-color 0.15s, box-shadow 0.15s; }
+    .wq-card:hover { box-shadow: 0 0 0 1px #58a6ff33; }
+    .action-btn { border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; color: #fff; margin: 1px; }
+    .action-btn.promote { background: #1f6feb; }
+    .action-btn.complete { background: #238636; }
+    .action-btn.comment { background: #d29922; }
+    .cmt-input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 3px 6px; border-radius: 4px; font-size: 11px; width: 110px; }
+
+    /* Bus messages */
+    .bus-filters { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .bus-filter-btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 5px 12px; border-radius: 16px; cursor: pointer; font-size: 12px; }
+    .bus-filter-btn.active { background: #1f6feb !important; color: #fff !important; border-color: #1f6feb !important; }
+    .bus-msg { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; }
+    .bus-msg.compact { background: transparent; border: none; padding: 4px 14px; margin-bottom: 2px; color: #484f58; font-size: 12px; }
+    .bus-msg.hidden { display: none; }
+    .bus-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 13px; }
+    .type-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; color: #fff; margin-left: 4px; }
+
+    /* Send form */
+    .send-form { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .send-form summary { cursor: pointer; font-weight: 600; color: #58a6ff; font-size: 13px; }
+    .send-form input, .send-form textarea, .send-form select { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 5px 8px; border-radius: 4px; font-size: 12px; }
+    .send-form textarea { width: 100%; resize: vertical; min-height: 50px; }
+    .send-btn { background: #238636; color: #fff; border: none; padding: 5px 14px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 12px; }
+    .send-btn:hover { background: #2ea043; }
+    .new-task-btn { background: #238636; border: 1px solid #2ea04388; color: #fff; border-radius: 6px; padding: 4px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .new-task-btn:hover { background: #2ea043; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 20px; right: 20px; background: #238636; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 999; }
+    .toast.error { background: #f85149; }
+
+    /* Footer */
+    .footer { color: #484f58; font-size: 11px; text-align: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid #21262d; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <h1 style="font-size:24px;margin:0;color:#f0f6fc">🐿️ Rocky Command Center</h1>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="openDigestModal()" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">📊 Status</button>
+        <button onclick="authFlow()" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🔑 Auth</button>
+      </div>
+    </div>
+
+    <!-- Section 1: Agent Status -->
+    <div class="section">
+      <div class="section-header">🟢 Agent Status</div>
+      <div class="agent-cards" id="agent-cards">
+        <div class="agent-card"><span class="agent-meta">Loading...</span></div>
+      </div>
+    </div>
+
+    <!-- Section 2: Work Queue -->
+    <div class="section">
+      <div class="section-header" style="display:flex;align-items:center;justify-content:space-between">
+        <span>📋 Work Queue</span>
+        <button class="new-task-btn" onclick="openNewTaskModal()">＋ New Task</button>
+      </div>
+      <div class="filter-bar" id="queue-filters"></div>
+      <div id="queue-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-top:12px">
+        <div style="padding:16px;color:#8b949e">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Item Detail Modal -->
+    <div id="item-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)closeItemModal()">
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;width:90%;max-width:700px;max-height:90vh;overflow-y:auto;padding:24px">
+        <div id="item-modal-body">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Section 3: SquirrelBus -->
+    <div class="section">
+      <div class="section-header">📡 SquirrelBus</div>
+      <details class="send-form">
+        <summary>✉️ Send a message</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+          <div><label style="font-size:11px;color:#8b949e">From</label><select id="msg-from" style="width:100%"><option value="rocky">Rocky</option><option value="jkh">jkh</option></select></div>
+          <div><label style="font-size:11px;color:#8b949e">To</label><select id="msg-to" style="width:100%"><option value="all">All</option><option value="rocky">Rocky</option><option value="bullwinkle">Bullwinkle</option><option value="natasha">Natasha</option><option value="jkh">jkh</option></select></div>
+          <div><label style="font-size:11px;color:#8b949e">Type</label><select id="msg-type" style="width:100%"><option value="text">text</option><option value="memo">memo</option></select></div>
+        </div>
+        <div style="margin-top:6px"><label style="font-size:11px;color:#8b949e">Subject</label><input id="msg-subject" style="width:100%" placeholder="Optional subject..."></div>
+        <div style="margin-top:6px"><label style="font-size:11px;color:#8b949e">Body</label><textarea id="msg-body" placeholder="Type your message..."></textarea></div>
+        <div style="margin-top:6px;text-align:right"><button class="send-btn" onclick="sendBusMessage()">Send</button></div>
+      </details>
+      <div class="bus-filters" id="bus-filters"></div>
+      <div id="bus-messages"><div style="color:#8b949e;padding:12px">Loading messages...</div></div>
+    </div>
+
+    <div class="footer" id="footer">Loading...</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- New Task Modal -->
+  <div id="new-task-overlay" style="display:none;position:fixed;inset:0;background:#00000088;z-index:200;align-items:center;justify-content:center">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;width:100%;max-width:480px;margin:1rem;box-shadow:0 8px 32px #000a">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <span style="font-size:1rem;font-weight:600;color:#f0f6fc">＋ New Task</span>
+        <button onclick="closeNewTaskModal()" style="background:none;border:none;color:#6e7681;font-size:1.2rem;cursor:pointer;padding:0 4px">✕</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.6rem">
+        <div>
+          <label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Title <span style="color:#f85149">*</span></label>
+          <input id="nt-title" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px 10px;color:#c9d1d9;font-size:13px;font-family:inherit" placeholder="Short task title..." />
+        </div>
+        <div>
+          <label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Description</label>
+          <textarea id="nt-desc" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px 10px;color:#c9d1d9;font-size:13px;font-family:inherit;resize:vertical;min-height:70px" placeholder="What needs to be done?"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
+          <div>
+            <label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Priority</label>
+            <select id="nt-priority" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px 8px;color:#c9d1d9;font-size:13px">
+              <option value="normal" selected>normal</option>
+              <option value="idea">idea</option>
+              <option value="high">high</option>
+              <option value="urgent">urgent</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Assignee</label>
+            <select id="nt-assignee" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px 8px;color:#c9d1d9;font-size:13px">
+              <option value="all" selected>all</option>
+              <option value="rocky">rocky</option>
+              <option value="bullwinkle">bullwinkle</option>
+              <option value="natasha">natasha</option>
+              <option value="boris">boris</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Tags <span style="color:#484f58">(comma-separated)</span></label>
+          <input id="nt-tags" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px 10px;color:#c9d1d9;font-size:13px;font-family:inherit" placeholder="e.g. infrastructure, gpu, memory" />
+        </div>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.4rem">
+          <button onclick="closeNewTaskModal()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 16px;font-size:13px;cursor:pointer">Cancel</button>
+          <button id="nt-submit" onclick="submitNewTask()" style="background:#238636;border:none;color:#fff;border-radius:6px;padding:6px 18px;font-size:13px;font-weight:600;cursor:pointer">Create Task</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Digest Modal -->
+  <div id="digest-overlay" style="display:none;position:fixed;inset:0;background:#00000088;z-index:200;align-items:center;justify-content:center">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;width:100%;max-width:600px;margin:1rem;box-shadow:0 8px 32px #000a;max-height:80vh;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <span style="font-size:1rem;font-weight:600;color:#f0f6fc">📊 Agent Status Digest</span>
+        <button onclick="closeDigestModal()" style="background:none;border:none;color:#6e7681;font-size:1.2rem;cursor:pointer;padding:0 4px">✕</button>
+      </div>
+      <div id="digest-content" style="font-family:monospace;font-size:12px;color:#c9d1d9;white-space:pre-wrap;overflow-y:auto;flex:1;line-height:1.6;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">Loading…</div>
+      <div style="margin-top:0.8rem;display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="refreshDigest()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">↻ Refresh</button>
+        <button onclick="closeDigestModal()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // === Token management ===
+    function getToken() {
+      let t = localStorage.getItem('wq-token');
+      if (!t) {
+        t = prompt('Enter auth token:');
+        if (t) { t = t.trim(); localStorage.setItem('wq-token', t); }
+      }
+      return t ? t.trim() : t;
+    }
+    function authFlow() {
+      localStorage.removeItem('wq-token');
+      const t = prompt('Enter auth token:');
+      if (t && t.trim()) {
+        localStorage.setItem('wq-token', t.trim());
+        showToast('✅ Token updated');
+      } else {
+        showToast('❌ No token entered', true);
+      }
+    }
+    async function authedFetch(url, opts = {}) {
+      const token = getToken();
+      if (!token) return null;
+      opts.headers = Object.assign({}, opts.headers, { 'Authorization': 'Bearer ' + token });
+      const r = await fetch(url, opts);
+      if (r.status === 401) {
+        showToast('⚠️ Unauthorized — update your token', true);
+        authFlow();
+        return null;
+      }
+      return r;
+    }
+    function resetToken() {
+      localStorage.removeItem('wq-token');
+      showToast('Token cleared — reload to re-enter');
+    }
+    function showToast(msg, isError) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = 'toast' + (isError ? ' error' : '');
+      el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 3000);
+    }
+
+    // === Helpers ===
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function timeAgo(ds) {
+      if (!ds) return 'never';
+      const diff = Date.now() - new Date(ds).getTime();
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+    }
+    const EMOJIS = { rocky: '🐿️', bullwinkle: '🫎', natasha: '🕵️‍♀️', boris: '🕵️‍♂️', jkh: '👤' };
+    const TYPE_COLORS = { text: '#58a6ff', memo: '#3fb950', blob: '#a371f7', heartbeat: '#8b949e', queue_sync: '#d29922', ping: '#3fb950', pong: '#3fb950', event: '#f85149', handoff: '#f0883e' };
+
+    // === Section 1: Agent Cards ===
+    async function loadAgents() {
+      try {
+        const hbs = await fetch('/api/heartbeats').then(r => r.json());
+        const el = document.getElementById('agent-cards');
+        const agentNames = Object.keys(hbs).length > 0 ? Object.keys(hbs) : ['rocky', 'bullwinkle', 'natasha'];
+        el.innerHTML = agentNames.map(name => {
+          const hb = hbs[name] || {};
+          const emoji = EMOJIS[name] || '📨';
+          let stClass = 'status-offline', stEmoji = '🔴', stLabel = 'offline';
+          if (hb.ts) {
+            const age = Date.now() - new Date(hb.ts).getTime();
+            if (age < 45 * 60 * 1000) { stClass = 'status-online'; stEmoji = '🟢'; stLabel = 'online'; }
+            else if (age < 4 * 60 * 60 * 1000) { stClass = 'status-stale'; stEmoji = '🟡'; stLabel = 'stale'; }
+          }
+          const host = hb.host || '—';
+          const lastSeen = timeAgo(hb.ts);
+          const queueDepth = hb.queueDepth != null ? '<div class="agent-meta">Queue: ' + hb.queueDepth + ' items</div>' : '';
+          return '<div class="agent-card">' +
+            '<div class="agent-name">' + emoji + ' ' + name.charAt(0).toUpperCase() + name.slice(1) + '</div>' +
+            '<div class="' + stClass + '">' + stEmoji + ' ' + stLabel + '</div>' +
+            '<div class="agent-meta">Host: ' + esc(host) + '</div>' +
+            '<div class="agent-meta">Last seen: ' + lastSeen + '</div>' +
+            queueDepth +
+            '</div>';
+        }).join('');
+      } catch (e) { console.error('Agent load error:', e); }
+    }
+
+    // === Section 2: Work Queue ===
+    let queueItems = [];
+    let currentFilter = 'jkh'; // default to jkh-assigned so blocked items are front and center
+    const STATUS_ORDER = { 'in-progress': 0, blocked: 1, pending: 2, deferred: 3, idea: 4, completed: 5 };
+    const PILL_CLASS = { pending: 'pill-pending', 'in-progress': 'pill-in-progress', blocked: 'pill-blocked', deferred: 'pill-deferred', completed: 'pill-completed', idea: 'pill-idea', cancelled: 'pill-deferred' };
+    const PILL_LABEL = { pending: 'Pending', 'in-progress': 'In Progress', blocked: 'Blocked', deferred: 'Deferred', completed: 'Completed', idea: 'Idea', cancelled: 'Cancelled' };
+    const PRIORITY_COLOR = { urgent: '#f85149', high: '#f0883e', normal: '#58a6ff', low: '#8b949e', idea: '#6e40c9' };
+
+    async function loadQueue() {
+      try {
+        const data = await fetch('/api/queue').then(r => r.json());
+        queueItems = data.items || [];
+        renderQueueFilters();
+        renderQueue();
+      } catch (e) { console.error('Queue load error:', e); }
+    }
+
+    function renderQueueFilters() {
+      const counts = { all: queueItems.length, jkh: 0 };
+      for (const item of queueItems) {
+        counts[item.status] = (counts[item.status] || 0) + 1;
+        if (item.assignee === 'jkh') counts.jkh++;
+      }
+      const filters = [['jkh','⏳ Needs Me'],['all','All'],['pending','Pending'],['in-progress','In Progress'],['blocked','Blocked'],['deferred','Deferred'],['completed','Completed'],['idea','Ideas']];
+      document.getElementById('queue-filters').innerHTML = filters.map(([val, label]) => {
+        const c = counts[val] || 0;
+        const active = currentFilter === val ? ' active' : '';
+        return '<button class="filter-btn' + active + '" onclick="setQueueFilter(\\'' + val + '\\')">' + label + (c ? ' (' + c + ')' : '') + '</button>';
+      }).join('');
+    }
+
+    function setQueueFilter(f) {
+      currentFilter = f;
+      renderQueueFilters();
+      renderQueue();
+    }
+
+    function renderQueue() {
+      let filtered = [...queueItems].sort((a, b) => (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99));
+      if (currentFilter === 'jkh') filtered = filtered.filter(i => i.assignee === 'jkh');
+      else if (currentFilter !== 'all') filtered = filtered.filter(i => i.status === currentFilter);
+      const container = document.getElementById('queue-cards');
+      if (!container) return;
+      if (filtered.length === 0) {
+        container.innerHTML = '<div style="padding:32px;color:#8b949e;text-align:center">No items' + (currentFilter === 'jkh' ? ' — nothing needs your attention right now 🎉' : '') + '</div>';
+        return;
+      }
+      container.innerHTML = filtered.map(item => renderCard(item)).join('');
+    }
+
+    function renderCard(item) {
+      const isJkh = item.assignee === 'jkh';
+      const borderColor = isJkh ? '#f0883e' : (item.priority === 'high' || item.priority === 'urgent' ? '#f85149' : '#30363d');
+      const pill = '<span class="pill ' + (PILL_CLASS[item.status] || 'pill-deferred') + '">' + (PILL_LABEL[item.status] || item.status) + '</span>';
+      const prioColor = PRIORITY_COLOR[item.priority] || '#8b949e';
+      const prioBadge = '<span style="font-size:11px;color:' + prioColor + ';font-weight:600;text-transform:uppercase">' + (item.priority || 'normal') + '</span>';
+      const assigneeBadge = '<span style="font-size:11px;background:#21262d;border-radius:4px;padding:1px 6px;color:#8b949e">' + esc(item.assignee || '—') + '</span>';
+      const age = timeAgo(item.created);
+      const jkhBanner = isJkh ? '<div style="background:#f0883e22;border-left:3px solid #f0883e;padding:4px 8px;margin-bottom:8px;font-size:12px;color:#f0883e">⏳ Awaiting your decision</div>' : '';
+
+      // Last journal entry preview
+      const lastComment = item.journal && item.journal.length ? item.journal[item.journal.length-1] : null;
+      const commentPreview = lastComment ? '<div style="margin-top:6px;font-size:11px;color:#8b949e;border-left:2px solid #30363d;padding-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(lastComment.author) + ': ' + esc(lastComment.text.slice(0,80)) + '</div>' : '';
+
+      // Choice buttons
+      let choiceButtons = '';
+      if (item.choices && item.choices.length && !item.choiceRecorded) {
+        choiceButtons = '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">' +
+          item.choices.map(c =>
+            '<button onclick="recordChoice(event,\\'' + item.id + '\\',\\'' + esc(c.id) + '\\',\\'' + esc(c.label) + '\\')" style="font-size:12px;padding:5px 10px;background:#21262d;border:1px solid #58a6ff;color:#58a6ff;border-radius:6px;cursor:pointer" onmouseover="this.style.background=\\'#58a6ff22\\'" onmouseout="this.style.background=\\'#21262d\\'">[' + esc(c.id) + '] ' + esc(c.label) + '</button>'
+          ).join('') + '</div>';
+      } else if (item.choiceRecorded) {
+        choiceButtons = '<div style="margin-top:8px;font-size:12px;color:#3fb950">✅ Choice recorded: [' + esc(item.choiceRecorded.choice) + '] ' + esc(item.choiceRecorded.label) + '</div>';
+      }
+
+      // Quick actions
+      let quickActions = '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">';
+      if (item.status !== 'completed' && item.status !== 'cancelled') {
+        quickActions += '<button onclick="quickComplete(event,\\'' + item.id + '\\')" style="font-size:11px;padding:3px 8px;background:#238636;border:none;color:#fff;border-radius:4px;cursor:pointer">✓ Complete</button>';
+      }
+      if (item.status === 'idea') {
+        quickActions += '<button onclick="queueAction(event,\\'/api/upvote/' + item.id + '\\',\\'POST\\')" style="font-size:11px;padding:3px 8px;background:#6e40c9;border:none;color:#fff;border-radius:4px;cursor:pointer">⬆️ Promote</button>';
+      }
+      quickActions += '<span style="font-size:11px;color:#8b949e;align-self:center">' + age + '</span>';
+      quickActions += '</div>';
+
+      return '<div class="wq-card" style="background:#161b22;border:1px solid ' + borderColor + ';border-radius:8px;padding:14px;cursor:pointer;transition:border-color 0.15s" ' +
+        'ondblclick="openItemModal(\\'' + item.id + '\\')" ' +
+        'onmouseenter="this.style.borderColor=\\'' + (isJkh ? '#f0883e' : '#58a6ff') + '\\';" ' +
+        'onmouseleave="this.style.borderColor=\\'' + borderColor + '\\';">' +
+        jkhBanner +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + esc(item.title) + '</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + pill + prioBadge + assigneeBadge + '</div>' +
+          '</div>' +
+          '<div style="font-size:10px;color:#8b949e;white-space:nowrap">' + esc(item.id) + '</div>' +
+        '</div>' +
+        (item.description ? '<div style="margin-top:8px;font-size:12px;color:#8b949e">' + esc(item.description.slice(0,160)) + (item.description.length > 160 ? '…' : '') + '</div>' : '') +
+        commentPreview +
+        choiceButtons +
+        quickActions +
+        '<div style="margin-top:8px;font-size:10px;color:#484f58">Double-click to edit &amp; view journal · ' + (item.journal ? item.journal.length : 0) + ' journal entr' + ((item.journal && item.journal.length === 1) ? 'y' : 'ies') + '</div>' +
+        '</div>';
+    }
+
+    async function recordChoice(e, id, choice, label) {
+      e.stopPropagation();
+      const token = getToken();
+      if (!token) return showToast('No auth token', true);
+      const resp = await fetch('/api/item/' + id + '/choice', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice, choiceLabel: label })
+      });
+      const data = await resp.json();
+      if (data.ok) { showToast('Choice recorded: [' + choice + '] ' + label); loadQueue(); }
+      else showToast(data.error || 'Error', true);
+    }
+
+    async function quickComplete(e, id) {
+      e.stopPropagation();
+      const token = getToken();
+      if (!token) return showToast('No auth token', true);
+      const resp = await fetch('/api/complete/' + id, { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+      const data = await resp.json();
+      if (data.ok) { showToast('Completed!'); loadQueue(); }
+      else showToast(data.error || 'Error', true);
+    }
+
+    async function queueAction(e, url, method, body) {
+      if (e) e.stopPropagation();
+      const token = getToken();
+      if (!token) return showToast('No token', true);
+      try {
+        const opts = { method, headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const resp = await fetch(url, opts);
+        const data = await resp.json();
+        if (data.ok) { showToast('Done!'); loadQueue(); }
+        else showToast(data.error || 'Error', true);
+      } catch (err) { showToast(err.message, true); }
+    }
+
+    // === Item Detail Modal ===
+    let modalItemId = null;
+
+    async function openItemModal(id) {
+      modalItemId = id;
+      const item = await fetch('/api/item/' + id).then(r => r.json());
+      const modal = document.getElementById('item-modal');
+      const body = document.getElementById('item-modal-body');
+      if (!modal || !body) return;
+
+      const journalHtml = (item.journal || []).map(e => {
+        const color = e.type === 'ai' ? '#a371f7' : e.type === 'choice' ? '#3fb950' : e.type === 'status-change' ? '#8b949e' : '#58a6ff';
+        return '<div style="border-left:2px solid ' + color + ';padding:6px 10px;margin-bottom:8px;background:#0d1117;border-radius:0 4px 4px 0">' +
+          '<div style="font-size:10px;color:#8b949e">' + esc(e.author) + ' · ' + new Date(e.ts).toLocaleString() + '</div>' +
+          '<div style="font-size:13px;margin-top:2px;white-space:pre-wrap">' + esc(e.text) + '</div></div>';
+      }).join('') || '<div style="color:#8b949e;font-size:13px">No journal entries yet.</div>';
+
+      const choicesHtml = (item.choices && item.choices.length && !item.choiceRecorded) ?
+        '<div style="margin:12px 0"><div style="font-size:12px;color:#8b949e;margin-bottom:6px">Choices:</div>' +
+        item.choices.map(c => '<button onclick="recordChoice(null,\\'' + item.id + '\\',\\'' + esc(c.id) + '\\',\\'' + esc(c.label) + '\\')" style="display:block;width:100%;text-align:left;margin-bottom:6px;padding:8px 12px;background:#21262d;border:1px solid #58a6ff;color:#58a6ff;border-radius:6px;cursor:pointer;font-size:13px">[' + esc(c.id) + '] ' + esc(c.label) + '</button>').join('') + '</div>' :
+        (item.choiceRecorded ? '<div style="margin:8px 0;color:#3fb950;font-size:13px">✅ Choice: [' + esc(item.choiceRecorded.choice) + '] ' + esc(item.choiceRecorded.label) + '</div>' : '');
+
+      body.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">' +
+          '<div style="font-size:11px;color:#8b949e">' + esc(item.id) + ' · created ' + timeAgo(item.created) + '</div>' +
+          '<button onclick="closeItemModal()" style="background:none;border:none;color:#8b949e;font-size:18px;cursor:pointer">✕</button>' +
+        '</div>' +
+        '<div style="margin-bottom:12px"><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:4px">Title</label>' +
+          '<input id="modal-title" value="' + esc(item.title) + '" style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:8px;font-size:14px"></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">' +
+          '<div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:4px">Status</label>' +
+            '<select id="modal-status" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:6px">' +
+            ['pending','in-progress','blocked','deferred','completed','cancelled','idea'].map(s => '<option value="' + s + '"' + (item.status===s?' selected':'') + '>' + s + '</option>').join('') + '</select></div>' +
+          '<div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:4px">Priority</label>' +
+            '<select id="modal-priority" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:6px">' +
+            ['urgent','high','normal','low','idea'].map(p => '<option value="' + p + '"' + (item.priority===p?' selected':'') + '>' + p + '</option>').join('') + '</select></div>' +
+          '<div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:4px">Assignee</label>' +
+            '<input id="modal-assignee" value="' + esc(item.assignee||'') + '" style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:6px"></div>' +
+        '</div>' +
+        '<div style="margin-bottom:12px"><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:4px">Description</label>' +
+          '<textarea id="modal-description" rows="3" style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:8px;font-size:13px;resize:vertical">' + esc(item.description||'') + '</textarea></div>' +
+        '<div style="margin-bottom:12px"><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:4px">Notes</label>' +
+          '<textarea id="modal-notes" rows="2" style="width:100%;box-sizing:border-box;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:8px;font-size:13px;resize:vertical">' + esc(item.notes||'') + '</textarea></div>' +
+        '<div style="margin-bottom:16px"><button onclick="saveModalItem()" style="background:#238636;border:none;color:#fff;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">💾 Save Changes</button></div>' +
+        choicesHtml +
+        '<div style="border-top:1px solid #30363d;padding-top:16px;margin-bottom:12px"><div style="font-size:13px;font-weight:600;margin-bottom:10px">📋 Journal (' + (item.journal||[]).length + ' entries)</div>' +
+          '<div style="max-height:300px;overflow-y:auto;margin-bottom:12px">' + journalHtml + '</div>' +
+          '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+            '<input id="modal-comment" placeholder="Add a comment…" style="flex:1;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:8px;font-size:13px" onkeydown="if(event.key===\\'Enter\\' && !event.shiftKey){addModalComment();event.preventDefault()}">' +
+            '<button onclick="addModalComment()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:8px 14px;border-radius:4px;cursor:pointer">💬</button>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px">' +
+            '<input id="modal-ai" placeholder="✨ Ask AI about this item…" style="flex:1;background:#0d1117;border:1px solid #6e40c9;color:#c9d1d9;border-radius:4px;padding:8px;font-size:13px" onkeydown="if(event.key===\\'Enter\\' && !event.shiftKey){addModalAI();event.preventDefault()}">' +
+            '<button onclick="addModalAI()" style="background:#6e40c9;border:none;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer">✨</button>' +
+          '</div>' +
+        '</div>';
+
+      modal.style.display = 'flex';
+    }
+
+    function closeItemModal() {
+      const modal = document.getElementById('item-modal');
+      if (modal) modal.style.display = 'none';
+      modalItemId = null;
+    }
+
+    async function saveModalItem() {
+      if (!modalItemId) return;
+      const token = getToken();
+      if (!token) return showToast('No auth token', true);
+      const patch = {
+        title: document.getElementById('modal-title').value,
+        status: document.getElementById('modal-status').value,
+        priority: document.getElementById('modal-priority').value,
+        assignee: document.getElementById('modal-assignee').value,
+        description: document.getElementById('modal-description').value,
+        notes: document.getElementById('modal-notes').value,
+      };
+      const resp = await fetch('/api/item/' + modalItemId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      });
+      const data = await resp.json();
+      if (data.ok) { showToast('Saved!'); loadQueue(); openItemModal(modalItemId); }
+      else showToast(data.error || 'Error', true);
+    }
+
+    async function addModalComment() {
+      if (!modalItemId) return;
+      const token = getToken();
+      if (!token) return showToast('No auth token', true);
+      const input = document.getElementById('modal-comment');
+      const text = input.value.trim();
+      if (!text) return;
+      const resp = await fetch('/api/item/' + modalItemId + '/comment', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, author: 'jkh' })
+      });
+      const data = await resp.json();
+      if (data.ok) { input.value = ''; showToast('Comment added!'); openItemModal(modalItemId); loadQueue(); }
+      else showToast(data.error || 'Error', true);
+    }
+
+    async function addModalAI() {
+      if (!modalItemId) return;
+      const token = getToken();
+      if (!token) return showToast('No auth token', true);
+      const input = document.getElementById('modal-ai');
+      const prompt = input.value.trim();
+      if (!prompt) return;
+      input.value = '';
+      input.placeholder = '✨ Thinking…';
+      input.disabled = true;
+      const resp = await fetch('/api/item/' + modalItemId + '/ai-comment', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await resp.json();
+      input.placeholder = '✨ Ask AI about this item…';
+      input.disabled = false;
+      if (data.ok) { showToast('AI responded!'); openItemModal(modalItemId); loadQueue(); }
+      else showToast(data.error || 'Error', true);
+    }
+
+    function sendComment(id) {
+      const input = document.getElementById('cmt-' + id);
+      const text = input ? input.value.trim() : '';
+      if (!text) return showToast('Enter a comment first', true);
+      queueAction(null, '/api/comment/' + id, 'POST', { text });
+    }
+
+    // === Section 3: SquirrelBus ===
+    let busMessages = [];
+    let busFilter = 'all';
+    let lastBusTs = null;
+
+    async function loadBus(initial) {
+      try {
+        const url = initial ? '/bus/messages?limit=50' : '/bus/messages?limit=50' + (lastBusTs ? '&since=' + encodeURIComponent(lastBusTs) : '');
+        const msgs = await fetch(url).then(r => r.json());
+        if (initial) {
+          busMessages = msgs;
+        } else if (msgs.length > 0) {
+          // Prepend new messages (they come newest-first)
+          const existingIds = new Set(busMessages.map(m => m.id));
+          const newMsgs = msgs.filter(m => !existingIds.has(m.id));
+          if (newMsgs.length > 0) busMessages = [...newMsgs, ...busMessages];
+        }
+        if (busMessages.length > 0 && busMessages[0].ts) lastBusTs = busMessages[0].ts;
+        renderBusFilters();
+        renderBus();
+      } catch (e) { console.error('Bus load error:', e); }
+    }
+
+    function renderBusFilters() {
+      const agents = ['all', 'rocky', 'bullwinkle', 'natasha', 'jkh'];
+      document.getElementById('bus-filters').innerHTML = agents.map(agent => {
+        const emoji = agent === 'all' ? '📡' : (EMOJIS[agent] || '📨');
+        const active = busFilter === agent ? ' active' : '';
+        return '<button class="bus-filter-btn' + active + '" onclick="setBusFilter(\\'' + agent + '\\')">' + emoji + ' ' + agent.charAt(0).toUpperCase() + agent.slice(1) + '</button>';
+      }).join('');
+    }
+
+    function setBusFilter(f) {
+      busFilter = f;
+      renderBusFilters();
+      renderBus();
+    }
+
+    function renderBus() {
+      const filtered = busFilter === 'all' ? busMessages : busMessages.filter(m => m.from === busFilter || m.to === busFilter);
+      if (filtered.length === 0) {
+        document.getElementById('bus-messages').innerHTML = '<div style="color:#8b949e;padding:12px">No messages</div>';
+        return;
+      }
+      document.getElementById('bus-messages').innerHTML = filtered.map(renderBusMsg).join('');
+    }
+
+    function renderBusMsg(msg) {
+      const fromEmoji = EMOJIS[msg.from] || '📨';
+      const toLabel = msg.to === 'all' ? 'all' : msg.to;
+      const ts = new Date(msg.ts).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const typeColor = TYPE_COLORS[msg.type] || '#8b949e';
+
+      // Compact rendering for heartbeat/ping/pong
+      if (msg.type === 'heartbeat' || msg.type === 'ping' || msg.type === 'pong') {
+        const icon = msg.type === 'heartbeat' ? '💓' : '🏓';
+        return '<div class="bus-msg compact" data-from="' + esc(msg.from) + '">' +
+          fromEmoji + ' ' + esc(msg.from) + ' ' + icon + ' ' + msg.type + ' · #' + msg.seq + ' · ' + esc(ts) +
+          '</div>';
+      }
+
+      let subject = msg.subject ? '<div style="font-weight:600;color:#58a6ff;margin-bottom:3px;font-size:13px">' + esc(msg.subject) + '</div>' : '';
+      let bodyHtml = '';
+
+      switch (msg.type) {
+        case 'text':
+        case 'memo':
+          bodyHtml = '<div style="white-space:pre-wrap;font-size:13px">' + esc(msg.body) + '</div>';
+          break;
+        case 'blob':
+          if (msg.mime && msg.mime.startsWith('image/')) {
+            const src = msg.enc === 'base64' ? 'data:' + msg.mime + ';base64,' + msg.body : esc(msg.body);
+            bodyHtml = '<img src="' + src + '" style="max-width:360px;border-radius:6px;margin-top:4px">';
+          } else if (msg.mime && msg.mime.startsWith('audio/')) {
+            const src = msg.enc === 'base64' ? 'data:' + msg.mime + ';base64,' + msg.body : esc(msg.body);
+            bodyHtml = '<audio controls src="' + src + '" style="margin-top:4px"></audio>';
+          } else if (msg.mime && msg.mime.startsWith('video/')) {
+            const src = msg.enc === 'base64' ? 'data:' + msg.mime + ';base64,' + msg.body : esc(msg.body);
+            bodyHtml = '<video controls src="' + src + '" style="max-width:360px;border-radius:6px;margin-top:4px"></video>';
+          } else {
+            bodyHtml = '<pre style="background:#0d1117;padding:6px;border-radius:4px;overflow-x:auto;font-size:11px">' + esc((msg.body || '').slice(0, 500)) + '</pre>';
+          }
+          break;
+        case 'queue_sync':
+          bodyHtml = '<details style="margin-top:4px"><summary style="cursor:pointer;color:#58a6ff;font-size:12px">Queue sync data</summary><pre style="background:#0d1117;padding:6px;border-radius:4px;overflow-x:auto;font-size:11px;margin-top:4px">' + esc(typeof msg.body === 'string' ? msg.body : JSON.stringify(msg.body, null, 2)) + '</pre></details>';
+          break;
+        default:
+          bodyHtml = '<pre style="background:#0d1117;padding:6px;border-radius:4px;overflow-x:auto;font-size:11px">' + esc(JSON.stringify(msg, null, 2)) + '</pre>';
+      }
+
+      return '<div class="bus-msg" data-from="' + esc(msg.from) + '">' +
+        '<div class="bus-header">' +
+          '<div>' + fromEmoji + ' <strong style="color:#f0f6fc">' + esc(msg.from) + '</strong>' +
+          ' <span style="color:#484f58">→</span> <strong>' + esc(toLabel) + '</strong>' +
+          ' <span class="type-badge" style="background:' + typeColor + '">' + esc(msg.type) + '</span></div>' +
+          '<div style="color:#484f58;font-size:11px">#' + msg.seq + ' · ' + esc(ts) + '</div>' +
+        '</div>' +
+        subject + bodyHtml +
+        '</div>';
+    }
+
+    // === Send bus message ===
+    async function sendBusMessage() {
+      const token = getToken();
+      if (!token) return showToast('No token', true);
+      const body = {
+        from: document.getElementById('msg-from').value,
+        to: document.getElementById('msg-to').value,
+        type: document.getElementById('msg-type').value,
+        subject: document.getElementById('msg-subject').value || null,
+        body: document.getElementById('msg-body').value,
+      };
+      if (!body.body && body.type !== 'ping') return showToast('Body required', true);
+      try {
+        const resp = await fetch('/bus/send', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          showToast('Message sent!');
+          document.getElementById('msg-body').value = '';
+          document.getElementById('msg-subject').value = '';
+          loadBus(true);
+        } else showToast(data.error || 'Error', true);
+      } catch (e) { showToast(e.message, true); }
+    }
+
+    // === New Task Modal ===
+    // === Digest Modal ===
+    async function openDigestModal() {
+      const overlay = document.getElementById('digest-overlay');
+      overlay.style.display = 'flex';
+      document.getElementById('digest-content').textContent = 'Loading…';
+      await refreshDigest();
+    }
+
+    function closeDigestModal() {
+      document.getElementById('digest-overlay').style.display = 'none';
+    }
+
+    async function refreshDigest() {
+      const el = document.getElementById('digest-content');
+      try {
+        const resp = await fetch('/api/digest');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        el.textContent = data.digest || '(empty)';
+      } catch (e) {
+        el.textContent = '⚠️ Failed to load digest: ' + e.message;
+      }
+    }
+
+    document.getElementById('digest-overlay').addEventListener('click', function(e) {
+      if (e.target === this) closeDigestModal();
+    });
+
+    function openNewTaskModal() {
+      const el = document.getElementById('new-task-overlay');
+      el.style.display = 'flex';
+      document.getElementById('nt-title').focus();
+    }
+
+    function closeNewTaskModal() {
+      document.getElementById('new-task-overlay').style.display = 'none';
+      document.getElementById('nt-title').value = '';
+      document.getElementById('nt-desc').value = '';
+      document.getElementById('nt-priority').value = 'normal';
+      document.getElementById('nt-assignee').value = 'all';
+      document.getElementById('nt-tags').value = '';
+      const btn = document.getElementById('nt-submit');
+      btn.disabled = false;
+      btn.textContent = 'Create Task';
+    }
+
+    // Close modal on overlay click
+    document.getElementById('new-task-overlay').addEventListener('click', function(e) {
+      if (e.target === this) closeNewTaskModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeNewTaskModal();
+    });
+
+    async function submitNewTask() {
+      const title = document.getElementById('nt-title').value.trim();
+      if (!title) {
+        document.getElementById('nt-title').style.borderColor = '#f85149';
+        document.getElementById('nt-title').focus();
+        return;
+      }
+      document.getElementById('nt-title').style.borderColor = '';
+
+      const btn = document.getElementById('nt-submit');
+      btn.disabled = true;
+      btn.textContent = '⏳ Creating…';
+
+      const tagsRaw = document.getElementById('nt-tags').value;
+      const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+      const payload = {
+        title,
+        description: document.getElementById('nt-desc').value.trim(),
+        priority: document.getElementById('nt-priority').value,
+        assignee: document.getElementById('nt-assignee').value,
+        tags,
+      };
+
+      try {
+        const r = await authedFetch('/api/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!r) { btn.disabled = false; btn.textContent = 'Create Task'; return; }
+        const j = await r.json();
+        if (r.ok && j.ok) {
+          closeNewTaskModal();
+          showToast('✅ Created: ' + j.item.id);
+          loadQueue();
+        } else {
+          showToast('⚠️ ' + (j.error || 'Unknown error'), true);
+          btn.disabled = false;
+          btn.textContent = 'Create Task';
+        }
+      } catch (e) {
+        showToast('⚠️ ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Create Task';
+      }
+    }
+
+    // === Init & refresh ===
+    loadAgents();
+    loadQueue();
+    loadBus(true);
+
+    // Auto-refresh agent cards every 30s
+    setInterval(loadAgents, 30000);
+    // Auto-refresh queue every 60s
+    setInterval(loadQueue, 60000);
+    // Auto-refresh bus every 10s (incremental)
+    setInterval(() => loadBus(false), 10000);
+
+    document.getElementById('footer').textContent = '🐿️ Rocky Command Center · Auto-refreshing · Rendered: ' + new Date().toLocaleString();
+  </script>
+</body>
+</html>`;
+}
+
+// --- Metrics API ---
+
+app.get('/api/metrics', async (req, res) => {
+  try {
+    const data = await readQueue();
+    const now = Date.now();
+    const windowMs = 24 * 60 * 60 * 1000; // 24h
+
+    // All items (active + completed array)
+    const allItems = [...(data.items || []), ...(data.completed || [])];
+
+    // items_completed_24h
+    const completed24h = allItems.filter(i =>
+      i.status === 'completed' && i.completedAt &&
+      (now - new Date(i.completedAt).getTime()) < windowMs
+    );
+
+    // avg_time_to_completion_h (for items with both createdAt and completedAt)
+    const timings = completed24h
+      .filter(i => i.created && i.completedAt)
+      .map(i => (new Date(i.completedAt).getTime() - new Date(i.created).getTime()) / 3600000);
+    const avg_ttc = timings.length > 0
+      ? parseFloat((timings.reduce((a, b) => a + b, 0) / timings.length).toFixed(2))
+      : null;
+
+    // blocked_count
+    const blocked = (data.items || []).filter(i => i.status === 'blocked');
+
+    // pending_by_assignee
+    const pending = (data.items || []).filter(i => i.status === 'pending');
+    const pendingByAssignee = {};
+    for (const item of pending) {
+      const a = item.assignee || 'unassigned';
+      pendingByAssignee[a] = (pendingByAssignee[a] || 0) + 1;
+    }
+
+    // in_progress_by_assignee
+    const inProgress = (data.items || []).filter(i => i.status === 'in_progress' || i.status === 'in-progress');
+    const inProgressByAssignee = {};
+    for (const item of inProgress) {
+      const a = item.assignee || 'unassigned';
+      inProgressByAssignee[a] = (inProgressByAssignee[a] || 0) + 1;
+    }
+
+    // total_active (pending + in_progress + blocked)
+    const totalActive = pending.length + inProgress.length + blocked.length;
+
+    // idea backlog count
+    const ideas = (data.items || []).filter(i => i.status === 'pending' && i.priority === 'idea');
+
+    res.json({
+      ts: new Date().toISOString(),
+      items_completed_24h: completed24h.length,
+      avg_time_to_completion_h: avg_ttc,
+      blocked_count: blocked.length,
+      total_active: totalActive,
+      pending_count: pending.length,
+      in_progress_count: inProgress.length,
+      idea_backlog: ideas.length,
+      pending_by_assignee: pendingByAssignee,
+      in_progress_by_assignee: inProgressByAssignee,
+      last_completed: completed24h.length > 0
+        ? completed24h.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))[0]
+        : null,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Changelog API ---
+// GET /api/changelog?id=<itemId>&limit=30
+// Returns reconstructed status-change history for a queue item, newest first.
+// History is assembled from: (a) notes field lines containing bracketed events,
+// (b) key timestamp fields (created, claimedAt, completedAt), (c) itemVersion bumps.
+app.get('/api/changelog', async (req, res) => {
+  try {
+    const itemId = (req.query.id || '').trim();
+    if (!itemId) return res.status(400).json({ error: 'id query param required' });
+    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+
+    const data = await readQueue();
+    const allItems = [...(data.items || []), ...(data.completed || [])];
+    const item = allItems.find(i => i.id === itemId);
+    if (!item) return res.status(404).json({ error: 'item not found', id: itemId });
+
+    const events = [];
+
+    // 1. Parse bracketed/timestamped events from notes field
+    // Supports patterns like:
+    //   "[promoted] idea→normal via quorum 2026-03-21T04:08Z"
+    //   "jkh comment [2026-03-21T04:08:00.000Z]: text"
+    //   "[escalated] normal→high at 2026-03-21T04:08:00.000Z"
+    //   "Unblocked by completion of X at 2026-03-21T04:08:00.000Z"
+    if (item.notes) {
+      const noteLines = item.notes.split('\n').filter(l => l.trim());
+      for (const line of noteLines) {
+        // Extract ISO timestamp from line if present
+        const isoMatch = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)/);
+        const ts = isoMatch ? new Date(isoMatch[1]).toISOString() : null;
+
+        // Classify event type from content
+        let type = 'note';
+        const lower = line.toLowerCase();
+        if (/\[promoted\]|promoted to task/.test(lower))     type = 'promotion';
+        else if (/\[escalated\]/.test(lower))                type = 'escalation';
+        else if (/unblocked/.test(lower))                    type = 'unblocked';
+        else if (/claimed by|claimedby/.test(lower))         type = 'claim';
+        else if (/jkh comment/.test(lower))                  type = 'comment';
+        else if (/completed by|marked complete/.test(lower)) type = 'completion';
+        else if (/assigned to/.test(lower))                  type = 'assignment';
+        else if (/proposed/.test(lower))                     type = 'proposed';
+
+        events.push({ ts, type, detail: line.trim(), source: 'notes' });
+      }
+    }
+
+    // 2. Synthetic events from structured timestamp fields
+    if (item.created) {
+      events.push({ ts: item.created, type: 'created', detail: `Item created (source: ${item.source || 'unknown'})`, source: 'field' });
+    }
+    if (item.claimedAt && item.claimedBy) {
+      events.push({ ts: item.claimedAt, type: 'claim', detail: `Claimed by ${item.claimedBy}`, source: 'field' });
+    }
+    if (item.lastAttempt) {
+      events.push({ ts: item.lastAttempt, type: 'attempt', detail: `Last attempt recorded`, source: 'field' });
+    }
+    if (item.completedAt) {
+      events.push({ ts: item.completedAt, type: 'completed', detail: `Completed (status: ${item.status})`, source: 'field' });
+    }
+
+    // 3. Current state snapshot
+    events.push({
+      ts: null,
+      type: 'current_state',
+      detail: `status=${item.status} assignee=${item.assignee || '—'} priority=${item.priority} itemVersion=${item.itemVersion || 1}`,
+      source: 'snapshot',
+    });
+
+    // Sort: timestamped entries newest-first, null-ts (current_state) at top
+    events.sort((a, b) => {
+      if (!a.ts && !b.ts) return 0;
+      if (!a.ts) return -1;
+      if (!b.ts) return 1;
+      return new Date(b.ts) - new Date(a.ts);
+    });
+
+    // Deduplicate by (ts, detail) — notes and field events can overlap
+    const seen = new Set();
+    const deduped = events.filter(e => {
+      const key = `${e.ts}|${e.detail}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    res.json({
+      id: itemId,
+      title: item.title || itemId,
+      itemVersion: item.itemVersion || 1,
+      totalEvents: deduped.length,
+      changelog: deduped.slice(0, limit),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Dashboard route ---
+app.get('/', (req, res) => {
+  res.type('html').send(renderUnifiedPage());
+});
+
+// Redirect /bus to /
+app.get('/bus', (req, res) => {
+  // Check if this is an API-like request or browser request
+  if (req.path === '/bus' && !req.path.startsWith('/bus/')) {
+    return res.redirect('/');
+  }
+  res.redirect('/');
+});
+
+// ========================================
+// SquirrelBus v1 — Inter-agent comms
+// ========================================
+
+let busSeq = 0;
+const busSSEClients = new Set();
+const busPresence = {};
+
+async function initBusSeq() {
+  try {
+    if (!existsSync(BUS_LOG_PATH)) return;
+    const rl = createInterface({ input: createRS(BUS_LOG_PATH), crlfDelay: Infinity });
+    for await (const line of rl) {
+      try {
+        const msg = JSON.parse(line);
+        if (msg.seq && msg.seq > busSeq) busSeq = msg.seq;
+      } catch {}
+    }
+    console.log(`📡 SquirrelBus: initialized seq=${busSeq}`);
+  } catch (e) {
+    console.error('Bus seq init error:', e.message);
+  }
+}
+
+async function readBusMessages({ from, to, limit = 100, since, type } = {}) {
+  const messages = [];
+  try {
+    if (!existsSync(BUS_LOG_PATH)) return messages;
+    const rl = createInterface({ input: createRS(BUS_LOG_PATH), crlfDelay: Infinity });
+    for await (const line of rl) {
+      try {
+        const msg = JSON.parse(line);
+        if (from && msg.from !== from) continue;
+        if (to && msg.to !== to && msg.to !== 'all') continue;
+        if (type && msg.type !== type) continue;
+        if (since && new Date(msg.ts) <= new Date(since)) continue;
+        messages.push(msg);
+      } catch {}
+    }
+  } catch {}
+  return messages.slice(-limit).reverse();
+}
+
+async function appendBusMessage(msg) {
+  const full = {
+    id: msg.id || randomUUID(),
+    from: msg.from || 'unknown',
+    to: msg.to || 'all',
+    ts: msg.ts || new Date().toISOString(),
+    seq: ++busSeq,
+    type: msg.type || 'text',
+    mime: msg.mime || 'text/plain',
+    enc: msg.enc || 'none',
+    body: msg.body || '',
+    ref: msg.ref || null,
+    subject: msg.subject || null,
+    ttl: msg.ttl ?? 604800,
+  };
+  const line = JSON.stringify(full) + '\n';
+  await appendFile(BUS_LOG_PATH, line, 'utf8');
+
+  try {
+    execFile(MC_PATH, ['cp', BUS_LOG_PATH, `${MINIO_ALIAS}/agents/shared/squirrelbus.jsonl`], { timeout: 10000 }, (err) => {
+      if (err) console.error('MinIO bus upload error:', err.message);
+    });
+  } catch {}
+
+  for (const client of busSSEClients) {
+    try {
+      client.write(`data: ${JSON.stringify(full)}\n\n`);
+    } catch { busSSEClients.delete(client); }
+  }
+
+  // Fire-and-forget fan-out to registered peer endpoints
+  fanOutBusMessage(full);
+
+  return full;
+}
+
+// CORS for bus endpoints
+app.use('/bus', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+app.post('/bus/send', requireAuth, async (req, res) => {
+  try {
+    const msg = await appendBusMessage(req.body);
+    res.json({ ok: true, message: msg });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/bus/messages', async (req, res) => {
+  try {
+    const { from, to, limit, since, type } = req.query;
+    const messages = await readBusMessages({
+      from, to, type, since,
+      limit: limit ? parseInt(limit, 10) : 100,
+    });
+    res.json(messages);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/bus/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.write('data: {"type":"connected"}\n\n');
+  busSSEClients.add(res);
+  req.on('close', () => busSSEClients.delete(res));
+});
+
+app.post('/bus/heartbeat', requireAuth, async (req, res) => {
+  try {
+    const { from } = req.body;
+    if (!from) return res.status(400).json({ error: 'Missing "from" field' });
+    busPresence[from] = {
+      agent: from,
+      ts: new Date().toISOString(),
+      status: 'online',
+      ...req.body,
+    };
+    await appendBusMessage({
+      from,
+      to: 'all',
+      type: 'heartbeat',
+      body: JSON.stringify({ status: 'online', ...req.body }),
+      mime: 'application/json',
+    });
+    res.json({ ok: true, presence: busPresence });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/bus/presence', (req, res) => {
+  res.json(busPresence);
+});
+
+// ── Agent Status Digest ────────────────────────────────────────────────────────
+
+const DIGEST_AGENTS = [
+  { name: 'rocky',      emoji: '🐿️',  healthFile: 'agent-health-rocky.json' },
+  { name: 'bullwinkle', emoji: '🫎',   healthFile: 'agent-health-bullwinkle.json' },
+  { name: 'natasha',    emoji: '🕵️‍♀️', healthFile: 'agent-health-natasha.json' },
+  { name: 'boris',      emoji: '🕵️‍♂️', healthFile: 'agent-heartbeat-boris.json' },
+];
+
+async function fetchMinIOJson(path) {
+  try {
+    const { stdout } = await execFileP(MC_PATH, ['cat', `${MINIO_ALIAS}/${path}`], { timeout: 6000 });
+    return JSON.parse(stdout);
+  } catch { return null; }
+}
+
+function digestOnlineStatus(health) {
+  if (!health) return 'unknown';
+  const tsField = health.ts || health.timestamp || health.lastTs || null;
+  if (!tsField) return 'unknown';
+  const ageMs = Date.now() - new Date(tsField).getTime();
+  if (ageMs < 40 * 60 * 1000) return 'online';
+  if (ageMs < 4 * 60 * 60 * 1000) return 'idle';
+  return 'offline';
+}
+
+async function buildAgentDigest() {
+  let queueData = { items: [], completed: [] };
+  try {
+    queueData = await readQueue();
+  } catch { /* queue unavailable */ }
+
+  const items     = queueData.items     || [];
+  const completed = queueData.completed || [];
+  const now       = Date.now();
+  const day24h    = now - 24 * 60 * 60 * 1000;
+  const day7d     = now - 7 * 24 * 60 * 60 * 1000;
+
+  function agentStats(name) {
+    const claimedBy  = i => i.claimedBy === name;
+    const isAssigned = i => i.assignee === name || i.assignee === 'all' || claimedBy(i);
+    return {
+      done24h:    completed.filter(i => claimedBy(i) && i.completedAt && new Date(i.completedAt).getTime() > day24h).length,
+      done7d:     completed.filter(i => claimedBy(i) && i.completedAt && new Date(i.completedAt).getTime() > day7d).length,
+      inProgress: items.filter(i => (i.status === 'claimed' || i.status === 'in-progress') && claimedBy(i)),
+      pending:    items.filter(i => i.status === 'pending' && isAssigned(i)),
+    };
+  }
+
+  const healthResults = await Promise.all(
+    DIGEST_AGENTS.map(a => fetchMinIOJson(`agents/shared/${a.healthFile}`))
+  );
+
+  const agentData = DIGEST_AGENTS.map((a, i) => ({
+    ...a,
+    health: healthResults[i],
+    status: digestOnlineStatus(healthResults[i]),
+    stats:  agentStats(a.name),
+  }));
+
+  const totalPending   = items.filter(i => i.status === 'pending').length;
+  const totalClaimed   = items.filter(i => i.status === 'claimed' || i.status === 'in-progress').length;
+  const totalCompleted = completed.length;
+  const totalIdeas     = items.filter(i => i.status === 'idea').length;
+
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  const lines = [`📊 Agent Status Digest — ${ts}`, ''];
+
+  for (const a of agentData) {
+    const { done24h, done7d, inProgress, pending } = a.stats;
+    lines.push(`${a.emoji} ${a.name.charAt(0).toUpperCase() + a.name.slice(1)} (${a.status}): ${done24h} done today, ${done7d} this week`);
+    inProgress.forEach(i => lines.push(`  ▸ In progress: [${i.id}] ${i.title}`));
+    pending.slice(0, 3).forEach(i => lines.push(`  ▸ Pending: [${i.id}] ${i.title}`));
+    if (pending.length > 3) lines.push(`  ▸ … and ${pending.length - 3} more pending`);
+    if (inProgress.length === 0 && pending.length === 0) lines.push(`  ▸ Nothing assigned`);
+    lines.push('');
+  }
+  lines.push(`Queue: ${totalPending} pending, ${totalClaimed} in-progress, ${totalIdeas} ideas, ${totalCompleted} completed total`);
+
+  const agents = {};
+  for (const a of agentData) {
+    agents[a.name] = {
+      status:     a.status,
+      done24h:    a.stats.done24h,
+      done7d:     a.stats.done7d,
+      inProgress: a.stats.inProgress.map(i => ({ id: i.id, title: i.title })),
+      pending:    a.stats.pending.slice(0, 5).map(i => ({ id: i.id, title: i.title })),
+    };
+  }
+
+  return {
+    digest: lines.join('\n'),
+    agents,
+    queueStats: { totalPending, totalClaimed, totalIdeas, totalCompleted },
+    ts,
+  };
+}
+
+app.get('/api/digest', async (req, res) => {
+  try {
+    const result = await buildAgentDigest();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── S3 Proxy Routes ────────────────────────────────────────────────────────────
+// Provides authenticated MinIO access for agents without Tailscale (e.g. Boris)
+// All write/read routes require Bearer RCC_AUTH_TOKEN_REMOVED
+
+app.use('/s3', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// Health check — no auth required
+app.get('/s3/health', async (req, res) => {
+  try {
+    await execFileP(MC_PATH, ['ls', MINIO_ALIAS], { timeout: 5000 });
+    res.json({ ok: true, minio: 'connected' });
+  } catch {
+    res.status(503).json({ ok: false, minio: 'unreachable' });
+  }
+});
+
+// List objects in bucket: GET /s3/:bucket
+app.get('/s3/:bucket', requireAuth, async (req, res) => {
+  const { bucket } = req.params;
+  try {
+    const { stdout } = await execFileP(MC_PATH, [
+      'ls', '--json', `${MINIO_ALIAS}/${bucket}/`
+    ], { timeout: 15000 });
+    const objects = stdout.trim().split('\n').filter(Boolean).map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+    res.json({ bucket, objects });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get object: GET /s3/:bucket/*key
+app.get('/s3/:bucket/*key', requireAuth, async (req, res) => {
+  const { bucket } = req.params;
+  const key = [].concat(req.params.key).join('/');
+  try {
+    const { stdout } = await execFileP(MC_PATH, [
+      'cat', `${MINIO_ALIAS}/${bucket}/${key}`
+    ], { timeout: 30000, maxBuffer: 50 * 1024 * 1024, encoding: 'buffer' });
+    // Detect content type by extension
+    const ext = key.split('.').pop().toLowerCase();
+    const ctypes = { json: 'application/json', txt: 'text/plain', html: 'text/html', png: 'image/png', jpg: 'image/jpeg' };
+    res.set('Content-Type', ctypes[ext] || 'application/octet-stream');
+    res.send(stdout);
+  } catch (e) {
+    if (e.stderr && e.stderr.toString().includes('does not exist')) {
+      return res.status(404).json({ error: 'Object not found' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Put object: PUT /s3/:bucket/*key — streams body via mc pipe
+app.put('/s3/:bucket/*key', requireAuth, (req, res) => {
+  const { bucket } = req.params;
+  const key = [].concat(req.params.key).join('/');
+  const target = `${MINIO_ALIAS}/${bucket}/${key}`;
+
+  const child = spawn(MC_PATH, ['pipe', target]);
+  let stderr = '';
+  child.stderr.on('data', d => stderr += d.toString());
+  child.on('close', code => {
+    if (code !== 0) return res.status(500).json({ error: stderr.trim() || 'Upload failed' });
+    res.json({ ok: true, bucket, key: key });
+  });
+
+  // Body may already be parsed by express.json (if Content-Type: application/json)
+  if (req.body !== undefined && typeof req.body === 'object' && !(req.body instanceof Buffer)) {
+    child.stdin.write(JSON.stringify(req.body));
+    child.stdin.end();
+  } else if (req.body instanceof Buffer) {
+    child.stdin.write(req.body);
+    child.stdin.end();
+  } else {
+    req.pipe(child.stdin);
+    req.on('error', err => { child.stdin.destroy(); res.status(500).json({ error: err.message }); });
+  }
+});
+
+// Delete object: DELETE /s3/:bucket/*key
+app.delete('/s3/:bucket/*key', requireAuth, async (req, res) => {
+  const { bucket } = req.params;
+  const key = [].concat(req.params.key).join('/');
+  try {
+    await execFileP(MC_PATH, [
+      'rm', `${MINIO_ALIAS}/${bucket}/${key}`
+    ], { timeout: 10000 });
+    res.json({ ok: true, bucket, key });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Initialize bus sequence on startup
+initBusSeq();
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🐿️ Rocky Command Center running on http://0.0.0.0:${PORT}`);
+});

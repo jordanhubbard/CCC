@@ -1,0 +1,69 @@
+squirrelstack packaging — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+Recipient: Shawn Edwards
+
+Output files:
+  /tmp/squirrelstack/          — unpacked bundle directory
+  /tmp/squirrelstack.tar.gz    — 76K tarball, 44 files
+
+Bundle contents:
+
+  Generated docs (new):
+    README.md                  — overview + quick start + architecture diagram
+    AGENTS.md                  — full deployment guide (step-by-step, Boris-style, crons, self-test)
+    AZURE_VM_SETUP.md          — VM provisioning, systemd service file, firewall rules, MinIO optional
+    install.sh                 — one-shot installer (Node version check, npm install, mkdir, plugin copy)
+
+  Dashboard:
+    dashboard/server.mjs       — full Express hub (workqueue, SquirrelBus, fan-out, changelog, metrics)
+    dashboard/package.json + package-lock.json
+
+  SquirrelBus:
+    squirrelbus/SPEC.md        — protocol spec
+    squirrelbus/bus.jsonl      — empty (ready for messages)
+
+  squirrelbus-plugin:
+    squirrelbus-plugin/index.js + openclaw.plugin.json + package.json + README.md
+
+  Workqueue:
+    workqueue/queue.json       — empty template (agent: YOUR_AGENT_NAME)
+    workqueue/alerts.jsonl     — empty
+    workqueue/decision-log.jsonl — empty
+    workqueue/results/.gitkeep
+    workqueue/SCHEMA.md + WORKQUEUE_AGENT.md + README.md
+    workqueue/scripts/         — 15 scripts (all .mjs + .sh + .py)
+
+Secrets scrubbed from all scripts:
+  - MinIO access key/secret → YOUR_MINIO_ACCESS_KEY / YOUR_MINIO_SECRET_KEY
+  - Mattermost token → YOUR_MATTERMOST_TOKEN
+  - Channel IDs (Bullwinkle, Natasha DM) → placeholder strings
+
+AGENTS.md covers:
+  ✓ What this bundle is
+  ✓ Step-by-step deployment (Ubuntu, Node 22, npm, systemd)
+  ✓ Connecting OpenClaw to the dashboard
+  ✓ squirrelbus-plugin install
+  ✓ Fan-out peer registry configuration
+  ✓ MinIO optional section
+  ✓ Cron job entries
+  ✓ Boris-style deployment (containerized, no Tailscale, public IP)
+  ✓ Self-test sequence (6 steps, all curl/node commands)
+
+AZURE_VM_SETUP.md covers:
+  ✓ Recommended VM size (Standard_B2s, ~$37/month)
+  ✓ Ubuntu 22.04 setup + Node 22 install
+  ✓ Port 8788 firewall rules (Azure CLI + NSG)
+  ✓ Full systemd .service file content
+  ✓ Optional Tailscale setup
+  ✓ Optional MinIO setup
+  ✓ Cost estimate
+
+install.sh:
+  ✓ Node 22+ version check (exits with instructions on failure)
+  ✓ npm install in dashboard/ (--omit=dev)
+  ✓ mkdir squirrelbus/, workqueue/results/
+  ✓ touch empty log files
+  ✓ cp -r squirrelbus-plugin/ → ~/.openclaw/plugins/squirrelbus-receiver/
+  ✓ mc availability check (optional, no-fail)
+  ✓ Prints summary + next steps

@@ -1,0 +1,34 @@
+auth-button UI enhancement — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+File modified: dashboard/server.mjs
+
+Changes:
+
+1. "🔑 Auth" button in page header
+   - Wrapped h1 + button in a flex row (space-between)
+   - Ghost/outline style: transparent bg, #30363d border, #8b949e text
+   - Hover: border + text transition to #58a6ff (blue)
+   - onclick="authFlow()"
+
+2. authFlow() function (new)
+   - localStorage.removeItem('wq-token')
+   - prompt('Enter auth token:')
+   - Trims whitespace from result
+   - Stores in localStorage on success → showToast('✅ Token updated')
+   - If cancelled/empty → showToast('❌ No token entered', true)
+   - No page reload
+
+3. authedFetch(url, opts) helper (new)
+   - Wraps fetch() with Authorization: Bearer <token> header
+   - Returns null if no token (so callers can bail early)
+   - On 401: shows "⚠️ Unauthorized — update your token" toast + auto-calls authFlow()
+   - Used by submitNewTask() (replaces direct fetch call)
+
+4. Service restart
+   - sudo systemctl restart wq-dashboard.service → active ✓
+
+Verification:
+   curl http://localhost:8788/ | grep '🔑 Auth'  → "🔑 Auth" present ✓
+   authFlow + authedFetch hit count in served HTML: 5 ✓

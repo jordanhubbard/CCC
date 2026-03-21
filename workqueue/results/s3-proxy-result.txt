@@ -1,0 +1,35 @@
+S3 Proxy for MinIO — COMPLETED
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+File modified: dashboard/server.mjs
+
+Routes added under /s3/ prefix (all except /health require Bearer RCC_AUTH_TOKEN_REMOVED):
+
+  GET  /s3/health              → {ok:true, minio:"connected"} — no auth required
+  GET  /s3/:bucket             → {bucket, objects:[...]} — mc ls --json
+  GET  /s3/:bucket/*key        → object bytes, Content-Type sniffed from extension
+  PUT  /s3/:bucket/*key        → {ok:true, bucket, key} — mc pipe (handles pre-parsed JSON body + raw streams)
+  DELETE /s3/:bucket/*key      → {ok:true, bucket, key} — mc rm
+
+Implementation notes:
+  - Uses existing MC_PATH (/home/jkh/.local/bin/mc) + MINIO_ALIAS (do-host1)
+  - PUT handler detects if express.json pre-parsed body (re-serializes) or pipes raw stream
+  - Express 5 *key wildcard returns array — normalized with [].concat(key).join('/')
+  - CORS headers added for /s3/* routes (origin:*, GET/PUT/DELETE/OPTIONS)
+  - Spawn added to child_process import
+
+Test results:
+  GET  /s3/health                              → {"ok":true,"minio":"connected"}   ✓
+  PUT  /s3/agents/shared/test-proxy.json       → {"ok":true,"bucket":"agents","key":"shared/test-proxy.json"} ✓
+  GET  /s3/agents/shared/test-proxy.json       → {"test":true,"source":"s3-proxy","ts":"2026-03-21"} ✓
+  GET  /s3/agents                              → {bucket:"agents", objects:[...]} (14+ items listed) ✓
+  DELETE /s3/agents/shared/test-proxy.json     → {"ok":true,...} ✓
+  GET  /s3/agents/shared/test-proxy.json       → {"error":"Object not found"} (404 after delete) ✓
+
+Service restart:
+  sudo systemctl restart wq-dashboard.service → active ✓
+
+Boris access:
+  http://YOUR_PUBLIC_IP:8788/s3/agents/shared/some-file.json
+  Authorization: Bearer RCC_AUTH_TOKEN_REMOVED

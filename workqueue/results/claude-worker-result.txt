@@ -1,0 +1,27 @@
+claude-worker.mjs — COMPLETED
+Date: 2026-03-20
+Agent: Rocky (do-host1)
+
+Files created:
+  workqueue/scripts/claude-worker.mjs          — reusable ESM module
+  workqueue/scripts/CLAUDE_WORKER_README.md    — usage docs for Bullwinkle/Natasha
+
+Module exports:
+  sendTask(sessionName, task, opts)           — send task, poll until idle prompt, return output
+  sendTaskBackground(sessionName, task)       — fire-and-forget with & prefix, no wait
+  detectSession()                             — scan tmux ls, return first session running claude
+  pollUntilDone(sessionName, timeoutMs)       — low-level poller, waits for idle prompt
+
+Self-test result (node claude-worker.mjs --test):
+  Detected session: "auth3"
+  Task sent successfully
+  Idle prompt detected in 810ms
+  done=true  exit code=0
+
+Idle detection strategy:
+  - Strips ANSI codes from pane capture
+  - Checks for ❯ at line start, "? for shortcuts", or "> " fallback
+  - Confirms no spinner chars (⠋⠙⠹…) in last 6 lines
+  - Polls every 800ms, default timeout 120s
+
+No npm dependencies — Node.js built-ins only.

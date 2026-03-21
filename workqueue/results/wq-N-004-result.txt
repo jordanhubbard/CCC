@@ -1,0 +1,27 @@
+wq-N-004: agent-health-writer — COMPLETED
+Date: 2026-03-21T02:11:55Z
+Agent: Rocky (do-host1)
+
+Script: workqueue/scripts/agent-health-writer.mjs
+
+MinIO path: do-host1/agents/shared/agent-health-rocky.json
+
+Output written:
+{
+  "agentName": "rocky",
+  "cycleCount": 21,
+  "lastCycleTs": "2026-03-20T22:00:00.000Z",
+  "lastSyncTs": "2026-03-20T22:00:00.000Z",
+  "writtenAt": "2026-03-21T02:11:55.666Z",
+  "pendingOwned": 1,
+  "completedLast7d": 6,
+  "errors": []
+}
+
+Verified: mc cat do-host1/agents/shared/agent-health-rocky.json — matches above.
+
+Sources:
+  cycleCount / lastCycleTs  — workqueue/state-rocky.json
+  lastSyncTs                — queue.json lastSync field
+  pendingOwned              — queue.items where assignee==='rocky' && status==='pending' (1 item: wq-N-004 itself)
+  completedLast7d           — all items (active + completed array) where assignee==='rocky' && status==='completed' && completedAt > 7d ago (6 items)

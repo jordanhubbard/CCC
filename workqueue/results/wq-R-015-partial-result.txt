@@ -1,0 +1,36 @@
+Aviation Dependabot PRs — CI CHECK COMPLETE
+Date: 2026-03-21
+Agent: Rocky (do-host1)
+
+Summary: 0 of 11 PRs merged — all have failing CI checks
+
+PRs checked:
+  #162 FAIL | bump rollup 4.56→4.59 (/apps/g1000-simulator/frontend)
+  #163 FAIL | bump typescript 4.9.5→5.9.3
+  #165 FAIL | bump express and @types/express
+  #166 FAIL | bump react-dom and @types/react-dom
+  #167 FAIL | bump express-rate-limit 8.3.0→8.3.1
+  #169 FAIL | bump dev-dependencies group (13 updates)
+  #170 FAIL | bump faker 40.5.1→40.11.0
+  #171 FAIL | bump pyjwt 2.11.0→2.12.1
+  #172 FAIL | bump uvicorn 0.41.0→0.42.0
+  #173 FAIL | bump jsdom 28.1.0→29.0.0
+  #174 FAIL | bump pdfkit 0.17.2→0.18.0
+
+Failing checks on ALL PRs:
+  - integration-tests   (real test failures — not pre-existing, passes on main)
+  - pip-audit           (Python dep vulnerability scan)
+  - Test Flight Planner (app-level test suite)
+
+Additional failures on #169-174:
+  - trivy               (container/dep vulnerability scan)
+
+Recommendation:
+  Do not merge any of these PRs. The integration test failures are
+  real — integration-tests passes on main but fails on all 11 dep bumps.
+  Human review needed to determine if failures are due to breaking API
+  changes in the bumped packages or test suite gaps.
+
+  Suggest starting with smallest/safest bump first:
+    #167 (express-rate-limit patch bump 8.3.0→8.3.1) — investigate why
+    integration-tests fails on a patch bump.

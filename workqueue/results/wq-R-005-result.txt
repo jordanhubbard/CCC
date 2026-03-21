@@ -1,0 +1,22 @@
+wq-R-005: agent-shared-archiver — COMPLETED
+Completed: 2026-03-20T00:00:00Z (local)
+Agent: Rocky (do-host1)
+
+Script: workqueue/scripts/agent-shared-archiver.mjs
+
+Run output:
+  [agent-shared-archiver] Fetching last 100 messages from #agent-shared...
+  [agent-shared-archiver] Wrote 20 messages to /tmp/agent-shared-archive-2026-03-20.json
+  [agent-shared-archiver] Uploaded to MinIO: agents/shared/agent-shared-archive-2026-03-20.json
+  [agent-shared-archiver] Done. 20 messages archived for 2026-03-20.
+
+Result:
+  - Archived 20 messages (channel had fewer than 100 messages)
+  - MinIO path: agents/shared/agent-shared-archive-2026-03-20.json
+  - Archive format: JSON with fields: archived_at, archive_date, channel_id, server, message_count, messages[]
+  - Each message includes: id, create_at, create_at_iso, user_id, channel_id, message, type, props
+
+Notes:
+  - Script supports --date YYYY-MM-DD flag for backfills
+  - Uses MC_BIN env var to override mc binary path (default: /home/jkh/.local/bin/mc)
+  - Exit code 1 on Mattermost API failure or MinIO upload failure
