@@ -279,6 +279,9 @@ async function handleRequest(req, res) {
         completedAt: null,
         result: null,
         tags: body.tags || [],
+        // Scout dedup key — preserved for itemAlreadyExists() checks
+        scout_key: body.scout_key || null,
+        repo: body.repo || null,
       };
       if (!q.items) q.items = [];
       q.items.push(item);
