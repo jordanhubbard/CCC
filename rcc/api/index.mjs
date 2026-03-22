@@ -154,6 +154,17 @@ async function handleRequest(req, res) {
       const body = await readBody(req);
       if (!body.title) return json(res, 400, { error: 'title required' });
       const q = await readQueue();
+      // Infer preferred_executor if not specified
+      const inferExecutor = (b) => {
+        if (b.preferred_executor) return b.preferred_executor;
+        const tags = b.tags || [];
+        if (tags.includes('gpu') || tags.includes('render') || tags.includes('simulation')) return 'gpu';
+        if (tags.includes('reasoning') || tags.includes('code') || tags.includes('complex')) return 'claude_cli';
+        if (tags.includes('heartbeat') || tags.includes('status') || tags.includes('poll')) return 'inference_key';
+        // Default: claude_cli for assignee-specific tasks, inference_key for housekeeping
+        return (b.assignee && b.assignee !== 'all') ? 'claude_cli' : 'inference_key';
+      };
+
       const item = {
         id: body.id || `wq-API-${Date.now()}`,
         itemVersion: 1,
@@ -165,6 +176,7 @@ async function handleRequest(req, res) {
         title: body.title,
         description: body.description || '',
         notes: body.notes || '',
+        preferred_executor: inferExecutor(body),  // claude_cli | inference_key | gpu
         journal: [],
         choices: body.choices || [],
         choiceRecorded: null,
@@ -304,15 +316,45 @@ async function handleRequest(req, res) {
       agents[body.name] = {
         name: body.name,
         host: body.host || 'unknown',
-        type: body.type || 'full',
+        type: body.type || 'full',           // full | container | local | spark
         token,
         registeredAt: new Date().toISOString(),
         lastSeen: null,
+        // Worker capabilities — declared at registration, updated via PATCH /api/agents/:name
+        capabilities: {
+          claude_cli: body.capabilities?.claude_cli ?? false,
+          claude_cli_model: body.capabilities?.claude_cli_model || null,
+          inference_key: body.capabilities?.inference_key ?? true,
+          inference_provider: body.capabilities?.inference_provider || 'nvidia',
+          gpu: body.capabilities?.gpu ?? false,
+          gpu_model: body.capabilities?.gpu_model || null,
+          gpu_count: body.capabilities?.gpu_count || 0,
+          gpu_vram_gb: body.capabilities?.gpu_vram_gb || 0,
+        },
+        billing: {
+          claude_cli: body.billing?.claude_cli || 'fixed',
+          inference_key: body.billing?.inference_key || 'metered',
+          gpu: body.billing?.gpu || 'fixed',
+        },
       };
       await writeAgents(agents);
-      // Add token to auth set for immediate use
       AUTH_TOKENS.add(token);
       return json(res, 201, { ok: true, token, agent: { ...agents[body.name], token } });
+    }
+
+    // ── PATCH /api/agents/:name — update capabilities ─────────────────────
+    const agentPatchMatch = path.match(/^\/api\/agents\/([^/]+)$/);
+    if (method === 'PATCH' && agentPatchMatch) {
+      const name = decodeURIComponent(agentPatchMatch[1]);
+      const body = await readBody(req);
+      const agents = await readAgents();
+      if (!agents[name]) return json(res, 404, { error: 'Agent not found' });
+      if (body.capabilities) Object.assign(agents[name].capabilities, body.capabilities);
+      if (body.billing) Object.assign(agents[name].billing, body.billing);
+      if (body.host) agents[name].host = body.host;
+      if (body.type) agents[name].type = body.type;
+      await writeAgents(agents);
+      return json(res, 200, { ok: true, agent: agents[name] });
     }
 
     // ── POST /api/heartbeat/:agent ────────────────────────────────────────

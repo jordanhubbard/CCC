@@ -26,7 +26,25 @@ fi
 RESPONSE=$(curl -s -X POST "$RCC_URL/api/agents/register" \
   -H "Authorization: Bearer $RCC_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"name\":\"$AGENT_NAME\",\"host\":\"${AGENT_HOST:-$(hostname)}\",\"type\":\"${AGENT_TYPE:-full}\"}")
+  -d "{
+    \"name\":\"$AGENT_NAME\",
+    \"host\":\"${AGENT_HOST:-$(hostname)}\",
+    \"type\":\"${AGENT_TYPE:-full}\",
+    \"capabilities\":{
+      \"claude_cli\":${AGENT_CLAUDE_CLI:-false},
+      \"claude_cli_model\":\"${AGENT_CLAUDE_MODEL:-claude-sonnet-4-6}\",
+      \"inference_key\":true,
+      \"gpu\":${AGENT_HAS_GPU:-false},
+      \"gpu_model\":\"${AGENT_GPU_MODEL:-}\",
+      \"gpu_count\":${AGENT_GPU_COUNT:-0},
+      \"gpu_vram_gb\":${AGENT_GPU_VRAM_GB:-0}
+    },
+    \"billing\":{
+      \"claude_cli\":\"fixed\",
+      \"inference_key\":\"metered\",
+      \"gpu\":\"fixed\"
+    }
+  }")
 
 TOKEN=$(echo "$RESPONSE" | node -e "process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{ try { console.log(JSON.parse(d).token||''); } catch(e){} })")
 

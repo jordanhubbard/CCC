@@ -175,3 +175,81 @@ rocky/
 ---
 
 *Last updated: 2026-03-21 by Rocky 🐿️*
+
+---
+
+## Agent Capability Model (updated 2026-03-21)
+
+Every agent node has two potential "workers" attached to it:
+
+### Worker Types
+
+| Worker | Cost Model | Best For | Weakness |
+|--------|-----------|----------|---------|
+| **Claude CLI** (tmux) | Fixed monthly (~$20-100) | Complex reasoning, parallel subagents, long tasks, code gen | Requires human SSO auth, can die/need reauth |
+| **Inference Key** (NVIDIA/OpenAI) | Per token (metered) | Hub API calls, heartbeats, queue polling, simple coordination | Expensive at scale, rate-limited, no parallelism |
+| **GPU** (direct) | Fixed (hardware/cloud cost) | Renders, simulation, inference, training | Not LLM — for actual compute work |
+
+### Topology
+
+```
+jkh
+ └── RCC (Rocky) — nervous system, queue, routing
+      ├── Rocky's Claude CLI (tmux) — fixed cost, parallel
+      ├── Bullwinkle node
+      │    └── Bullwinkle's Claude CLI (tmux) — fixed cost, parallel
+      ├── Natasha node  
+      │    └── Natasha's Claude CLI (tmux) — fixed cost, parallel
+      │    └── Blackwell GPU — render/inference compute
+      └── Boris node
+           └── Boris's Claude CLI (tmux) — fixed cost, parallel
+           └── Dual L40 GPUs — render/simulation compute
+```
+
+**Key insight:** Each agent node IS its own mini-hub. The inference key handles
+coordination/API traffic. The Claude CLI handles the actual intelligent work.
+RCC routes to the right worker based on task type.
+
+### Agent Registry Schema (capabilities)
+
+When an agent registers with RCC, it declares its capabilities:
+
+```json
+{
+  "name": "boris",
+  "host": "sweden-l40",
+  "type": "full",
+  "capabilities": {
+    "claude_cli": true,
+    "claude_cli_model": "claude-sonnet-4-6",
+    "inference_key": true,
+    "inference_provider": "nvidia",
+    "gpu": true,
+    "gpu_model": "L40",
+    "gpu_count": 2,
+    "gpu_vram_gb": 96
+  },
+  "billing": {
+    "claude_cli": "fixed",
+    "inference_key": "metered",
+    "gpu": "fixed"
+  }
+}
+```
+
+### Routing Rules
+
+RCC dispatch uses `preferred_executor` on each work item:
+
+| Task type | Preferred executor | Reason |
+|-----------|-------------------|--------|
+| Heartbeat / queue poll | `inference_key` | Trivial, metered cost acceptable |
+| Simple status update | `inference_key` | Same |
+| Complex reasoning / code gen | `claude_cli` | Fixed cost, powerful |
+| Multi-step orchestration | `claude_cli` | Parallel subagents, no token anxiety |
+| GPU render / simulation | `gpu` (direct) | Not an LLM job at all |
+| Routing decision (RCC brain) | `inference_key` (with fallback chain) | Hub must always work even if CLIs are down |
+
+**The golden rule:** Never route expensive reasoning to a metered agent without
+explicit override. Never route GPU work to an LLM. Keep the hub's inference key
+usage lean so it can always coordinate even when everything else is down.
