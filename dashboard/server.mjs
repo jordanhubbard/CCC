@@ -1742,9 +1742,10 @@ app.get('/s3/:bucket', requireAuth, async (req, res) => {
 });
 
 // Get object: GET /s3/:bucket/*key
-app.get('/s3/:bucket/*key', requireAuth, async (req, res) => {
+app.get('/s3/:bucket/*splat', requireAuth, async (req, res) => {
+  req.params.key = req.params[0];
   const { bucket } = req.params;
-  const key = [].concat(req.params.key).join('/');
+  const key = [].concat(req.params.splat).join('/');
   try {
     const { stdout } = await execFileP(MC_PATH, [
       'cat', `${MINIO_ALIAS}/${bucket}/${key}`
@@ -1763,9 +1764,9 @@ app.get('/s3/:bucket/*key', requireAuth, async (req, res) => {
 });
 
 // Put object: PUT /s3/:bucket/*key — streams body via mc pipe
-app.put('/s3/:bucket/*key', requireAuth, (req, res) => {
+app.put('/s3/:bucket/*splat', requireAuth, (req, res) => {
   const { bucket } = req.params;
-  const key = [].concat(req.params.key).join('/');
+  const key = [].concat(req.params.splat).join('/');
   const target = `${MINIO_ALIAS}/${bucket}/${key}`;
 
   const child = spawn(MC_PATH, ['pipe', target]);
@@ -1790,9 +1791,9 @@ app.put('/s3/:bucket/*key', requireAuth, (req, res) => {
 });
 
 // Delete object: DELETE /s3/:bucket/*key
-app.delete('/s3/:bucket/*key', requireAuth, async (req, res) => {
+app.delete('/s3/:bucket/*splat', requireAuth, async (req, res) => {
   const { bucket } = req.params;
-  const key = [].concat(req.params.key).join('/');
+  const key = [].concat(req.params.splat).join('/');
   try {
     await execFileP(MC_PATH, [
       'rm', `${MINIO_ALIAS}/${bucket}/${key}`

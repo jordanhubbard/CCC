@@ -12,11 +12,13 @@ import { createServer } from 'http';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { Brain, createRequest } from '../brain/index.mjs';
+import { Pump } from '../scout/pump.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT         = parseInt(process.env.RCC_PORT || '8789', 10);
 const QUEUE_PATH   = process.env.QUEUE_PATH || '../../workqueue/queue.json';
 const AGENTS_PATH  = process.env.AGENTS_PATH || './agents.json';
+const REPOS_PATH   = process.env.REPOS_PATH  || './repos.json';
 const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
 const START_TIME   = Date.now();
 
@@ -32,6 +34,16 @@ async function getBrain() {
     brain.start();
   }
   return brain;
+}
+
+// ── Pump (lazy init) ──────────────────────────────────────────────────────
+let pump = null;
+function getPump() {
+  if (!pump) {
+    pump = new Pump();
+    pump.start();
+  }
+  return pump;
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────
@@ -407,6 +419,26 @@ async function handleRequest(req, res) {
       const b = brain;
       if (!b) return json(res, 200, { ok: true, status: 'not started' });
       return json(res, 200, b.getStatus());
+    }
+
+    // ── GET /api/repos ────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/repos') {
+      const repos = await getPump().listRepos();
+      return json(res, 200, repos);
+    }
+
+    // ── POST /api/repos/register ──────────────────────────────────────────
+    if (method === 'POST' && path === '/api/repos/register') {
+      const body = await readBody(req);
+      if (!body.full_name) return json(res, 400, { error: 'full_name required (e.g. owner/repo)' });
+      const repo = await getPump().registerRepo(body);
+      return json(res, 201, { ok: true, repo });
+    }
+
+    // ── POST /api/repos/scan — trigger immediate scan ─────────────────────
+    if (method === 'POST' && path === '/api/repos/scan') {
+      const created = await getPump().scan();
+      return json(res, 200, { ok: true, itemsCreated: created });
     }
 
     return json(res, 404, { error: 'Not found' });
