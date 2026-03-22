@@ -1,0 +1,386 @@
+{
+  "queue": [
+    {
+      "id": "brain-1774150241905-9141k",
+      "messages": [
+        {
+          "role": "user",
+          "content": "high"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "high",
+      "created": "2026-03-22T03:30:41.905Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267321-flmsg",
+      "messages": [
+        {
+          "role": "user",
+          "content": "high"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "high",
+      "created": "2026-03-22T03:31:07.321Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273111-x1xvi",
+      "messages": [
+        {
+          "role": "user",
+          "content": "high"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "high",
+      "created": "2026-03-22T03:31:13.111Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150241871-rgp54",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:30:41.871Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150241905-9pza8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "normal"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:30:41.905Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150241920-ossfy",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:30:41.920Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150241945-vdhn1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:30:41.945Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150241952-fu0n8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:30:41.952Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267316-9vm38",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:07.316Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267321-fhzyv",
+      "messages": [
+        {
+          "role": "user",
+          "content": "normal"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:07.321Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267328-zm347",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:07.328Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267342-rx8qt",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:07.342Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267348-9gugp",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:07.348Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273104-c0bph",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:13.104Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273111-i9ed8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "normal"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:13.111Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273119-3sq2t",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:13.119Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273132-0wxkd",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:13.132Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273136-477ct",
+      "messages": [
+        {
+          "role": "user",
+          "content": "test"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "normal",
+      "created": "2026-03-22T03:31:13.136Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150241905-r0ax8",
+      "messages": [
+        {
+          "role": "user",
+          "content": "low"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "low",
+      "created": "2026-03-22T03:30:41.905Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150267321-jur9e",
+      "messages": [
+        {
+          "role": "user",
+          "content": "low"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "low",
+      "created": "2026-03-22T03:31:07.321Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    },
+    {
+      "id": "brain-1774150273111-np3io",
+      "messages": [
+        {
+          "role": "user",
+          "content": "low"
+        }
+      ],
+      "maxTokens": 1024,
+      "priority": "low",
+      "created": "2026-03-22T03:31:13.111Z",
+      "attempts": [],
+      "status": "pending",
+      "result": null,
+      "completedAt": null,
+      "callbackUrl": null,
+      "metadata": {}
+    }
+  ],
+  "completed": [],
+  "modelStatus": {},
+  "lastTick": "2026-03-22T03:31:13.136Z",
+  "tickCount": 0
+}
