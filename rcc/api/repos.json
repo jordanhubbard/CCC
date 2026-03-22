@@ -11,8 +11,9 @@
       "contributors": [
         "jordanhubbard"
       ],
-      "slack_channel": null,
-      "triaging_agent": "rocky"
+      "slack_channel": "C0AN166PJ9L",
+      "triaging_agent": "rocky",
+      "slack_workspace": "omgjkh"
     },
     "issue_tracker": "github",
     "scouts": [
@@ -24,7 +25,8 @@
     ],
     "enabled": true,
     "registeredAt": "2026-03-22T04:08:30.072Z",
-    "notes": "Rocky's own workspace. Rocky is de-facto maintainer."
+    "notes": "Rocky's own workspace. Rocky is de-facto maintainer.",
+    "updatedAt": "2026-03-22T09:45:12.075Z"
   },
   {
     "full_name": "jordanhubbard/loom",
@@ -42,8 +44,9 @@
         "mbrukman",
         "popey"
       ],
-      "slack_channel": null,
-      "triaging_agent": "rocky"
+      "slack_channel": "C0AN166PJ9L",
+      "triaging_agent": "rocky",
+      "slack_workspace": "omgjkh"
     },
     "issue_tracker": "github",
     "scouts": [
@@ -55,7 +58,8 @@
     ],
     "enabled": true,
     "registeredAt": "2026-03-22T04:08:30.263Z",
-    "notes": "jkh personal project. Loom has its own internal agent org — agents work beads inside Loom, RCC scouts CI/deps/PRs from outside."
+    "notes": "jkh personal project. Loom has its own internal agent org — agents work beads inside Loom, RCC scouts CI/deps/PRs from outside.",
+    "updatedAt": "2026-03-22T09:45:12.239Z"
   },
   {
     "full_name": "jordanhubbard/webmux",
@@ -69,8 +73,9 @@
       "contributors": [
         "jordanhubbard"
       ],
-      "slack_channel": null,
-      "triaging_agent": "rocky"
+      "slack_channel": "C0AN166PJ9L",
+      "triaging_agent": "rocky",
+      "slack_workspace": "omgjkh"
     },
     "issue_tracker": "github",
     "scouts": [
@@ -82,7 +87,8 @@
     ],
     "enabled": true,
     "registeredAt": "2026-03-22T04:08:30.595Z",
-    "notes": "jkh personal project. Public repo. Natasha has wq item for AI sidebar (webmux #9)."
+    "notes": "jkh personal project. Public repo. Natasha has wq item for AI sidebar (webmux #9).",
+    "updatedAt": "2026-03-22T09:45:12.441Z"
   },
   {
     "full_name": "jordanhubbard/Aviation",
@@ -96,8 +102,9 @@
       "contributors": [
         "jordanhubbard"
       ],
-      "slack_channel": null,
-      "triaging_agent": "rocky"
+      "slack_channel": "C0AN166PJ9L",
+      "triaging_agent": "rocky",
+      "slack_workspace": "omgjkh"
     },
     "issue_tracker": "github",
     "scouts": [
@@ -109,7 +116,8 @@
     ],
     "enabled": true,
     "registeredAt": "2026-03-22T04:08:31.015Z",
-    "notes": "jkh personal project. CI fixed 2026-03-22 (tsconfig test exclusions). Dependabot PRs merged. AI explanation layer filed as issue #176."
+    "notes": "jkh personal project. CI fixed 2026-03-22 (tsconfig test exclusions). Dependabot PRs merged. AI explanation layer filed as issue #176.",
+    "updatedAt": "2026-03-22T09:45:12.623Z"
   },
   {
     "full_name": "NVIDIA-dev/horde",
@@ -162,8 +170,9 @@
           "role": "contributor"
         }
       ],
-      "slack_channel": null,
-      "triaging_agent": "rocky"
+      "slack_channel": "C0AN166PJ9L",
+      "triaging_agent": "rocky",
+      "slack_workspace": "omgjkh"
     },
     "issue_tracker": "github",
     "issue_tracker_url": "beads.horde.nvidia.com",
@@ -177,7 +186,7 @@
     "enabled": true,
     "registeredAt": "2026-03-22T06:13:32.264Z",
     "notes": "HORDE 4.0 — NVIDIA multi-cloud GPU/compute orchestration. Python/FastAPI/Temporal/React. 32MB. MOVED TO GITHUB ISSUES 2026-03-20 — was beads-only before that, expect issue volume to ramp. NemoClaw integration target.",
-    "updatedAt": "2026-03-22T06:19:10.537Z"
+    "updatedAt": "2026-03-22T09:45:12.813Z"
   },
   {
     "full_name": "NVIDIA-dev/omniverse-kit",
@@ -245,8 +254,9 @@
           "role": "contributor"
         }
       ],
-      "slack_channel": null,
-      "triaging_agent": "rocky"
+      "slack_channel": "C0AN166PJ9L",
+      "triaging_agent": "rocky",
+      "slack_workspace": "omgjkh"
     },
     "issue_tracker": "github",
     "scouts": [
@@ -257,6 +267,7 @@
     ],
     "enabled": true,
     "registeredAt": "2026-03-22T06:20:54.735Z",
-    "notes": "NVIDIA Omniverse Kit. Moved to GitHub 2026-03-12 (same external migration pattern as HORDE). Default branch is feat/OMPE-85820-github-changes — still being set up. External build migration in progress: Packman S3 mirror + PyPI. CODEOWNERS defined for rendering subsystems. 317 total contributors (showing top 10+jkh). Preferred executor: claude_cli for code work, boris/natasha for render validation."
+    "notes": "NVIDIA Omniverse Kit. Moved to GitHub 2026-03-12 (same external migration pattern as HORDE). Default branch is feat/OMPE-85820-github-changes — still being set up. External build migration in progress: Packman S3 mirror + PyPI. CODEOWNERS defined for rendering subsystems. 317 total contributors (showing top 10+jkh). Preferred executor: claude_cli for code work, boris/natasha for render validation.",
+    "updatedAt": "2026-03-22T09:45:12.983Z"
   }
 ]

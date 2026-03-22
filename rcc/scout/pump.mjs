@@ -22,6 +22,57 @@ const RCC_TOKEN          = process.env.RCC_AUTH_TOKENS?.split(',')[0] || '';
 const IDLE_THRESHOLD     = parseInt(process.env.PUMP_IDLE_THRESHOLD || '3', 10);  // items per agent
 const SCAN_INTERVAL_MS   = parseInt(process.env.PUMP_SCAN_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10); // 6h
 const IDLE_CHECK_MS      = parseInt(process.env.PUMP_IDLE_CHECK_MS || String(30 * 60 * 1000), 10); // 30min
+const SLACK_TOKEN        = process.env.SLACK_OMGJKH_TOKEN || '';
+const WATCH_CHANNEL      = process.env.WATCH_CHANNEL || 'C0AN166PJ9L'; // #watch-projects on omgjkh
+
+// ── Slack posting ──────────────────────────────────────────────────────────
+async function slackPost(channel, text, blocks) {
+  if (!SLACK_TOKEN) return; // no-op if token not configured
+  try {
+    const body = { channel, text };
+    if (blocks) body.blocks = blocks;
+    const r = await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SLACK_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!j.ok) console.error('[pump] Slack post failed:', j.error);
+  } catch (err) {
+    console.error('[pump] Slack post error:', err.message);
+  }
+}
+
+// Format a batch of new work items for Slack
+function formatNewItemsForSlack(newItems, repoMap) {
+  if (newItems.length === 0) return null;
+
+  // Group by repo
+  const byRepo = {};
+  for (const item of newItems) {
+    const repo = item.repo || item.tags?.find(t => t.includes('/')) || 'unknown';
+    if (!byRepo[repo]) byRepo[repo] = [];
+    byRepo[repo].push(item);
+  }
+
+  const lines = [`🔍 *Scout found ${newItems.length} new work item${newItems.length > 1 ? 's' : ''}*`];
+  for (const [repo, items] of Object.entries(byRepo)) {
+    const repoInfo = repoMap[repo];
+    const kind = repoInfo?.kind === 'team' ? '👥' : '👤';
+    lines.push(`\n${kind} *${repo}*`);
+    for (const item of items.slice(0, 5)) {
+      const pri = item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '⚪';
+      lines.push(`  ${pri} ${item.title}`);
+    }
+    if (items.length > 5) lines.push(`  _…and ${items.length - 5} more_`);
+  }
+  return lines.join('\n');
+}
+
+// Format CI failure alert
+function formatCIAlert(repo, failedJobs) {
+  return `🚨 *CI failure* in \`${repo}\`\nFailed: ${failedJobs.map(j => `\`${j}\``).join(', ')}\n<https://github.com/${repo}/actions|View runs>`;
+}
 
 // ── Repo registry I/O ──────────────────────────────────────────────────────
 async function readRepos() {
@@ -54,10 +105,12 @@ async function runScan() {
   const repos = await readRepos();
   if (repos.length === 0) {
     console.log('[pump] No repos registered — nothing to scan');
-    return;
+    return 0;
   }
 
-  const repoNames = repos.filter(r => r.enabled !== false).map(r => r.full_name);
+  const enabledRepos = repos.filter(r => r.enabled !== false);
+  const repoNames = enabledRepos.map(r => r.full_name);
+  const repoMap = Object.fromEntries(enabledRepos.map(r => [r.full_name, r]));
   console.log(`[pump] Scanning ${repoNames.length} repos: ${repoNames.join(', ')}`);
 
   // Get current queue for dedup
@@ -70,16 +123,31 @@ async function runScan() {
 
   // Create items via API
   let created = 0;
+  const createdItems = [];
   for (const item of newItems) {
     try {
-      await rccPost('/api/queue', item);
-      created++;
+      const result = await rccPost('/api/queue', item);
+      if (result.ok) { created++; createdItems.push(item); }
     } catch (err) {
       console.error(`[pump] Failed to create item "${item.title}": ${err.message}`);
     }
   }
 
   console.log(`[pump] Created ${created} new work items`);
+
+  // Post to Slack #watch-projects if anything interesting found
+  if (created > 0) {
+    const msg = formatNewItemsForSlack(createdItems, repoMap);
+    if (msg) await slackPost(WATCH_CHANNEL, msg);
+  }
+
+  // Separately alert on CI failures (high-priority items)
+  const ciFailures = createdItems.filter(i => i.tags?.includes('ci-failure') || i.title?.includes('CI fail'));
+  for (const item of ciFailures) {
+    const repo = item.repo || item.tags?.find(t => t.includes('/')) || 'unknown';
+    await slackPost(WATCH_CHANNEL, formatCIAlert(repo, [item.title]));
+  }
+
   return created;
 }
 
