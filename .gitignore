@@ -1,7 +1,6 @@
 # Dependencies
 node_modules/
 **/node_modules/
-
 # Sensitive / personal
 memory/
 MEMORY.md
@@ -12,7 +11,6 @@ openclaw.json
 .env.*
 .env
 rcc/api/agents.json
-
 # Queue state (runtime data, not source)
 workqueue/queue.json
 brain-state.json
@@ -20,17 +18,14 @@ rcc/brain/brain-state.json
 workqueue/state-*.json
 memory/heartbeat-state.json
 memory/channel-state.json
-
 # Logs and temp
 *.log
 *.bak
 squirrelbus/bus.jsonl
 crash-reports/
-
 # Build artifacts
 dist/
 .cache/
-
 # Large binary assets (stored in MinIO/Azure instead)
 *.pptx
 *.ppt
@@ -50,14 +45,11 @@ keyframe_*.jpg
 *.usd
 render_*.py
 build_*.py
-
 # OpenClaw internal state
 .openclaw/
-
 # Scratch/temp
 tmp/
 scratch/
-
 # OS
 .DS_Store
 Thumbs.db
