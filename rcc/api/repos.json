@@ -178,5 +178,85 @@
     "registeredAt": "2026-03-22T06:13:32.264Z",
     "notes": "HORDE 4.0 — NVIDIA multi-cloud GPU/compute orchestration. Python/FastAPI/Temporal/React. 32MB. MOVED TO GITHUB ISSUES 2026-03-20 — was beads-only before that, expect issue volume to ramp. NemoClaw integration target.",
     "updatedAt": "2026-03-22T06:19:10.537Z"
+  },
+  {
+    "full_name": "NVIDIA-dev/omniverse-kit",
+    "platform": "github",
+    "kind": "team",
+    "display_name": "Omniverse Kit",
+    "description": "Omniverse Kit SDK and RTX renderer (C++). The core viewer/editor and carb-graphics plugin. 474MB, 317 contributors. In external migration — moved to GitHub 2026-03-12, currently externalizing build system (Packman S3 mirror, PyPI mirror).",
+    "ownership": {
+      "model": "team",
+      "owner": null,
+      "contributors": [
+        {
+          "github": "ignaci",
+          "commits": 2246,
+          "role": "lead"
+        },
+        {
+          "github": "davedepauw",
+          "commits": 2009,
+          "role": "lead"
+        },
+        {
+          "github": "novoselov-ab",
+          "commits": 1856,
+          "role": "lead"
+        },
+        {
+          "github": "roggiezhang-nv",
+          "commits": 1739,
+          "role": "lead"
+        },
+        {
+          "github": "marsupial",
+          "commits": 1523,
+          "role": "lead"
+        },
+        {
+          "github": "jshentu-nv",
+          "commits": 1430,
+          "role": "lead"
+        },
+        {
+          "github": "petethacker",
+          "commits": 1237,
+          "role": "lead"
+        },
+        {
+          "github": "avoroshilov",
+          "commits": 1224,
+          "role": "lead"
+        },
+        {
+          "github": "mhollaender",
+          "commits": 1043,
+          "role": "lead"
+        },
+        {
+          "github": "Kevin-Picott-NV",
+          "commits": 1002,
+          "role": "lead"
+        },
+        {
+          "github": "jordanhubbard",
+          "commits": 3,
+          "role": "contributor"
+        }
+      ],
+      "slack_channel": null,
+      "triaging_agent": "rocky"
+    },
+    "issue_tracker": "github",
+    "scouts": [
+      "issues",
+      "prs",
+      "ci",
+      "deps"
+    ],
+    "enabled": true,
+    "registeredAt": "2026-03-22T06:20:54.735Z",
+    "notes": "NVIDIA Omniverse Kit. Moved to GitHub 2026-03-12 (same external migration pattern as HORDE). Default branch is feat/OMPE-85820-github-changes — still being set up. External build migration in progress: Packman S3 mirror + PyPI. CODEOWNERS defined for rendering subsystems. 317 total contributors (showing top 10+jkh). Preferred executor: claude_cli for code work, boris/natasha for render validation."
   }
 ]
