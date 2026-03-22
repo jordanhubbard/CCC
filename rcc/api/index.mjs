@@ -26,6 +26,25 @@ const START_TIME   = Date.now();
 // ── In-memory heartbeats ───────────────────────────────────────────────────
 const heartbeats = {};
 
+// ── Repo helpers ───────────────────────────────────────────────────────────
+function repoOwnershipSummary(repo) {
+  if (!repo.ownership) return { kind: repo.kind || 'personal', label: repo.full_name.split('/')[0] };
+  const o = repo.ownership;
+  if (o.model === 'sole') {
+    return { kind: 'personal', label: o.owner || repo.full_name.split('/')[0], sole: true };
+  }
+  // team/org: list contributor logins
+  const contributors = Array.isArray(o.contributors)
+    ? o.contributors.map(c => typeof c === 'string' ? c : c.github)
+    : [];
+  return {
+    kind: repo.kind || 'team',
+    label: contributors.slice(0, 3).join(', ') + (contributors.length > 3 ? ` +${contributors.length - 3}` : ''),
+    contributors,
+    slack_channel: o.slack_channel || null,
+  };
+}
+
 // ── Brain (lazy init) ─────────────────────────────────────────────────────
 let brain = null;
 async function getBrain() {
@@ -443,7 +462,30 @@ async function handleRequest(req, res) {
     // ── GET /api/repos ────────────────────────────────────────────────────
     if (method === 'GET' && path === '/api/repos') {
       const repos = await getPump().listRepos();
-      return json(res, 200, repos);
+      // Enrich with kind/ownership summary for dashboard
+      const enriched = repos.map(r => ({
+        ...r,
+        kind: r.kind || 'personal',
+        ownership_summary: repoOwnershipSummary(r),
+      }));
+      return json(res, 200, enriched);
+    }
+
+    // ── GET /api/repos/:name or PATCH /api/repos/:name ───────────────────
+    const repoSingleMatch = path.match(/^\/api\/repos\/([^/]+\/[^/]+)$/);
+    if (repoSingleMatch) {
+      const fullName = decodeURIComponent(repoSingleMatch[1]);
+      if (method === 'GET') {
+        const repos = await getPump().listRepos();
+        const repo = repos.find(r => r.full_name === fullName);
+        if (!repo) return json(res, 404, { error: 'Repo not found' });
+        return json(res, 200, { ...repo, ownership_summary: repoOwnershipSummary(repo) });
+      }
+      if (method === 'PATCH') {
+        const body = await readBody(req);
+        const repo = await getPump().patchRepo(fullName, body);
+        return json(res, 200, { ok: true, repo });
+      }
     }
 
     // ── POST /api/repos/register ──────────────────────────────────────────

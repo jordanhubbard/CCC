@@ -155,23 +155,56 @@ export class Pump {
   }
 
   async registerRepo(repoSpec) {
-    // repoSpec: { full_name, platform, scouts, enabled, notes }
+    // repoSpec: full project object — see repos.json schema
+    // Required: full_name
+    // Optional: kind (personal|team|org), display_name, description,
+    //           ownership { model, owner, contributors, slack_channel, triaging_agent },
+    //           issue_tracker (github|beads|jira|linear|none),
+    //           scouts, enabled, notes
     const repos = await readRepos();
     const existing = repos.findIndex(r => r.full_name === repoSpec.full_name);
+
+    const defaults = {
+      full_name: repoSpec.full_name,
+      platform: repoSpec.platform || 'github',
+      kind: repoSpec.kind || 'personal',
+      display_name: repoSpec.display_name || repoSpec.full_name.split('/')[1],
+      description: repoSpec.description || '',
+      ownership: repoSpec.ownership || {
+        model: 'sole',
+        owner: repoSpec.full_name.split('/')[0],
+        contributors: [repoSpec.full_name.split('/')[0]],
+        slack_channel: null,
+        triaging_agent: 'rocky',
+      },
+      issue_tracker: repoSpec.issue_tracker || 'github',
+      scouts: repoSpec.scouts || ['issues', 'prs', 'ci', 'deps', 'analysis'],
+      enabled: repoSpec.enabled !== false,
+      registeredAt: new Date().toISOString(),
+      notes: repoSpec.notes || '',
+    };
+
     if (existing >= 0) {
       repos[existing] = { ...repos[existing], ...repoSpec };
     } else {
-      repos.push({
-        full_name: repoSpec.full_name,
-        platform: repoSpec.platform || 'github',
-        scouts: repoSpec.scouts || ['issues', 'prs', 'ci', 'deps', 'analysis'],
-        enabled: repoSpec.enabled !== false,
-        registeredAt: new Date().toISOString(),
-        notes: repoSpec.notes || '',
-      });
+      repos.push(defaults);
     }
     await writeRepos(repos);
     return repos.find(r => r.full_name === repoSpec.full_name);
+  }
+
+  // Update a single field or sub-object on an existing repo
+  async patchRepo(fullName, patch) {
+    const repos = await readRepos();
+    const idx = repos.findIndex(r => r.full_name === fullName);
+    if (idx < 0) throw new Error(`Repo not found: ${fullName}`);
+    // Deep-merge ownership if provided
+    if (patch.ownership) {
+      patch.ownership = { ...repos[idx].ownership, ...patch.ownership };
+    }
+    repos[idx] = { ...repos[idx], ...patch, updatedAt: new Date().toISOString() };
+    await writeRepos(repos);
+    return repos[idx];
   }
 
   async listRepos() {
