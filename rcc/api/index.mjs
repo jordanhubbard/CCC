@@ -13,6 +13,7 @@ import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { Brain, createRequest } from '../brain/index.mjs';
 import { Pump } from '../scout/pump.mjs';
+import { learnLesson, queryLessons, formatLessonsForContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT         = parseInt(process.env.RCC_PORT || '8789', 10);
@@ -421,6 +422,24 @@ async function handleRequest(req, res) {
       return json(res, 200, b.getStatus());
     }
 
+    // ── POST /api/lessons — record a lesson ──────────────────────────────
+    if (method === 'POST' && path === '/api/lessons') {
+      const body = await readBody(req);
+      if (!body.domain || !body.symptom || !body.fix) return json(res, 400, { error: 'domain, symptom, fix required' });
+      const lesson = await learnLesson({ ...body, agent: body.agent || 'api' });
+      return json(res, 201, { ok: true, lesson });
+    }
+
+    // ── GET /api/lessons?domain=X&q=keyword+keyword ───────────────────────
+    if (method === 'GET' && path.startsWith('/api/lessons')) {
+      const domain = url.searchParams.get('domain') || 'general';
+      const q = (url.searchParams.get('q') || '').split(/\s+/).filter(Boolean);
+      const limit = parseInt(url.searchParams.get('limit') || '5', 10);
+      const lessons = await queryLessons({ domain, keywords: q, limit });
+      const context = url.searchParams.get('format') === 'context' ? formatLessonsForContext(lessons) : null;
+      return json(res, 200, { lessons, context, count: lessons.length });
+    }
+
     // ── GET /api/repos ────────────────────────────────────────────────────
     if (method === 'GET' && path === '/api/repos') {
       const repos = await getPump().listRepos();
@@ -433,6 +452,16 @@ async function handleRequest(req, res) {
       if (!body.full_name) return json(res, 400, { error: 'full_name required (e.g. owner/repo)' });
       const repo = await getPump().registerRepo(body);
       return json(res, 201, { ok: true, repo });
+    }
+
+    // ── POST /api/bus/receive — handle incoming SquirrelBus messages ──────
+    if (method === 'POST' && path === '/api/bus/receive') {
+      const body = await readBody(req);
+      if (body.type === 'lesson') {
+        await receiveLessonFromBus(body);
+        return json(res, 200, { ok: true });
+      }
+      return json(res, 200, { ok: true, ignored: true });
     }
 
     // ── POST /api/repos/scan — trigger immediate scan ─────────────────────
