@@ -113,9 +113,9 @@ async function runScan() {
   const repoMap = Object.fromEntries(enabledRepos.map(r => [r.full_name, r]));
   console.log(`[pump] Scanning ${repoNames.length} repos: ${repoNames.join(', ')}`);
 
-  // Get current queue for dedup
-  const { items = [] } = await rccGet('/api/queue');
-  const allItems = [...items];
+  // Get current queue for dedup — include completed[] so scout doesn't re-create finished work
+  const { items = [], completed = [] } = await rccGet('/api/queue');
+  const allItems = [...items, ...completed];
 
   // Run scouts
   const newItems = await scout(repoNames, allItems);
