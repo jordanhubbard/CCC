@@ -16,10 +16,12 @@ import { Pump } from '../scout/pump.mjs';
 import { learnLesson, queryLessons, formatLessonsForContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const PORT         = parseInt(process.env.RCC_PORT || '8789', 10);
-const QUEUE_PATH   = process.env.QUEUE_PATH || '../../workqueue/queue.json';
-const AGENTS_PATH  = process.env.AGENTS_PATH || './agents.json';
-const REPOS_PATH   = process.env.REPOS_PATH  || './repos.json';
+const PORT            = parseInt(process.env.RCC_PORT || '8789', 10);
+const QUEUE_PATH      = process.env.QUEUE_PATH    || '../../workqueue/queue.json';
+const AGENTS_PATH     = process.env.AGENTS_PATH   || './agents.json';
+const REPOS_PATH      = process.env.REPOS_PATH    || './repos.json';
+const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
+const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://YOUR_PUBLIC_IP:8789';
 const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
 const START_TIME   = Date.now();
 
@@ -36,6 +38,43 @@ const STALE_THRESHOLDS = {
 
 // ── In-memory heartbeats ───────────────────────────────────────────────────
 const heartbeats = {};
+
+// ── Projects I/O ─────────────────────────────────────────────────────────
+async function readProjects() {
+  const p = new URL(PROJECTS_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return [];
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeProjects(data) {
+  const p = new URL(PROJECTS_PATH, import.meta.url).pathname;
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
+function projectUrl(fullName) {
+  return `${RCC_PUBLIC_URL}/projects/${encodeURIComponent(fullName)}`;
+}
+
+function buildProjectFromRepo(repo) {
+  return {
+    id:            repo.full_name,
+    display_name:  repo.display_name || repo.full_name.split('/')[1],
+    description:   repo.description || '',
+    github_url:    `https://github.com/${repo.full_name}`,
+    rcc_url:       projectUrl(repo.full_name),
+    issue_tracker: repo.issue_tracker_url ? `https://${repo.issue_tracker_url}` : `https://github.com/${repo.full_name}/issues`,
+    slack_channels: repo.ownership?.slack_channel
+      ? [{ workspace: repo.ownership.slack_workspace || 'omgjkh', channel_id: repo.ownership.slack_channel }]
+      : [],
+    triaging_agent: repo.ownership?.triaging_agent || 'rocky',
+    enabled:        repo.enabled !== false,
+    kind:           repo.kind || 'personal',
+    scouts:         repo.scouts || [],
+    notes:          repo.notes || '',
+    registeredAt:   repo.registeredAt || new Date().toISOString(),
+    updatedAt:      repo.updatedAt || new Date().toISOString(),
+  };
+}
 
 // ── Repo helpers ───────────────────────────────────────────────────────────
 function repoOwnershipSummary(repo) {
@@ -558,6 +597,111 @@ async function handleRequest(req, res) {
       if (!body.full_name) return json(res, 400, { error: 'full_name required (e.g. owner/repo)' });
       const repo = await getPump().registerRepo(body);
       return json(res, 201, { ok: true, repo });
+    }
+
+    // ── GET /api/projects — list all projects (derived from repos + projects.json) ──
+    if (method === 'GET' && path === '/api/projects') {
+      const repos    = await getPump().listRepos();
+      const projects = await readProjects();
+      // Merge: repos.json is source of truth; projects.json holds Slack channel overrides
+      const projectMap = new Map(projects.map(p => [p.id, p]));
+      const result = repos
+        .filter(r => r.enabled !== false)
+        .map(r => {
+          const base    = buildProjectFromRepo(r);
+          const overlay = projectMap.get(r.full_name) || {};
+          return { ...base, ...overlay };
+        });
+      return json(res, 200, result);
+    }
+
+    // ── GET /api/projects/:owner/:repo — single project ───────────────────
+    const projectDetailMatch = path.match(/^\/api\/projects\/([^/]+\/[^/]+)$/);
+    if (method === 'GET' && projectDetailMatch) {
+      const fullName = decodeURIComponent(projectDetailMatch[1]);
+      const repos    = await getPump().listRepos();
+      const repo     = repos.find(r => r.full_name === fullName);
+      if (!repo) return json(res, 404, { error: 'Project not found' });
+      const projects = await readProjects();
+      const overlay  = projects.find(p => p.id === fullName) || {};
+      const base     = buildProjectFromRepo(repo);
+      return json(res, 200, { ...base, ...overlay });
+    }
+
+    // ── POST /api/projects/:owner/:repo/channel — register a Slack channel ─
+    const projectChannelMatch = path.match(/^\/api\/projects\/([^/]+\/[^/]+)\/channel$/);
+    if (method === 'POST' && projectChannelMatch) {
+      const fullName = decodeURIComponent(projectChannelMatch[1]);
+      const body     = await readBody(req);
+      if (!body.channel_id || !body.workspace) return json(res, 400, { error: 'channel_id and workspace required' });
+      const projects = await readProjects();
+      let project    = projects.find(p => p.id === fullName);
+      if (!project) {
+        const repos = await getPump().listRepos();
+        const repo  = repos.find(r => r.full_name === fullName);
+        if (!repo) return json(res, 404, { error: 'Project not found' });
+        project = buildProjectFromRepo(repo);
+        projects.push(project);
+      }
+      if (!project.slack_channels) project.slack_channels = [];
+      // Upsert by workspace
+      const existing = project.slack_channels.find(c => c.workspace === body.workspace);
+      if (existing) {
+        existing.channel_id = body.channel_id;
+        existing.channel_name = body.channel_name || existing.channel_name;
+        existing.updatedAt  = new Date().toISOString();
+      } else {
+        project.slack_channels.push({
+          workspace:    body.workspace,
+          channel_id:   body.channel_id,
+          channel_name: body.channel_name || null,
+          addedAt:      new Date().toISOString(),
+        });
+      }
+      project.updatedAt = new Date().toISOString();
+      await writeProjects(projects);
+      // Also update repos.json for the primary workspace
+      const pump = getPump();
+      const repos = await pump.listRepos();
+      const repo  = repos.find(r => r.full_name === fullName);
+      if (repo) {
+        if (!repo.ownership) repo.ownership = {};
+        if (!repo.ownership.slack_channel || body.workspace === 'omgjkh') {
+          repo.ownership.slack_channel   = body.channel_id;
+          repo.ownership.slack_workspace = body.workspace;
+          await pump.patchRepo(fullName, { ownership: repo.ownership });
+        }
+      }
+      return json(res, 200, { ok: true, project });
+    }
+
+    // ── GET /api/context?channel=CXXXX — get project context for a Slack channel ──
+    if (method === 'GET' && path === '/api/context') {
+      const channelId = url.searchParams.get('channel');
+      if (!channelId) return json(res, 400, { error: 'channel query param required' });
+      const repos    = await getPump().listRepos();
+      const projects = await readProjects();
+      // Search repos.json first
+      let repo = repos.find(r =>
+        r.ownership?.slack_channel === channelId
+      );
+      // Then projects.json (may have multiple workspaces)
+      if (!repo) {
+        const projectEntry = projects.find(p =>
+          (p.slack_channels || []).some(c => c.channel_id === channelId)
+        );
+        if (projectEntry) repo = repos.find(r => r.full_name === projectEntry.id);
+      }
+      if (!repo) return json(res, 404, { error: 'No project associated with this channel' });
+      const overlay  = projects.find(p => p.id === repo.full_name) || {};
+      const project  = { ...buildProjectFromRepo(repo), ...overlay };
+      // Include recent queue items for this project
+      const q        = await readQueue();
+      const repoItems = (q.items || []).filter(i =>
+        i.tags?.includes(repo.full_name) ||
+        i.title?.toLowerCase().includes(repo.full_name.split('/')[1].toLowerCase())
+      ).slice(-10);
+      return json(res, 200, { project, recentItems: repoItems });
     }
 
     // ── POST /api/bus/receive — handle incoming SquirrelBus messages ──────
