@@ -45,7 +45,7 @@ node --test dashboard/test/api.test.mjs
 
 ## Work Queue
 
-Three-agent distributed work queue. Items are JSON in `workqueue/queue.json`, synced via Mattermost DMs and SquirrelBus. Agents claim, process, and complete items on staggered hourly crons.
+Four-agent distributed work queue (Rocky, Bullwinkle, Natasha, Boris). Items are JSON in `workqueue/queue.json`, synced via Mattermost DMs and SquirrelBus. Agents claim, process, and complete items on staggered hourly crons.
 
 See `workqueue/README.md` for the full spec.
 
