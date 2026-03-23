@@ -68,7 +68,7 @@ function buildProjectFromRepo(repo) {
     slack_channels: repo.ownership?.slack_channel
       ? [{ workspace: repo.ownership.slack_workspace || 'omgjkh', channel_id: repo.ownership.slack_channel }]
       : [],
-    triaging_agent: repo.ownership?.triaging_agent || 'rocky',
+    triaging_agent: repo.ownership?.triaging_agent || process.env.DEFAULT_TRIAGING_AGENT || '',
     enabled:        repo.enabled !== false,
     kind:           repo.kind || 'personal',
     scouts:         repo.scouts || [],

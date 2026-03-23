@@ -6,13 +6,28 @@
 
 import express from 'express';
 import { readFile, writeFile, appendFile } from 'fs/promises';
-import { existsSync, createReadStream } from 'fs';
+import { existsSync, createReadStream, readdirSync, readFileSync } from 'fs';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { createInterface } from 'readline';
 import { createReadStream as createRS } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { initCrashReporter } from '../lib/crash-reporter.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Load agent names from rcc/agents/*.capabilities.json (config-driven, no hardcoded list)
+function loadCapabilityNames() {
+  try {
+    const capDir = join(__dirname, '..', 'rcc', 'agents');
+    return readdirSync(capDir)
+      .filter(f => f.endsWith('.capabilities.json'))
+      .map(f => { try { return JSON.parse(readFileSync(join(capDir, f), 'utf8')).name; } catch { return null; } })
+      .filter(Boolean);
+  } catch { return []; }
+}
 
 // Initialize crash reporter early — before anything else can throw
 initCrashReporter({
@@ -40,8 +55,8 @@ const BUS_PEERS = {
 
 // Known /bus/receive URLs for delivery confirmation + retry
 const BUS_RECEIVE_URLS = {
-  bullwinkle: process.env.BULLWINKLE_URL || 'http://100.87.68.11:18789/bus/receive',
-  natasha:    process.env.NATASHA_URL    || 'http://100.87.229.125:18789/bus/receive',
+  bullwinkle: process.env.BULLWINKLE_URL || '',
+  natasha:    process.env.NATASHA_URL    || '',
 };
 
 const RETRY_DELAY_MS = parseInt(process.env.BUS_RETRY_DELAY_MS || '') || 5 * 60 * 1000;
@@ -131,7 +146,7 @@ async function getHeartbeats() {
   // Start with in-memory heartbeats (includes any agent that has posted)
   const result = { ...heartbeats };
   // Also check MinIO for known persistent agents (fills gaps on cold start)
-  const knownAgents = ['rocky', 'bullwinkle', 'natasha', 'boris'];
+  const knownAgents = loadCapabilityNames();
   for (const agent of knownAgents) {
     if (!result[agent]) {
       const minio = await fetchMinIOHeartbeat(agent);
@@ -724,7 +739,7 @@ function renderUnifiedPage() {
       try {
         const hbs = await fetch('/api/heartbeats').then(r => r.json());
         const el = document.getElementById('agent-cards');
-        const agentNames = Object.keys(hbs).length > 0 ? Object.keys(hbs) : ['rocky', 'bullwinkle', 'natasha'];
+        const agentNames = Object.keys(hbs);
         el.innerHTML = agentNames.map(name => {
           const hb = hbs[name] || {};
           const emoji = EMOJIS[name] || '📨';
@@ -1924,12 +1939,11 @@ app.get('/bus/delivery-status', (req, res) => {
 
 // ── Agent Status Digest ────────────────────────────────────────────────────────
 
-const DIGEST_AGENTS = [
-  { name: 'rocky',      emoji: '🐿️',  healthFile: 'agent-health-rocky.json' },
-  { name: 'bullwinkle', emoji: '🫎',   healthFile: 'agent-health-bullwinkle.json' },
-  { name: 'natasha',    emoji: '🕵️‍♀️', healthFile: 'agent-health-natasha.json' },
-  { name: 'boris',      emoji: '🕵️‍♂️', healthFile: 'agent-heartbeat-boris.json' },
-];
+const DIGEST_AGENTS = loadCapabilityNames().map(name => ({
+  name,
+  emoji: '📨',
+  healthFile: `agent-health-${name}.json`,
+}));
 
 async function fetchMinIOJson(path) {
   try {
