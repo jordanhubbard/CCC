@@ -52,7 +52,7 @@ async function writeProjects(data) {
 }
 
 function projectUrl(fullName) {
-  return `${RCC_PUBLIC_URL}/projects/${encodeURIComponent(fullName)}`;
+  return `${RCC_PUBLIC_URL}/api/projects/${encodeURIComponent(fullName)}`;
 }
 
 function buildProjectFromRepo(repo) {
@@ -224,6 +224,47 @@ async function handleRequest(req, res) {
       const item = [...(q.items||[]), ...(q.completed||[])].find(i => i.id === id);
       if (!item) return json(res, 404, { error: 'Item not found' });
       return json(res, 200, item);
+    }
+
+    // ── Public: GET /api/projects list + detail ──────────────────────────
+    if (method === 'GET' && path === '/api/projects') {
+      const repos    = await getPump().listRepos();
+      const projects = await readProjects();
+      const projectMap = new Map(projects.map(p => [p.id, p]));
+      const result = repos
+        .filter(r => r.enabled !== false)
+        .map(r => {
+          const base    = buildProjectFromRepo(r);
+          const overlay = projectMap.get(r.full_name) || {};
+          return { ...base, ...overlay };
+        });
+      return json(res, 200, result);
+    }
+    const projectPublicDetailMatch = path.match(/^\/api\/projects\/([^/]+(?:\/[^/]+|%2F[^/]+))$/i);
+    if (method === 'GET' && projectPublicDetailMatch) {
+      const fullName = decodeURIComponent(projectPublicDetailMatch[1]);
+      const repos    = await getPump().listRepos();
+      const repo     = repos.find(r => r.full_name === fullName);
+      if (!repo) return json(res, 404, { error: 'Project not found' });
+      const projects = await readProjects();
+      const overlay  = projects.find(p => p.id === fullName) || {};
+      const base     = buildProjectFromRepo(repo);
+      return json(res, 200, { ...base, ...overlay });
+    }
+
+    // ── Friendly redirects: /projects → /api/projects ────────────────────
+    if (method === 'GET' && path.startsWith('/projects')) {
+      const apiPath = '/api' + path + (url.search || '');
+      res.writeHead(302, { Location: apiPath, 'Access-Control-Allow-Origin': '*' });
+      res.end();
+      return;
+    }
+    // ── Friendly redirects: /repos → /api/repos ──────────────────────────
+    if (method === 'GET' && path.startsWith('/repos')) {
+      const apiPath = '/api' + path + (url.search || '');
+      res.writeHead(302, { Location: apiPath, 'Access-Control-Allow-Origin': '*' });
+      res.end();
+      return;
     }
 
     // ── Auth-required endpoints ───────────────────────────────────────────
@@ -625,7 +666,8 @@ async function handleRequest(req, res) {
     }
 
     // ── GET /api/projects/:owner/:repo — single project ───────────────────
-    const projectDetailMatch = path.match(/^\/api\/projects\/([^/]+\/[^/]+)$/);
+    // Handles both /api/projects/owner/repo and /api/projects/owner%2Frepo
+    const projectDetailMatch = path.match(/^\/api\/projects\/([^/]+(?:\/[^/]+|%2F[^/]+))$/i);
     if (method === 'GET' && projectDetailMatch) {
       const fullName = decodeURIComponent(projectDetailMatch[1]);
       const repos    = await getPump().listRepos();
@@ -638,7 +680,7 @@ async function handleRequest(req, res) {
     }
 
     // ── POST /api/projects/:owner/:repo/channel — register a Slack channel ─
-    const projectChannelMatch = path.match(/^\/api\/projects\/([^/]+\/[^/]+)\/channel$/);
+    const projectChannelMatch = path.match(/^\/api\/projects\/([^/]+(?:\/[^/]+|%2F[^/]+))\/channel$/i);
     if (method === 'POST' && projectChannelMatch) {
       const fullName = decodeURIComponent(projectChannelMatch[1]);
       const body     = await readBody(req);
