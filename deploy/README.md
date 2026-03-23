@@ -6,9 +6,9 @@ This directory contains everything needed to bootstrap a new agent node and keep
 
 ```bash
 # 1. Clone the repo (or use the bootstrap script)
-git clone git@github.com:jordanhubbard/rocky.git ~/.rcc/workspace
+git clone git@github.com:jordanhubbard/rocky-and-friends.git ~/.rcc/workspace
 
-# 2. Run setup
+# 2. Run setup (also installs tmux, checks for coding CLI, installs coding-agent skill)
 bash ~/.rcc/workspace/deploy/setup-node.sh
 
 # 3. Fill in your credentials
@@ -19,7 +19,38 @@ bash ~/.rcc/workspace/deploy/register-agent.sh
 
 # 5. Test the pull
 bash ~/.rcc/workspace/deploy/agent-pull.sh
+
+# 6. Start your coding CLI turbocharger (do this once per machine)
+tmux new-session -d -s claude-main
+tmux send-keys -t claude-main 'claude --dangerously-skip-permissions' Enter
 ```
+
+## The Coding CLI Turbocharger
+
+OpenClaw coordinates. It doesn't do heavy coding in-process — that burns tokens and blocks everything else.
+
+The turbocharger pattern: a coding CLI (Claude Code, Codex, OpenCode, Cursor, Pi) runs persistently in a tmux session. When a work item arrives with `preferred_executor: claude_cli`, the brain calls `workqueue/scripts/claude-worker.mjs`, which:
+1. Finds the active coding CLI tmux session
+2. Injects the task
+3. Waits for completion
+4. Returns output
+
+Cost model: coding CLI = fixed monthly subscription, not per-token. OpenClaw's inference key stays for coordination only.
+
+**Required: install a coding CLI on every agent.**
+
+| CLI | Install | Notes |
+|-----|---------|-------|
+| Claude Code | `npm install -g @anthropic-ai/claude-code` | Primary — what we use |
+| Codex | `npm install -g @openai/codex` | Good alternative |
+| OpenCode | https://opencode.ai | Open source |
+
+Also install the [coding-agent skill](https://github.com/openclaw/skills/blob/main/skills/steipete/coding-agent/SKILL.md) in OpenClaw:
+```bash
+clawhub install coding-agent
+```
+
+Without the coding CLI turbocharger, `claude_cli` work items stay pending forever.
 
 ## How It Works
 

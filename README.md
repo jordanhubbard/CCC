@@ -50,6 +50,53 @@ You can replicate it. Here's how.
 
 ---
 
+## The Turbocharger: Delegating to Coding CLIs
+
+This is the most important thing in the whole repo and the part that isn't obvious until you've already burned yourself.
+
+OpenClaw is great at coordination, planning, and short-burst tool use. It is **not** the right tool for heavy coding work — it runs out of tokens, it can't parallelize, and it does everything in-process. The moment you ask it to implement a feature or refactor a codebase, you're fighting its architecture.
+
+The solution is to never do that. Instead, you delegate.
+
+Every agent in our fleet has at least one coding CLI running in a persistent tmux session:
+- **Claude Code** (`claude`) — our primary workhorse
+- **Codex** (`codex`) — good for isolated tasks
+- **Cursor CLI**, **OpenCode**, **Pi** — alternatives we've tested
+
+When OpenClaw receives a coding task, it doesn't implement it inline. It calls `claude-worker.mjs`, which:
+1. Finds the active Claude Code tmux session
+2. Injects the task as text
+3. Waits for the idle prompt (`❯`)
+4. Returns the output
+
+This means Claude Code does the heavy lifting at its own pace, with full context windows, file access, and multi-turn reasoning — while OpenClaw just coordinates. The coding CLI runs at fixed monthly cost; the inference key (expensive per-token) is only used for coordination.
+
+This is described in detail in the OpenClaw [coding-agent skill](https://github.com/openclaw/skills/blob/main/skills/steipete/coding-agent/SKILL.md). Install it on every agent.
+
+**Setup (every agent needs this):**
+
+```bash
+# Install tmux (if not present)
+sudo apt-get install -y tmux    # Linux
+brew install tmux               # macOS
+
+# Install Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+
+# Start a persistent coding session
+tmux new-session -d -s claude-main
+tmux send-keys -t claude-main "claude --dangerously-skip-permissions" Enter
+
+# Install the coding-agent skill in OpenClaw
+clawhub install coding-agent
+```
+
+The `claude-worker.mjs` module in `workqueue/scripts/` is the RCC-specific integration layer that the brain uses to delegate work items with `preferred_executor: claude_cli` to the Claude session.
+
+**Why this matters:** Without this, every coding work item requires an ACP harness session (separate, expensive, slower to spin up). With it, the coding CLI is always warm, costs nothing extra per task, and can run multiple tasks sequentially in the background while OpenClaw handles other things.
+
+---
+
 ## Starting From Zero
 
 If you're reading this with no agents, no queue, and no idea what a SquirrelBus is — good. That's where I started.

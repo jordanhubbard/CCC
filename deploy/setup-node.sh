@@ -8,7 +8,7 @@
 
 set -e
 
-REPO_URL="git@github.com:jordanhubbard/rocky.git"
+REPO_URL="${REPO_URL:-git@github.com:jordanhubbard/rocky-and-friends.git}"
 RCC_DIR="$HOME/.rcc"
 WORKSPACE="$RCC_DIR/workspace"
 ENV_FILE="$RCC_DIR/.env"
@@ -122,6 +122,61 @@ info "Installing dashboard dependencies..."
 cd "$WORKSPACE/dashboard" && npm install --silent
 success "Dependencies installed"
 
+# ── Install coding CLI turbocharger ───────────────────────────────────────
+echo ""
+info "Checking coding CLI turbocharger..."
+
+# tmux (required for claude-worker.mjs delegation)
+if ! command -v tmux &>/dev/null; then
+  info "Installing tmux..."
+  if [[ "$PLATFORM" == "linux" ]]; then
+    sudo apt-get install -y tmux 2>/dev/null || \
+    sudo yum install -y tmux 2>/dev/null || \
+    warn "Could not auto-install tmux. Please run: sudo apt-get install -y tmux"
+  elif [[ "$PLATFORM" == "macos" ]]; then
+    brew install tmux 2>/dev/null || \
+    warn "Could not auto-install tmux. Please run: brew install tmux"
+  fi
+else
+  success "tmux present ($(tmux -V))"
+fi
+
+# Claude Code CLI (primary coding executor)
+if command -v claude &>/dev/null; then
+  success "Claude Code CLI present ($(claude --version 2>/dev/null | head -1))"
+else
+  warn "Claude Code CLI not found."
+  echo ""
+  echo "  ┌─────────────────────────────────────────────────────────────┐"
+  echo "  │  RECOMMENDED: Install a coding CLI for the turbocharger     │"
+  echo "  │                                                              │"
+  echo "  │  Claude Code:  npm install -g @anthropic-ai/claude-code     │"
+  echo "  │  Codex:        npm install -g @openai/codex                 │"
+  echo "  │  OpenCode:     https://opencode.ai                          │"
+  echo "  │                                                              │"
+  echo "  │  After install, start a persistent session:                 │"
+  echo "  │    tmux new-session -d -s claude-main                       │"
+  echo "  │    tmux send-keys -t claude-main \"claude\" Enter             │"
+  echo "  │                                                              │"
+  echo "  │  Without this, claude_cli work items won't execute locally. │"
+  echo "  └─────────────────────────────────────────────────────────────┘"
+  echo ""
+fi
+
+# Install coding-agent skill via clawhub (if openclaw + clawhub present)
+if command -v openclaw &>/dev/null && command -v clawhub &>/dev/null; then
+  if ! openclaw skills list 2>/dev/null | grep -q "coding-agent"; then
+    info "Installing coding-agent skill..."
+    clawhub install coding-agent 2>/dev/null && \
+    success "coding-agent skill installed" || \
+    warn "Could not install coding-agent skill. Run: clawhub install coding-agent"
+  else
+    success "coding-agent skill already installed"
+  fi
+elif command -v openclaw &>/dev/null; then
+  warn "clawhub not found. Install it to get the coding-agent skill: npm install -g clawhub"
+fi
+
 # ── Set up systemd service (Linux only) ───────────────────────────────────
 if [[ "$PLATFORM" == "linux" ]] && command -v systemctl &>/dev/null; then
   SERVICE_SRC="$WORKSPACE/deploy/systemd/rcc-agent.service"
@@ -158,4 +213,10 @@ echo "  3. Check logs: tail -f $LOG_DIR/pull.log"
 echo ""
 echo "  To register this agent with RCC:"
 echo "  bash $WORKSPACE/deploy/register-agent.sh"
+echo ""
+echo "  Coding CLI turbocharger (if not already running):"
+echo "  tmux new-session -d -s claude-main"
+echo "  tmux send-keys -t claude-main 'claude --dangerously-skip-permissions' Enter"
+echo ""
+echo "  See README.md § The Turbocharger for full details."
 echo ""
