@@ -116,16 +116,18 @@ export function detectSession() {
   try {
     paneList = execFileSync(
       'tmux',
-      ['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_command}\t#{pane_id}'],
+      ['list-panes', '-a', '-F', '#{session_name}|||#{pane_current_command}|||#{pane_id}'],
       { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
   } catch {
     return null;
   }
 
+  // Note: we use ||| as separator instead of \t because tmux 3.6a on macOS
+  // does not reliably pass \t through execFileSync format strings.
   for (const line of paneList.trim().split('\n')) {
     if (!line.trim()) continue;
-    const [session, cmd] = line.split('\t');
+    const [session, cmd] = line.split('|||');
     if (!session) continue;
 
     // Fast path: current command is literally "claude"
