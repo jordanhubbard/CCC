@@ -3,8 +3,10 @@
 # Run once on a new machine. Safe to re-run (idempotent).
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/jordanhubbard/rocky/master/deploy/setup-node.sh | bash
-#   OR: bash deploy/setup-node.sh
+#   REPO_URL=git@github.com:yourorg/your-rcc-repo.git bash deploy/setup-node.sh
+#   OR (from inside an existing clone): bash deploy/setup-node.sh
+#
+# Tip: run deploy/rcc-init.sh after this to configure your .env interactively.
 
 set -e
 
