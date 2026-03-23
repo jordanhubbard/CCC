@@ -33,10 +33,10 @@ const BUS_LOG_PATH = '/home/jkh/.openclaw/workspace/squirrelbus/bus.jsonl';
 // ── SquirrelBus peer fan-out registry ─────────────────────────────────────────
 const BUS_PEERS = {
   bullwinkle: 'http://BULLWINKLE_TAILSCALE_IP:18789/squirrelbus/receive',
-  natasha:    'http://NATASHA_TAILSCALE_IP:18789/squirrelbus/receive',
+  natasha:    'https://sparky.tail407856.ts.net/bus/receive',
 };
 const BULLWINKLE_TOKEN = process.env.BULLWINKLE_TOKEN || 'SQUIRRELBUS_TOKEN_REMOVED';
-const NATASHA_TOKEN    = process.env.NATASHA_TOKEN    || 'SQUIRRELBUS_TOKEN_REMOVED';
+const NATASHA_TOKEN    = process.env.NATASHA_TOKEN    || 'RCC_AUTH_TOKEN_REMOVED';
 const PEER_TOKENS = { bullwinkle: BULLWINKLE_TOKEN, natasha: NATASHA_TOKEN };
 
 async function fanOutBusMessage(msg) {
@@ -50,7 +50,7 @@ async function fanOutBusMessage(msg) {
     (async () => {
       try {
         const ctrl = new AbortController();
-        const timeout = setTimeout(() => ctrl.abort(), 5000);
+        const timeout = setTimeout(() => ctrl.abort(), 35000);
         const resp = await fetch(url, {
           method: 'POST',
           headers: {
@@ -529,6 +529,7 @@ function renderUnifiedPage() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h1 style="font-size:24px;margin:0;color:#f0f6fc">🐿️ Rocky Command Center</h1>
       <div style="display:flex;gap:8px;align-items:center">
+        <a href="/activity" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;text-decoration:none;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🗺️ Activity Map</a>
         <button onclick="openDigestModal()" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">📊 Status</button>
         <button onclick="authFlow()" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🔑 Auth</button>
       </div>
@@ -1440,6 +1441,174 @@ app.get('/', (req, res) => {
 });
 
 // Redirect /bus to /
+app.get('/activity', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activity Map — RCC</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; overflow: hidden; }
+  #header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
+  #header h1 { font-size: 16px; font-weight: 600; color: #f0f6fc; }
+  #header .subtitle { font-size: 12px; color: #8b949e; }
+  #legend { display: flex; gap: 20px; margin-left: auto; font-size: 11px; }
+  #legend span { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #canvas-wrap { width: 100%; height: calc(100vh - 53px); position: relative; }
+  svg { width: 100%; height: 100%; }
+  .node circle { stroke-width: 2; cursor: pointer; transition: opacity 0.2s; }
+  .node:hover circle { opacity: 0.85; }
+  .node text { font-size: 11px; fill: #c9d1d9; text-anchor: middle; pointer-events: none; user-select: none; }
+  .node .emoji { font-size: 16px; }
+  .link { stroke: #30363d; stroke-opacity: 0.4; }
+  .link.worked-on { stroke: #58a6ff; stroke-opacity: 0.3; }
+  .link.contributor { stroke: #3fb950; stroke-opacity: 0.3; }
+  .link.directs { stroke: #f85149; stroke-opacity: 0.2; }
+  #tooltip { position: fixed; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; font-size: 12px; line-height: 1.6; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 100; max-width: 260px; }
+  #tooltip .tt-title { font-weight: 600; color: #f0f6fc; font-size: 13px; margin-bottom: 4px; }
+  #back { color: #58a6ff; text-decoration: none; font-size: 13px; }
+  #back:hover { text-decoration: underline; }
+  .kind-badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: #21262d; color: #8b949e; margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="header">
+  <a href="/" id="back">← Dashboard</a>
+  <h1>🗺️ Activity Map</h1>
+  <div class="subtitle">People · Agents · Projects — bubble size = activity, color = recency</div>
+  <div id="legend">
+    <span><span class="dot" style="background:#f85149"></span>Hot (&lt;1h)</span>
+    <span><span class="dot" style="background:#e3b341"></span>Warm (&lt;3d)</span>
+    <span><span class="dot" style="background:#58a6ff"></span>Cool (&lt;7d)</span>
+    <span><span class="dot" style="background:#30363d"></span>Cold</span>
+  </div>
+</div>
+<div id="canvas-wrap">
+  <svg id="viz"></svg>
+</div>
+<div id="tooltip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" crossorigin="anonymous"></script>
+<script>
+const TOKEN = localStorage.getItem('wq_auth_token') || '';
+
+async function load() {
+  const r = await fetch('/api/activity', { headers: { Authorization: 'Bearer ' + TOKEN } });
+  if (!r.ok) { document.body.innerHTML += '<p style="padding:20px;color:#f85149">Error loading data: ' + r.status + '</p>'; return; }
+  const data = await r.json();
+  render(data);
+}
+
+function render({ nodes, edges }) {
+  const svg = d3.select('#viz');
+  const wrap = document.getElementById('canvas-wrap');
+  let W = wrap.clientWidth, H = wrap.clientHeight;
+  svg.attr('viewBox', \`0 0 \${W} \${H}\`);
+
+  const kindForce = { agent: { cx: W * 0.5, cy: H * 0.4 }, project: { cx: W * 0.5, cy: H * 0.7 }, person: { cx: W * 0.5, cy: H * 0.15 } };
+
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(d => 80 + d.weight * 8).strength(0.15))
+    .force('charge', d3.forceManyBody().strength(d => -d.size * 6))
+    .force('collision', d3.forceCollide(d => d.size + 8))
+    .force('x', d3.forceX(d => kindForce[d.kind]?.cx ?? W/2).strength(0.06))
+    .force('y', d3.forceY(d => kindForce[d.kind]?.cy ?? H/2).strength(0.1))
+    .force('center', d3.forceCenter(W/2, H/2).strength(0.01));
+
+  // Kind zone labels
+  const zones = [
+    { label: '👤 People', x: W * 0.12, y: H * 0.08 },
+    { label: '🤖 Agents', x: W * 0.12, y: H * 0.38 },
+    { label: '📁 Projects', x: W * 0.12, y: H * 0.68 },
+  ];
+  zones.forEach(z => {
+    svg.append('text').attr('x', z.x).attr('y', z.y)
+      .attr('fill', '#21262d').attr('font-size', '13px').attr('font-weight', '600')
+      .text(z.label);
+  });
+
+  // Divider lines
+  [H * 0.27, H * 0.56].forEach(y => {
+    svg.append('line').attr('x1', 0).attr('y1', y).attr('x2', W).attr('y2', y)
+      .attr('stroke', '#21262d').attr('stroke-dasharray', '4,6');
+  });
+
+  // Links
+  const link = svg.append('g').selectAll('line')
+    .data(edges).enter().append('line')
+    .attr('class', d => 'link ' + d.kind)
+    .attr('stroke-width', d => Math.sqrt(d.weight));
+
+  // Nodes
+  const node = svg.append('g').selectAll('g')
+    .data(nodes).enter().append('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+  node.append('circle')
+    .attr('r', d => d.size)
+    .attr('fill', d => d.color + '22')
+    .attr('stroke', d => d.color);
+
+  // Emoji label
+  node.append('text').attr('class', 'emoji').attr('dy', '0.35em').text(d => d.emoji);
+  // Name label below
+  node.append('text').attr('dy', d => d.size + 14).attr('font-size', '10px')
+    .attr('fill', '#8b949e').text(d => d.label);
+
+  // Tooltip
+  const tip = document.getElementById('tooltip');
+  node.on('mouseover', (e, d) => {
+    const m = d.meta || {};
+    let rows = '';
+    if (d.kind === 'agent') rows = \`
+      <div>✅ Completed: \${m.completedItems || 0}</div>
+      <div>⚡ In progress: \${m.activeItems || 0}</div>
+      <div>💓 Last heartbeat: \${m.lastHeartbeat ? new Date(m.lastHeartbeat).toLocaleTimeString() : 'unknown'}</div>
+      <div>🖥️ Host: \${m.host || '?'}</div>\`;
+    else if (d.kind === 'project') rows = \`
+      <div>\${m.kind === 'team' ? '👥 Team' : '👤 Personal'} · \${m.issueTracker || 'github'}</div>
+      <div>✅ Items completed: \${m.completedItems || 0}</div>
+      <div>📅 Items last 7d: \${m.recentItems || 0}</div>
+      <div>👥 Contributors: \${m.contributors || 0}</div>
+      <div>🕐 Last activity: \${m.lastActivity ? new Date(m.lastActivity).toLocaleDateString() : 'unknown'}</div>\`;
+    else rows = \`
+      <div>Role: \${m.role || 'contributor'}</div>
+      \${m.commits ? '<div>📝 Commits: ' + m.commits + '</div>' : ''}
+      \${m.itemsAssigned ? '<div>📋 Items assigned: ' + m.itemsAssigned + '</div>' : ''}
+      \${m.repos ? '<div>Repos: ' + (m.repos||[]).join(', ') + '</div>' : ''}\`;
+    tip.innerHTML = \`<div class="tt-title">\${d.emoji} \${d.label}<span class="kind-badge">\${d.kind}</span></div>\${rows}\`;
+    tip.style.opacity = '1';
+    tip.style.left = (e.pageX + 14) + 'px';
+    tip.style.top  = (e.pageY - 10) + 'px';
+  }).on('mousemove', e => {
+    tip.style.left = (e.pageX + 14) + 'px';
+    tip.style.top  = (e.pageY - 10) + 'px';
+  }).on('mouseout', () => { tip.style.opacity = '0'; });
+
+  sim.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => \`translate(\${d.x},\${d.y})\`);
+  });
+
+  // Auto-refresh every 60s
+  setTimeout(() => { svg.selectAll('*').remove(); load(); }, 60000);
+}
+
+load();
+</script>
+</body>
+</html>`);
+});
+
 app.get('/bus', (req, res) => {
   // Check if this is an API-like request or browser request
   if (req.path === '/bus' && !req.path.startsWith('/bus/')) {
@@ -1699,6 +1868,216 @@ app.get('/api/digest', async (req, res) => {
     const result = await buildAgentDigest();
     res.json(result);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Activity Bubble Chart API ──────────────────────────────────────────────────
+// Returns nodes for people, agents, and projects with activity scores + recency
+// Used by /activity bubble chart visualization
+app.get('/api/activity', async (req, res) => {
+  try {
+    const data = await readQueue();
+    const hbs = await getHeartbeats();
+    const now = Date.now();
+    const allItems = [...(data.items || []), ...(data.completed || [])];
+
+    // Time windows for recency scoring
+    const H1  = 60 * 60 * 1000;
+    const H24 = 24 * H1;
+    const H72 = 72 * H1;
+    const D7  = 7 * 24 * H1;
+
+    function recencyScore(tsStr) {
+      if (!tsStr) return 0;
+      const age = now - new Date(tsStr).getTime();
+      if (age < H1)  return 1.0;
+      if (age < H24) return 0.8;
+      if (age < H72) return 0.5;
+      if (age < D7)  return 0.2;
+      return 0.05;
+    }
+
+    // Color from recency score: red (hot) → amber → blue (cold)
+    function recencyColor(score) {
+      if (score >= 0.8) return '#f85149'; // hot red
+      if (score >= 0.5) return '#e3b341'; // warm amber
+      if (score >= 0.2) return '#58a6ff'; // cool blue
+      return '#30363d';                   // cold grey
+    }
+
+    // ── AGENT nodes ────────────────────────────────────────────────────────
+    const AGENT_EMOJIS = { rocky:'🐿️', bullwinkle:'🫎', natasha:'🕵️‍♀️', boris:'🕵️‍♂️' };
+    const agentNodes = [];
+    for (const [name, hb] of Object.entries(hbs)) {
+      const agentItems = allItems.filter(i =>
+        i.claimedBy === name || i.assignee === name
+      );
+      const completed = agentItems.filter(i => i.status === 'completed');
+      const lastAct = hb.ts || completed.sort((a,b) =>
+        new Date(b.completedAt||0) - new Date(a.completedAt||0))[0]?.completedAt;
+      const score = recencyScore(lastAct);
+      agentNodes.push({
+        id: `agent:${name}`,
+        kind: 'agent',
+        label: name,
+        emoji: AGENT_EMOJIS[name] || '🤖',
+        size: 20 + Math.min(completed.length * 2, 60),
+        score,
+        color: recencyColor(score),
+        meta: {
+          completedItems: completed.length,
+          activeItems: agentItems.filter(i => i.status === 'in-progress').length,
+          lastHeartbeat: hb.ts,
+          host: hb.host,
+        },
+      });
+    }
+
+    // ── PROJECT nodes ──────────────────────────────────────────────────────
+    // Load registered repos
+    let repos = [];
+    try {
+      const reposPath = '/home/jkh/.openclaw/workspace/rcc/api/repos.json';
+      repos = JSON.parse(await readFile(reposPath, 'utf8'));
+    } catch {}
+
+    const projectNodes = [];
+    for (const repo of repos) {
+      const repoItems = allItems.filter(i =>
+        i.repo === repo.full_name ||
+        (i.tags || []).includes(repo.full_name) ||
+        (i.title || '').toLowerCase().includes(repo.full_name.split('/')[1].toLowerCase())
+      );
+      const completed = repoItems.filter(i => i.status === 'completed');
+      const lastCompletion = completed.sort((a,b) =>
+        new Date(b.completedAt||0) - new Date(a.completedAt||0))[0]?.completedAt;
+
+      // Get recent GitHub commits velocity (rough: use item creation timestamps)
+      const recent7d = repoItems.filter(i =>
+        i.created && (now - new Date(i.created).getTime()) < D7
+      );
+
+      const score = recencyScore(lastCompletion);
+      const contribs = repo.ownership?.contributors || [];
+      const contribCount = Array.isArray(contribs) ? contribs.length : 0;
+
+      projectNodes.push({
+        id: `project:${repo.full_name}`,
+        kind: 'project',
+        label: repo.display_name || repo.full_name.split('/')[1],
+        fullName: repo.full_name,
+        emoji: repo.kind === 'team' ? '👥' : '👤',
+        size: 18 + Math.min(completed.length * 1.5 + contribCount * 0.5, 70),
+        score,
+        color: recencyColor(score),
+        meta: {
+          kind: repo.kind,
+          completedItems: completed.length,
+          recentItems: recent7d.length,
+          contributors: contribCount,
+          issueTracker: repo.issue_tracker,
+          lastActivity: lastCompletion,
+        },
+      });
+    }
+
+    // ── PERSON nodes ───────────────────────────────────────────────────────
+    // People = jkh + any human contributors found in repo data
+    const peopleMap = new Map();
+
+    // jkh is always present
+    const jkhItems = allItems.filter(i => i.assignee === 'jkh');
+    const jkhLastAct = jkhItems.sort((a,b) =>
+      new Date(b.completedAt||b.created||0) - new Date(a.completedAt||a.created||0))[0];
+    const jkhScore = recencyScore(jkhLastAct?.completedAt || jkhLastAct?.created);
+    peopleMap.set('jkh', {
+      id: 'person:jkh',
+      kind: 'person',
+      label: 'jkh',
+      emoji: '👤',
+      size: 35 + jkhItems.length,
+      score: Math.max(jkhScore, 0.3), // jkh is always relevant
+      color: recencyColor(Math.max(jkhScore, 0.3)),
+      meta: { role: 'owner', itemsAssigned: jkhItems.length },
+    });
+
+    // Contributors from team repos
+    for (const repo of repos.filter(r => r.kind === 'team')) {
+      const contribs = repo.ownership?.contributors || [];
+      for (const c of contribs) {
+        const login = typeof c === 'string' ? c : c.github;
+        const commits = typeof c === 'object' ? c.commits : 0;
+        if (login === 'jordanhubbard') continue; // that's jkh
+        if (!peopleMap.has(login)) {
+          peopleMap.set(login, {
+            id: `person:${login}`,
+            kind: 'person',
+            label: login,
+            emoji: '👤',
+            size: 12 + Math.min(Math.log1p(commits || 1) * 5, 40),
+            score: 0.15, // no direct activity data yet — grey-ish
+            color: '#30363d',
+            meta: { role: 'contributor', commits, repos: [repo.full_name] },
+          });
+        } else {
+          const existing = peopleMap.get(login);
+          existing.meta.repos = [...(existing.meta.repos || []), repo.full_name];
+          existing.size = Math.min(existing.size + 5, 60);
+        }
+      }
+    }
+
+    // ── EDGES ──────────────────────────────────────────────────────────────
+    const edges = [];
+
+    // Agent → Project edges (agent worked on project)
+    for (const agentNode of agentNodes) {
+      const agentName = agentNode.label;
+      for (const projectNode of projectNodes) {
+        const repoName = projectNode.fullName;
+        const count = allItems.filter(i =>
+          (i.claimedBy === agentName || i.assignee === agentName) &&
+          ((i.repo === repoName) || (i.tags||[]).includes(repoName) ||
+           (i.title||'').toLowerCase().includes(repoName.split('/')[1].toLowerCase()))
+        ).length;
+        if (count > 0) {
+          edges.push({ source: agentNode.id, target: projectNode.id, weight: count, kind: 'worked-on' });
+        }
+      }
+    }
+
+    // Person → Project edges (owner/contributor)
+    for (const [login, personNode] of peopleMap) {
+      for (const repo of repos) {
+        const contribs = repo.ownership?.contributors || [];
+        const isContrib = contribs.some(c => (typeof c === 'string' ? c : c.github) === login)
+          || (login === 'jkh' && repo.ownership?.owner === 'jkh');
+        if (isContrib) {
+          edges.push({ source: personNode.id, target: `project:${repo.full_name}`, weight: 2, kind: 'contributor' });
+        }
+      }
+    }
+
+    // Person → Agent edges (jkh directs agents)
+    for (const agentNode of agentNodes) {
+      edges.push({ source: 'person:jkh', target: agentNode.id, weight: 3, kind: 'directs' });
+    }
+
+    const nodes = [...agentNodes, ...projectNodes, ...[...peopleMap.values()]];
+
+    res.json({
+      ts: new Date().toISOString(),
+      nodes,
+      edges,
+      legend: {
+        kinds: ['agent', 'project', 'person'],
+        sizeMetric: 'activity volume (items completed + contributors)',
+        colorMetric: 'recency: red=hot (<1h), amber=warm (<3d), blue=cool (<7d), grey=cold',
+      },
+    });
+  } catch (e) {
+    console.error('/api/activity error:', e);
     res.status(500).json({ error: e.message });
   }
 });
