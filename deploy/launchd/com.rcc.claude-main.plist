@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  com.rcc.claude-main.plist
+  Keeps a tmux session named "claude-main" alive with Claude Code running inside.
+  Survives reboots and auto-restarts if the process dies.
+
+  Install:
+    cp deploy/launchd/com.rcc.claude-main.plist ~/Library/LaunchAgents/
+    # Edit HOME_DIR below to match your actual home directory
+    launchctl load ~/Library/LaunchAgents/com.rcc.claude-main.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.rcc.claude-main.plist
+    rm ~/Library/LaunchAgents/com.rcc.claude-main.plist
+
+  Check status:
+    launchctl list | grep rcc.claude
+    tail -f /tmp/claude-main.log
+
+  Notes:
+    - Session name is "claude-main" — matches what claude-worker.mjs looks for by default
+    - Uses --dangerously-skip-permissions so Claude Code doesn't prompt for approval mid-task
+    - If you prefer a different session name, update both this plist and CLAUDE_SESSION in .env
+    - On macOS, tmux must be installed: brew install tmux
+-->
+<dict>
+  <key>Label</key>
+  <string>com.rcc.claude-main</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-c</string>
+    <string>
+      # Kill any stale detached session with this name
+      /usr/local/bin/tmux kill-session -t claude-main 2>/dev/null || true;
+      # Start fresh: new detached session running Claude Code
+      /usr/local/bin/tmux new-session -d -s claude-main \
+        '/usr/local/bin/claude --dangerously-skip-permissions'
+    </string>
+  </array>
+
+  <!-- Restart automatically if the session exits -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <!-- Wait 5 seconds before restart (avoid tight loops on crash) -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- Start at login -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/claude-main.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/claude-main.log</string>
+</dict>
+</plist>

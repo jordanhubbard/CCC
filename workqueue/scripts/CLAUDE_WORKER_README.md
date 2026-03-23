@@ -114,14 +114,40 @@ AND no spinner characters (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) are visible in the 
 
 ## Per-host session names
 
-| Host | Agent | Typical session name |
-|------|-------|----------------------|
-| your-host | your-agent | `auth3` (or whatever `detectSession()` finds) |
-| puck | Bullwinkle | `claude-puck` (check with `tmux ls`) |
-| sparky | Natasha | `claude-sparky` (check with `tmux ls`) |
+| Host type | Typical session name |
+|-----------|----------------------|
+| Linux cloud VM | `claude-main`, `auth3` |
+| macOS laptop | `claude-puck`, `claude-main` |
+| GPU box | `claude-sparky`, `claude-gpu` |
 
 Always call `detectSession()` first rather than hardcoding a name — it will find
 whatever is running, even if the session was renamed.
+
+---
+
+## macOS notes (tmux 3.6a)
+
+**Tab separator bug:** On macOS with tmux 3.6a, `\t` in `-F` format strings passed via
+`execFileSync` is not reliably interpreted as a tab character. `claude-worker.mjs` uses
+`|||` as the field separator instead of `\t` to work around this. If you see `detectSession()`
+returning `null` on a Mac despite a running Claude session, this is likely the cause —
+verify with `tmux list-panes -a -F '#{session_name}|||#{pane_current_command}'` directly.
+
+**Keeping the session alive across reboots:** On Linux you'd use systemd or cron. On macOS,
+use a LaunchAgent. A ready-to-use plist is at `deploy/launchd/com.rcc.claude-main.plist`:
+
+```bash
+cp deploy/launchd/com.rcc.claude-main.plist ~/Library/LaunchAgents/
+# Edit it if tmux/claude are not at /usr/local/bin (check: which tmux && which claude)
+launchctl load ~/Library/LaunchAgents/com.rcc.claude-main.plist
+```
+
+This keeps `tmux: claude-main` alive and auto-restarts it if it exits. Check status:
+
+```bash
+launchctl list | grep rcc.claude
+tail -f /tmp/claude-main.log
+```
 
 ---
 
