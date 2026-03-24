@@ -220,6 +220,25 @@ const HTML_STYLE = `
     .status-completed{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-cancelled{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-failed{background:#2d1a1a;color:#f85149;border:1px solid #f8514955}
+    .gh-panel{margin-top:1rem}
+    .gh-columns{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+    @media(max-width:680px){.gh-columns{grid-template-columns:1fr}}
+    .gh-col-header{font-size:.95rem;font-weight:600;margin-bottom:.6rem;display:flex;align-items:center;gap:.5rem}
+    .gh-item{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:.65rem .85rem;margin-bottom:.45rem;font-size:.835rem;transition:border-color .15s}
+    .gh-item:hover{border-color:#388bfd55}
+    .gh-item-title{font-weight:500;line-height:1.35;margin-bottom:.3rem}
+    .gh-item-title a{color:#e6edf3}.gh-item-title a:hover{color:#58a6ff}
+    .gh-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem;font-size:.75rem;color:#8b949e}
+    .gh-num{color:#6e7681;font-size:.78rem;margin-right:.2rem}
+    .label-chip{display:inline-block;padding:.1rem .42rem;border-radius:999px;font-size:.7rem;font-weight:600;border:1px solid transparent;line-height:1.4}
+    .draft-badge{background:#21262d;color:#8b949e;border:1px solid #30363d;padding:.1rem .4rem;border-radius:4px;font-size:.7rem;font-weight:600;margin-right:.2rem}
+    .review-approved{color:#3fb950;font-weight:600}.review-changes{color:#f85149;font-weight:600}.review-pending{color:#d29922}
+    .merge-ok{color:#a371f7;font-weight:600}.merge-conflict{color:#f85149}
+    .gh-empty{color:#8b949e;font-size:.85rem;padding:.4rem 0}
+    .gh-refresh-btn{background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:.15rem .55rem;font-size:.75rem;cursor:pointer;transition:border-color .15s,color .15s;margin-left:.5rem}
+    .gh-refresh-btn:hover{border-color:#58a6ff;color:#58a6ff}
+    .gh-fetched{font-size:.72rem;color:#484f58}
+    .gh-error{color:#f85149;font-size:.82rem;padding:.4rem 0}
   </style>`;
 
 function projectsListHtml() {
@@ -259,10 +278,18 @@ function projectDetailHtml(projectId) {
   <script>
     const projectId=${JSON.stringify(projectId)};
     const encodedId=${JSON.stringify(encodedId)};
+    function timeAgo(ds){if(!ds)return'';const s=Math.floor((Date.now()-new Date(ds))/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+    function labelFg(hex){if(!hex||hex==='000000')return'#8b949e';const r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);return(r*299+g*587+b*114)/1000>128?'#0d1117':'#f0f6fc';}
+    function labelChip(l){const bg='#'+((l.color&&l.color!=='000000')?l.color:'333');const fg=labelFg(l.color);return\`<span class="label-chip" style="background:\${bg}33;border-color:\${bg}88;color:\${fg}">\${esc(l.name||'')}</span>\`;}
+    function renderIssue(i){return\`<div class="gh-item"><div class="gh-item-title"><span class="gh-num">#\${i.number}</span><a href="\${i.url}" target="_blank">\${esc(i.title||'')}</a></div><div class="gh-meta">\${(i.labels||[]).map(labelChip).join('')}<span>\${esc(i.author||'')}</span><span title="\${i.createdAt||''}">\${timeAgo(i.createdAt)}</span>\${i.commentCount?\`<span>💬 \${i.commentCount}</span>\`:''}</div></div>\`;}
+    function renderPR(pr){const rc=pr.reviewDecision==='APPROVED'?'review-approved':pr.reviewDecision==='CHANGES_REQUESTED'?'review-changes':'review-pending';const rl=pr.reviewDecision==='APPROVED'?'✓ approved':pr.reviewDecision==='CHANGES_REQUESTED'?'✗ changes req':'⏳ pending review';const mc=pr.mergeable==='MERGEABLE'?'merge-ok':pr.mergeable==='CONFLICTING'?'merge-conflict':'';const ml=pr.mergeable==='MERGEABLE'?'mergeable':pr.mergeable==='CONFLICTING'?'⚠ conflicts':'';return\`<div class="gh-item"><div class="gh-item-title"><span class="gh-num">#\${pr.number}</span>\${pr.isDraft?'<span class="draft-badge">draft</span>':''}<a href="\${pr.url}" target="_blank">\${esc(pr.title||'')}</a></div><div class="gh-meta">\${(pr.labels||[]).map(labelChip).join('')}<span>\${esc(pr.author||'')}</span><span class="\${rc}">\${rl}</span>\${ml?\`<span class="\${mc}">\${ml}</span>\`:''}<span title="\${pr.createdAt||''}">\${timeAgo(pr.createdAt)}</span></div></div>\`;}
+    function renderGitHub(ghData){if(!ghData)return'';if(ghData.error)return\`<div class="card gh-panel"><p class="gh-error">GitHub data unavailable: \${esc(ghData.error)}</p></div>\`;const issues=ghData.issues||[];const prs=ghData.prs||[];return\`<div class="card gh-panel"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem"><h2 style="font-size:1.05rem;font-weight:600">🐙 GitHub</h2><span><span class="gh-fetched">fetched \${timeAgo(ghData.fetchedAt)}</span><button class="gh-refresh-btn" onclick="refreshGitHub()">↻ Refresh</button></span></div><div class="gh-columns"><div><div class="gh-col-header">🔴 Issues <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${issues.length} open</span></div>\${issues.length?issues.map(renderIssue).join(''):'<p class="gh-empty">No open issues ✓</p>'}</div><div><div class="gh-col-header">🟣 Pull Requests <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${prs.length} open</span></div>\${prs.length?prs.map(renderPR).join(''):'<p class="gh-empty">No open PRs ✓</p>'}</div></div></div>\`;}
+    function refreshGitHub(){const panel=document.querySelector('.gh-panel');if(panel)panel.style.opacity='0.5';fetch('/api/projects/'+encodedId+'/github?refresh=1').then(()=>location.reload()).catch(()=>{if(panel)panel.style.opacity='1';});}
     Promise.all([
       fetch('/api/projects/'+encodedId).then(r=>r.json()),
       fetch('/api/queue').then(r=>r.json()),
-    ]).then(([p, qdata])=>{
+      fetch('/api/projects/'+encodedId+'/github').then(r=>r.json()).catch(()=>null),
+    ]).then(([p, qdata, ghData])=>{
       if(p.error){document.getElementById('root').innerHTML='<p class="error">'+p.error+'</p>';return;}
       const items=[...(qdata.items||[]),...(qdata.completed||[])].filter(i=>i.project===projectId||i.repo===projectId||(i.slack_channels||[]).some(c=>c===projectId));
       const active=items.filter(i=>!['completed','cancelled'].includes(i.status));
@@ -297,6 +324,7 @@ function projectDetailHtml(projectId) {
         \${active.length?'<div class="queue-section card"><h2>Active Work ('+active.length+')</h2>'+active.map(renderItem).join('')+'</div>':''}
         \${done.length?'<div class="queue-section card" style="margin-top:.5rem"><h2>Recent Completed</h2>'+done.map(renderItem).join('')+'</div>':''}
         \${!active.length&&!done.length?'<div class="card"><p style="color:#8b949e;font-size:.875rem">No queue items for this project yet.</p></div>':''}
+        \${renderGitHub(ghData)}
       \`
     }).catch(e=>{document.getElementById('root').innerHTML='<p class="error">Failed to load: '+e.message+'</p>';});
   </script></body></html>`;
