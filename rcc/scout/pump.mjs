@@ -123,15 +123,19 @@ async function runScan() {
 
   // Create items via API
   let created = 0;
+  let deduped = 0;
   const createdItems = [];
   for (const item of newItems) {
     try {
       const result = await rccPost('/api/queue', item);
       if (result.ok) { created++; createdItems.push(item); }
+      else if (result.duplicate) { deduped++; } // server-side scout_key dedup
+      else { console.warn(`[pump] Item not created (ok=false): "${item.title}"`, result); }
     } catch (err) {
       console.error(`[pump] Failed to create item "${item.title}": ${err.message}`);
     }
   }
+  if (deduped > 0) console.log(`[pump] Suppressed ${deduped} duplicate scout items (server-side dedup)`);
 
   console.log(`[pump] Created ${created} new work items`);
 
@@ -243,7 +247,7 @@ export class Pump {
         owner: repoSpec.full_name.split('/')[0],
         contributors: [repoSpec.full_name.split('/')[0]],
         slack_channel: null,
-        triaging_agent: 'rocky',
+        triaging_agent: process.env.PRIMARY_AGENT || 'rocky',
       },
       issue_tracker: repoSpec.issue_tracker || 'github',
       scouts: repoSpec.scouts || ['issues', 'prs', 'ci', 'deps', 'analysis'],

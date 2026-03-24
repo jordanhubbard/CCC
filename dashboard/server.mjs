@@ -24,7 +24,7 @@ const execFileP = promisify(execFile);
 
 const app = express();
 const PORT = 8788;
-const AUTH_TOKEN = 'RCC_AUTH_TOKEN_REMOVED';
+const AUTH_TOKEN = process.env.RCC_AUTH_TOKENS || process.env.RCC_AGENT_TOKEN || 'RCC_AUTH_TOKEN_PLACEHOLDER';
 const QUEUE_PATH = '/home/jkh/.openclaw/workspace/workqueue/queue.json';
 const MC_PATH = '/home/jkh/.local/bin/mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
