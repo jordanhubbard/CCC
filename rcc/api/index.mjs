@@ -226,6 +226,24 @@ const HTML_STYLE = `
     .status-completed{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-cancelled{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-failed{background:#2d1a1a;color:#f85149;border:1px solid #f8514955}
+    .status-incubating{background:#2a1f3d;color:#d2a8ff;border:1px solid #8957e555}
+    .incubator-section{margin-top:1rem}
+    .incubator-section h2{font-size:1rem;font-weight:600;margin-bottom:.75rem}
+    .incubator-item{background:#161b22;border:1px solid #8957e533;border-radius:8px;padding:.9rem 1rem;margin-bottom:.75rem}
+    .incubator-item .inc-title{font-weight:600;font-size:.9rem;margin-bottom:.3rem}
+    .inc-desc{font-size:.82rem;color:#8b949e;margin-bottom:.55rem;line-height:1.45}
+    .inc-journal{margin:.5rem 0;border-left:2px solid #8957e544;padding-left:.65rem}
+    .inc-journal-entry{font-size:.78rem;color:#c9d1d9;margin-bottom:.3rem;line-height:1.4}
+    .inc-journal-entry .je-author{color:#d2a8ff;font-weight:600;margin-right:.35rem}
+    .inc-journal-entry .je-ts{color:#8b949e;font-size:.72rem;margin-right:.35rem}
+    .inc-actions{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+    .inc-comment-form{margin-top:.6rem;display:flex;gap:.5rem}
+    .inc-comment-input{flex:1;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;padding:.3rem .6rem;font-size:.8rem}
+    .inc-comment-input:focus{outline:none;border-color:#8957e5}
+    .btn-promote{background:#1a2f1a;color:#3fb950;border:1px solid #3fb95055;border-radius:4px;padding:.25rem .65rem;font-size:.78rem;cursor:pointer;font-weight:600}
+    .btn-promote:hover{background:#1f3a1f}
+    .btn-send-comment{background:#2a1f3d;color:#d2a8ff;border:1px solid #8957e555;border-radius:4px;padding:.25rem .65rem;font-size:.78rem;cursor:pointer}
+    .btn-send-comment:hover{background:#321e4f}
     .gh-panel{margin-top:1rem}
     .gh-columns{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
     @media(max-width:680px){.gh-columns{grid-template-columns:1fr}}
@@ -291,6 +309,26 @@ function projectDetailHtml(projectId) {
     function renderPR(pr){const rc=pr.reviewDecision==='APPROVED'?'review-approved':pr.reviewDecision==='CHANGES_REQUESTED'?'review-changes':'review-pending';const rl=pr.reviewDecision==='APPROVED'?'✓ approved':pr.reviewDecision==='CHANGES_REQUESTED'?'✗ changes req':'⏳ pending review';const mc=pr.mergeable==='MERGEABLE'?'merge-ok':pr.mergeable==='CONFLICTING'?'merge-conflict':'';const ml=pr.mergeable==='MERGEABLE'?'mergeable':pr.mergeable==='CONFLICTING'?'⚠ conflicts':'';return\`<div class="gh-item"><div class="gh-item-title"><span class="gh-num">#\${pr.number}</span>\${pr.isDraft?'<span class="draft-badge">draft</span>':''}<a href="\${pr.url}" target="_blank">\${esc(pr.title||'')}</a></div><div class="gh-meta">\${(pr.labels||[]).map(labelChip).join('')}<span>\${esc(pr.author||'')}</span><span class="\${rc}">\${rl}</span>\${ml?\`<span class="\${mc}">\${ml}</span>\`:''}<span title="\${pr.createdAt||''}">\${timeAgo(pr.createdAt)}</span></div></div>\`;}
     function renderGitHub(ghData){if(!ghData)return'';if(ghData.error)return\`<div class="card gh-panel"><p class="gh-error">GitHub data unavailable: \${esc(ghData.error)}</p></div>\`;const issues=ghData.issues||[];const prs=ghData.prs||[];return\`<div class="card gh-panel"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem"><h2 style="font-size:1.05rem;font-weight:600">🐙 GitHub</h2><span><span class="gh-fetched">fetched \${timeAgo(ghData.fetchedAt)}</span><button class="gh-refresh-btn" onclick="refreshGitHub()">↻ Refresh</button></span></div><div class="gh-columns"><div><div class="gh-col-header">🔴 Issues <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${issues.length} open</span></div>\${issues.length?issues.map(renderIssue).join(''):'<p class="gh-empty">No open issues ✓</p>'}</div><div><div class="gh-col-header">🟣 Pull Requests <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${prs.length} open</span></div>\${prs.length?prs.map(renderPR).join(''):'<p class="gh-empty">No open PRs ✓</p>'}</div></div></div>\`;}
     function refreshGitHub(){const panel=document.querySelector('.gh-panel');if(panel)panel.style.opacity='0.5';fetch('/api/projects/'+encodedId+'/github?refresh=1').then(()=>location.reload()).catch(()=>{if(panel)panel.style.opacity='1';});}
+    function promoteIdea(id,priority){if(!priority)priority=prompt('Promote to what priority? (urgent/high/medium/normal)','medium');if(!priority)return;fetch('/api/item/'+encodeURIComponent(id)+'/promote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priority,author:'jkh'})}).then(r=>r.json()).then(d=>{if(d.ok)location.reload();else alert('Error: '+d.error);});}
+    function sendIncComment(id){const inp=document.getElementById('inc-inp-'+id);const text=(inp?.value||'').trim();if(!text)return;fetch('/api/item/'+encodeURIComponent(id)+'/comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,author:'jkh'})}).then(r=>r.json()).then(d=>{if(d.ok)location.reload();else alert('Error: '+d.error);});}
+    function renderIncubatorItem(i){
+      const journal=(i.journal||[]).filter(e=>e.type==='comment'||e.type==='ai'||e.type==='incubate-feedback');
+      const journalHtml=journal.length?'<div class="inc-journal">'+journal.map(e=>\`<div class="inc-journal-entry"><span class="je-ts">\${timeAgo(e.ts)}</span><span class="je-author">\${esc(e.author||'?')}:</span>\${esc(e.text||'')}</div>\`).join('')+'</div>':'';
+      return\`<div class="incubator-item" id="inc-\${i.id}">
+        <div class="inc-title">💡 \${esc(i.title||'Untitled')}</div>
+        \${i.description?'<div class="inc-desc">'+esc(i.description)+'</div>':''}
+        \${journalHtml}
+        <div class="inc-comment-form">
+          <input class="inc-comment-input" id="inc-inp-\${i.id}" placeholder="Add a comment or refinement…" onkeydown="if(event.key==='Enter')sendIncComment('\${i.id}')">
+          <button class="btn-send-comment" onclick="sendIncComment('\${i.id}')">Comment</button>
+        </div>
+        <div class="inc-actions">
+          <button class="btn-promote" onclick="promoteIdea('\${i.id}')">✓ Promote to work item</button>
+          <span style="font-size:.72rem;color:#8b949e">\${timeAgo(i.created||i.createdAt)} · \${i.source||'api'}</span>
+        </div>
+      </div>\`;
+    }
+    function renderIncubatorSection(incubating){if(!incubating.length)return'';return\`<div class="card incubator-section"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem"><h2>💡 Idea Incubator (\${incubating.length})</h2><span style="font-size:.78rem;color:#8b949e">Comment to refine · Promote when ready</span></div>\${incubating.map(renderIncubatorItem).join('')}</div>\`;}
     Promise.all([
       fetch('/api/projects/'+encodedId).then(r=>r.json()),
       fetch('/api/queue').then(r=>r.json()),
@@ -298,7 +336,8 @@ function projectDetailHtml(projectId) {
     ]).then(([p, qdata, ghData])=>{
       if(p.error){document.getElementById('root').innerHTML='<p class="error">'+p.error+'</p>';return;}
       const items=[...(qdata.items||[]),...(qdata.completed||[])].filter(i=>i.project===projectId||i.repo===projectId||(i.slack_channels||[]).some(c=>c===projectId));
-      const active=items.filter(i=>!['completed','cancelled'].includes(i.status));
+      const incubating=items.filter(i=>i.status==='incubating');
+      const active=items.filter(i=>!['completed','cancelled','incubating'].includes(i.status));
       const done=items.filter(i=>['completed','cancelled'].includes(i.status)).slice(0,10);
       const statusBadge=(s)=>\`<span class="status-badge status-\${s||'pending'}">\${s||'pending'}</span>\`;
       const renderItem=(i)=>\`<div class="queue-item">
@@ -327,9 +366,10 @@ function projectDetailHtml(projectId) {
           \${scoutTags?'<div class="scouts">'+scoutTags+'</div>':''}
           \${p.notes?'<div class="notes">'+p.notes+'</div>':''}
         </div>
+        \${renderIncubatorSection(incubating)}
         \${active.length?'<div class="queue-section card"><h2>Active Work ('+active.length+')</h2>'+active.map(renderItem).join('')+'</div>':''}
         \${done.length?'<div class="queue-section card" style="margin-top:.5rem"><h2>Recent Completed</h2>'+done.map(renderItem).join('')+'</div>':''}
-        \${!active.length&&!done.length?'<div class="card"><p style="color:#8b949e;font-size:.875rem">No queue items for this project yet.</p></div>':''}
+        \${!active.length&&!done.length&&!incubating.length?'<div class="card"><p style="color:#8b949e;font-size:.875rem">No queue items for this project yet.</p></div>':''}
         \${renderGitHub(ghData)}
       \`
     }).catch(e=>{document.getElementById('root').innerHTML='<p class="error">Failed to load: '+e.message+'</p>';});
@@ -652,7 +692,8 @@ async function handleRequest(req, res) {
         source: body.source || 'api',
         assignee: body.assignee || 'all',
         priority: body.priority || 'normal',
-        status: 'pending',
+        // Items created with priority "idea" start in the incubator, not the work queue
+        status: (body.status === 'incubating' || body.priority === 'idea') ? 'incubating' : 'pending',
         title: body.title,
         description: body.description || '',
         notes: body.notes || '',
@@ -838,6 +879,55 @@ async function handleRequest(req, res) {
       item.itemVersion = (item.itemVersion || 0) + 1;
       await writeQueue(q);
       return json(res, 200, { ok: true, userEntry, aiEntry });
+    }
+
+    // ── POST /api/item/:id/promote — graduate incubating idea to work item ─
+    const promoteMatch = path.match(/^\/api\/item\/([^/]+)\/promote$/);
+    if (method === 'POST' && promoteMatch) {
+      const id = decodeURIComponent(promoteMatch[1]);
+      const body = await readBody(req);
+      const q = await readQueue();
+      const item = q.items?.find(i => i.id === id);
+      if (!item) return json(res, 404, { error: 'Item not found' });
+      const now = new Date().toISOString();
+      const prevStatus = item.status;
+      item.status = 'pending';
+      item.priority = body.priority || item.priority || 'medium';
+      if (!item.journal) item.journal = [];
+      item.journal.push({
+        ts: now,
+        author: body.author || 'api',
+        type: 'promoted',
+        text: `Promoted from incubation (was: ${prevStatus}) with priority: ${item.priority}`,
+      });
+      item.itemVersion = (item.itemVersion || 0) + 1;
+      await writeQueue(q);
+      return json(res, 200, { ok: true, item });
+    }
+
+    // ── POST /api/item/:id/incubate — send item back to incubation ────────
+    const incubateMatch = path.match(/^\/api\/item\/([^/]+)\/incubate$/);
+    if (method === 'POST' && incubateMatch) {
+      const id = decodeURIComponent(incubateMatch[1]);
+      const body = await readBody(req);
+      const q = await readQueue();
+      const item = q.items?.find(i => i.id === id);
+      if (!item) return json(res, 404, { error: 'Item not found' });
+      const now = new Date().toISOString();
+      const prevStatus = item.status;
+      item.status = 'incubating';
+      item.claimedBy = null;
+      item.claimedAt = null;
+      if (!item.journal) item.journal = [];
+      item.journal.push({
+        ts: now,
+        author: body.author || 'api',
+        type: 'incubate-feedback',
+        text: body.feedback ? `Sent back for incubation: ${body.feedback}` : `Sent back for incubation (was: ${prevStatus})`,
+      });
+      item.itemVersion = (item.itemVersion || 0) + 1;
+      await writeQueue(q);
+      return json(res, 200, { ok: true, item });
     }
 
     // ── POST /api/agents/register ─────────────────────────────────────────
