@@ -9,16 +9,18 @@
  */
 
 import { createServer } from 'http';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { dirname } from 'path';
 import { Brain, createRequest } from '../brain/index.mjs';
 import { Pump } from '../scout/pump.mjs';
-import { learnLesson, queryLessons, formatLessonsForContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
+import { learnLesson, queryLessons, queryAllLessons, formatLessonsForContext, getTrendingLessons, formatTrendingForHeartbeat, getHeartbeatContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT            = parseInt(process.env.RCC_PORT || '8789', 10);
 const QUEUE_PATH      = process.env.QUEUE_PATH    || '../../workqueue/queue.json';
-const AGENTS_PATH     = process.env.AGENTS_PATH   || './agents.json';
+const AGENTS_PATH        = process.env.AGENTS_PATH        || './agents.json';
+const CAPABILITIES_PATH  = process.env.CAPABILITIES_PATH  || './data/agent-capabilities.json';
 const REPOS_PATH      = process.env.REPOS_PATH    || './repos.json';
 const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
 const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://localhost:8789';
@@ -66,7 +68,7 @@ function buildProjectFromRepo(repo) {
     slack_channels: repo.ownership?.slack_channel
       ? [{ workspace: repo.ownership.slack_workspace || 'omgjkh', channel_id: repo.ownership.slack_channel }]
       : [],
-    triaging_agent: repo.ownership?.triaging_agent || 'rocky',
+    triaging_agent: repo.ownership?.triaging_agent || process.env.DEFAULT_TRIAGING_AGENT || '',
     enabled:        repo.enabled !== false,
     kind:           repo.kind || 'personal',
     scouts:         repo.scouts || [],
@@ -148,6 +150,19 @@ async function writeAgents(data) {
   await writeFile(p, JSON.stringify(data, null, 2));
 }
 
+// ── Agent capabilities I/O ────────────────────────────────────────────────
+async function readCapabilities() {
+  const p = new URL(CAPABILITIES_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return {};
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeCapabilities(data) {
+  const p = new URL(CAPABILITIES_PATH, import.meta.url).pathname;
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
 // ── HTTP helpers ───────────────────────────────────────────────────────────
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -205,6 +220,25 @@ const HTML_STYLE = `
     .status-completed{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-cancelled{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-failed{background:#2d1a1a;color:#f85149;border:1px solid #f8514955}
+    .gh-panel{margin-top:1rem}
+    .gh-columns{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+    @media(max-width:680px){.gh-columns{grid-template-columns:1fr}}
+    .gh-col-header{font-size:.95rem;font-weight:600;margin-bottom:.6rem;display:flex;align-items:center;gap:.5rem}
+    .gh-item{background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:.65rem .85rem;margin-bottom:.45rem;font-size:.835rem;transition:border-color .15s}
+    .gh-item:hover{border-color:#388bfd55}
+    .gh-item-title{font-weight:500;line-height:1.35;margin-bottom:.3rem}
+    .gh-item-title a{color:#e6edf3}.gh-item-title a:hover{color:#58a6ff}
+    .gh-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem;font-size:.75rem;color:#8b949e}
+    .gh-num{color:#6e7681;font-size:.78rem;margin-right:.2rem}
+    .label-chip{display:inline-block;padding:.1rem .42rem;border-radius:999px;font-size:.7rem;font-weight:600;border:1px solid transparent;line-height:1.4}
+    .draft-badge{background:#21262d;color:#8b949e;border:1px solid #30363d;padding:.1rem .4rem;border-radius:4px;font-size:.7rem;font-weight:600;margin-right:.2rem}
+    .review-approved{color:#3fb950;font-weight:600}.review-changes{color:#f85149;font-weight:600}.review-pending{color:#d29922}
+    .merge-ok{color:#a371f7;font-weight:600}.merge-conflict{color:#f85149}
+    .gh-empty{color:#8b949e;font-size:.85rem;padding:.4rem 0}
+    .gh-refresh-btn{background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:.15rem .55rem;font-size:.75rem;cursor:pointer;transition:border-color .15s,color .15s;margin-left:.5rem}
+    .gh-refresh-btn:hover{border-color:#58a6ff;color:#58a6ff}
+    .gh-fetched{font-size:.72rem;color:#484f58}
+    .gh-error{color:#f85149;font-size:.82rem;padding:.4rem 0}
   </style>`;
 
 function projectsListHtml() {
@@ -244,10 +278,18 @@ function projectDetailHtml(projectId) {
   <script>
     const projectId=${JSON.stringify(projectId)};
     const encodedId=${JSON.stringify(encodedId)};
+    function timeAgo(ds){if(!ds)return'';const s=Math.floor((Date.now()-new Date(ds))/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+    function labelFg(hex){if(!hex||hex==='000000')return'#8b949e';const r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);return(r*299+g*587+b*114)/1000>128?'#0d1117':'#f0f6fc';}
+    function labelChip(l){const bg='#'+((l.color&&l.color!=='000000')?l.color:'333');const fg=labelFg(l.color);return\`<span class="label-chip" style="background:\${bg}33;border-color:\${bg}88;color:\${fg}">\${esc(l.name||'')}</span>\`;}
+    function renderIssue(i){return\`<div class="gh-item"><div class="gh-item-title"><span class="gh-num">#\${i.number}</span><a href="\${i.url}" target="_blank">\${esc(i.title||'')}</a></div><div class="gh-meta">\${(i.labels||[]).map(labelChip).join('')}<span>\${esc(i.author||'')}</span><span title="\${i.createdAt||''}">\${timeAgo(i.createdAt)}</span>\${i.commentCount?\`<span>💬 \${i.commentCount}</span>\`:''}</div></div>\`;}
+    function renderPR(pr){const rc=pr.reviewDecision==='APPROVED'?'review-approved':pr.reviewDecision==='CHANGES_REQUESTED'?'review-changes':'review-pending';const rl=pr.reviewDecision==='APPROVED'?'✓ approved':pr.reviewDecision==='CHANGES_REQUESTED'?'✗ changes req':'⏳ pending review';const mc=pr.mergeable==='MERGEABLE'?'merge-ok':pr.mergeable==='CONFLICTING'?'merge-conflict':'';const ml=pr.mergeable==='MERGEABLE'?'mergeable':pr.mergeable==='CONFLICTING'?'⚠ conflicts':'';return\`<div class="gh-item"><div class="gh-item-title"><span class="gh-num">#\${pr.number}</span>\${pr.isDraft?'<span class="draft-badge">draft</span>':''}<a href="\${pr.url}" target="_blank">\${esc(pr.title||'')}</a></div><div class="gh-meta">\${(pr.labels||[]).map(labelChip).join('')}<span>\${esc(pr.author||'')}</span><span class="\${rc}">\${rl}</span>\${ml?\`<span class="\${mc}">\${ml}</span>\`:''}<span title="\${pr.createdAt||''}">\${timeAgo(pr.createdAt)}</span></div></div>\`;}
+    function renderGitHub(ghData){if(!ghData)return'';if(ghData.error)return\`<div class="card gh-panel"><p class="gh-error">GitHub data unavailable: \${esc(ghData.error)}</p></div>\`;const issues=ghData.issues||[];const prs=ghData.prs||[];return\`<div class="card gh-panel"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem"><h2 style="font-size:1.05rem;font-weight:600">🐙 GitHub</h2><span><span class="gh-fetched">fetched \${timeAgo(ghData.fetchedAt)}</span><button class="gh-refresh-btn" onclick="refreshGitHub()">↻ Refresh</button></span></div><div class="gh-columns"><div><div class="gh-col-header">🔴 Issues <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${issues.length} open</span></div>\${issues.length?issues.map(renderIssue).join(''):'<p class="gh-empty">No open issues ✓</p>'}</div><div><div class="gh-col-header">🟣 Pull Requests <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${prs.length} open</span></div>\${prs.length?prs.map(renderPR).join(''):'<p class="gh-empty">No open PRs ✓</p>'}</div></div></div>\`;}
+    function refreshGitHub(){const panel=document.querySelector('.gh-panel');if(panel)panel.style.opacity='0.5';fetch('/api/projects/'+encodedId+'/github?refresh=1').then(()=>location.reload()).catch(()=>{if(panel)panel.style.opacity='1';});}
     Promise.all([
       fetch('/api/projects/'+encodedId).then(r=>r.json()),
       fetch('/api/queue').then(r=>r.json()),
-    ]).then(([p, qdata])=>{
+      fetch('/api/projects/'+encodedId+'/github').then(r=>r.json()).catch(()=>null),
+    ]).then(([p, qdata, ghData])=>{
       if(p.error){document.getElementById('root').innerHTML='<p class="error">'+p.error+'</p>';return;}
       const items=[...(qdata.items||[]),...(qdata.completed||[])].filter(i=>i.project===projectId||i.repo===projectId||(i.slack_channels||[]).some(c=>c===projectId));
       const active=items.filter(i=>!['completed','cancelled'].includes(i.status));
@@ -259,7 +301,7 @@ function projectDetailHtml(projectId) {
           \${statusBadge(i.status)}
           \${i.preferred_executor?'<span>'+i.preferred_executor+'</span>':''}
           \${i.assignedTo?'<span>→ '+i.assignedTo+'</span>':''}
-          <span>\${new Date(i.createdAt||i.ts||0).toLocaleDateString()}</span>
+          <span>\${new Date(i.completedAt||i.createdAt||i.created||i.ts||null).toLocaleDateString()}</span>
         </div>
       </div>\`;
       const scoutTags=(p.scouts||[]).map(s=>'<span class="scout-tag">'+s+'</span>').join('');
@@ -282,6 +324,7 @@ function projectDetailHtml(projectId) {
         \${active.length?'<div class="queue-section card"><h2>Active Work ('+active.length+')</h2>'+active.map(renderItem).join('')+'</div>':''}
         \${done.length?'<div class="queue-section card" style="margin-top:.5rem"><h2>Recent Completed</h2>'+done.map(renderItem).join('')+'</div>':''}
         \${!active.length&&!done.length?'<div class="card"><p style="color:#8b949e;font-size:.875rem">No queue items for this project yet.</p></div>':''}
+        \${renderGitHub(ghData)}
       \`
     }).catch(e=>{document.getElementById('root').innerHTML='<p class="error">Failed to load: '+e.message+'</p>';});
   </script></body></html>`;
@@ -322,11 +365,55 @@ async function handleRequest(req, res) {
 
     if (method === 'GET' && path === '/api/agents') {
       const agents = await readAgents();
+      const caps   = await readCapabilities();
       const result = Object.entries(agents).map(([name, agent]) => ({
         ...agent,
+        capabilities: { ...(agent.capabilities || {}), ...(caps[name] || {}) },
         heartbeat: heartbeats[name] || null,
       }));
       return json(res, 200, result);
+    }
+
+    // ── GET /api/agents/best?task=X — capability-based routing ───────────
+    if (method === 'GET' && path === '/api/agents/best') {
+      const task = url.searchParams.get('task') || '';
+      const agents = await readAgents();
+      const caps   = await readCapabilities();
+      const GPU_TASKS    = new Set(['gpu', 'render', 'training', 'inference']);
+      const CLAUDE_TASKS = new Set(['claude', 'code', 'review', 'debug', 'triage']);
+      const CTX_PRIORITY = { large: 3, medium: 2, small: 1 };
+
+      const candidates = Object.entries(agents).map(([name, agent]) => ({
+        name,
+        ...agent,
+        capabilities: { ...(agent.capabilities || {}), ...(caps[name] || {}) },
+        heartbeat: heartbeats[name] || null,
+      }));
+
+      // prefer online agents (heartbeat within last 10 min), fall back to all
+      const onlineCutoff = Date.now() - 10 * 60 * 1000;
+      const online = candidates.filter(a => a.heartbeat && new Date(a.heartbeat.ts).getTime() > onlineCutoff);
+      const pool   = online.length > 0 ? online : candidates;
+
+      let best = null;
+
+      if (GPU_TASKS.has(task)) {
+        const gpu = pool.filter(a => a.capabilities?.gpu);
+        if (gpu.length) best = gpu.sort((a, b) => (b.capabilities.gpu_vram_gb || 0) - (a.capabilities.gpu_vram_gb || 0))[0];
+      } else if (CLAUDE_TASKS.has(task)) {
+        const cli = pool.filter(a => a.capabilities?.claude_cli);
+        if (cli.length) best = cli.sort((a, b) => (CTX_PRIORITY[b.capabilities.context_size] || 0) - (CTX_PRIORITY[a.capabilities.context_size] || 0))[0];
+      }
+
+      if (!best) {
+        // match preferred_tasks
+        const byPref = pool.filter(a => (a.capabilities?.preferred_tasks || []).includes(task));
+        if (byPref.length) best = byPref[0];
+      }
+
+      if (!best && pool.length) best = pool[0];
+      if (!best) return json(res, 404, { error: 'No agents available' });
+      return json(res, 200, { agent: best, task });
     }
 
     if (method === 'GET' && path === '/api/heartbeats') {
@@ -363,6 +450,54 @@ async function handleRequest(req, res) {
         });
       return json(res, 200, result);
     }
+    // ── GET /api/projects/:owner/:repo/github — live issues + PRs (public) ─
+    // Must be before projectPublicDetailMatch (which would otherwise eat the /github suffix)
+    if (method === 'GET' && path.endsWith('/github')) {
+      const githubSubMatch = path.match(/^\/api\/projects\/([^/]+(?:\/[^/]+|%2F[^/]+))\/github$/i);
+      if (githubSubMatch) {
+        const fullName = decodeURIComponent(githubSubMatch[1]);
+        if (!globalThis._githubCache) globalThis._githubCache = new Map();
+        const cached = globalThis._githubCache.get(fullName);
+        const bustCache = url.searchParams.get('refresh') === '1';
+        if (cached && !bustCache && (Date.now() - cached.ts) < 5 * 60 * 1000) {
+          return json(res, 200, cached.data);
+        }
+        const { execSync } = await import('child_process');
+        function ghq(args, fields) {
+          try {
+            const out = execSync(`gh ${args} --json ${fields}`, { encoding: 'utf8', stdio: ['pipe','pipe','pipe'] });
+            return JSON.parse(out);
+          } catch { return null; }
+        }
+        const issues = ghq(`issue list --repo ${fullName} --state open --limit 50`,
+          'number,title,labels,url,author,createdAt,updatedAt,comments') || [];
+        const prs = ghq(`pr list --repo ${fullName} --state open --limit 30`,
+          'number,title,author,url,isDraft,reviewDecision,mergeable,createdAt,updatedAt,labels') || [];
+        const result = {
+          repo: fullName,
+          fetchedAt: new Date().toISOString(),
+          issues: issues.map(i => ({
+            number: i.number, title: i.title, url: i.url,
+            labels: (i.labels || []).map(l => ({ name: l.name, color: l.color })),
+            author: i.author?.login || i.author,
+            createdAt: i.createdAt, updatedAt: i.updatedAt,
+            commentCount: (i.comments || []).length,
+          })),
+          prs: (prs || []).map(p => ({
+            number: p.number, title: p.title, url: p.url,
+            author: p.author?.login || p.author,
+            isDraft: p.isDraft || false,
+            reviewDecision: p.reviewDecision || null,
+            mergeable: p.mergeable || null,
+            createdAt: p.createdAt, updatedAt: p.updatedAt,
+            labels: (p.labels || []).map(l => ({ name: l.name, color: l.color })),
+          })),
+        };
+        globalThis._githubCache.set(fullName, { ts: Date.now(), data: result });
+        return json(res, 200, result);
+      }
+    }
+
     const projectPublicDetailMatch = path.match(/^\/api\/projects\/([^/]+(?:\/[^/]+|%2F[^/]+))$/i);
     if (method === 'GET' && projectPublicDetailMatch) {
       const fullName = decodeURIComponent(projectPublicDetailMatch[1]);
@@ -399,6 +534,20 @@ async function handleRequest(req, res) {
       const body = await readBody(req);
       if (!body.title) return json(res, 400, { error: 'title required' });
       const q = await readQueue();
+
+      // Scout dedup: if a scout_key is provided, reject if it already exists
+      // anywhere in the queue (active OR completed) to prevent hourly re-filing.
+      if (body.scout_key) {
+        const allExisting = [...(q.items||[]), ...(q.completed||[])];
+        const exists = allExisting.some(i =>
+          i.scout_key === body.scout_key ||
+          (i.tags || []).includes(body.scout_key)
+        );
+        if (exists) {
+          return json(res, 200, { ok: false, duplicate: true, scout_key: body.scout_key });
+        }
+      }
+
       // Infer preferred_executor if not specified
       const inferExecutor = (b) => {
         if (b.preferred_executor) return b.preferred_executor;
@@ -649,6 +798,39 @@ async function handleRequest(req, res) {
       return json(res, 201, { ok: true, token, agent: { ...agents[body.name], token } });
     }
 
+    // ── POST /api/agents/:name — publish capabilities at startup (upsert) ─
+    const agentNameMatch = path.match(/^\/api\/agents\/([^/]+)$/);
+    if (method === 'POST' && agentNameMatch) {
+      const name = decodeURIComponent(agentNameMatch[1]);
+      const body = await readBody(req);
+      const agents = await readAgents();
+      if (!agents[name]) {
+        // auto-register on first capability publish
+        const token = `rcc-agent-${name}-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+        agents[name] = {
+          name,
+          host: body.host || 'unknown',
+          type: body.type || 'full',
+          token,
+          registeredAt: new Date().toISOString(),
+          lastSeen: null,
+          capabilities: {},
+          billing: { claude_cli: 'fixed', inference_key: 'metered', gpu: 'fixed' },
+        };
+        AUTH_TOKENS.add(token);
+      } else {
+        if (body.host) agents[name].host = body.host;
+        if (body.type) agents[name].type = body.type;
+      }
+      await writeAgents(agents);
+      if (body.capabilities) {
+        const caps = await readCapabilities();
+        caps[name] = { ...(caps[name] || {}), ...body.capabilities };
+        await writeCapabilities(caps);
+      }
+      return json(res, 200, { ok: true, token: agents[name].token, agent: agents[name] });
+    }
+
     // ── PATCH /api/agents/:name — update capabilities ─────────────────────
     const agentPatchMatch = path.match(/^\/api\/agents\/([^/]+)$/);
     if (method === 'PATCH' && agentPatchMatch) {
@@ -656,11 +838,16 @@ async function handleRequest(req, res) {
       const body = await readBody(req);
       const agents = await readAgents();
       if (!agents[name]) return json(res, 404, { error: 'Agent not found' });
-      if (body.capabilities) Object.assign(agents[name].capabilities, body.capabilities);
-      if (body.billing) Object.assign(agents[name].billing, body.billing);
+      if (body.capabilities) Object.assign(agents[name].capabilities || {}, body.capabilities);
+      if (body.billing) Object.assign(agents[name].billing || {}, body.billing);
       if (body.host) agents[name].host = body.host;
       if (body.type) agents[name].type = body.type;
       await writeAgents(agents);
+      if (body.capabilities) {
+        const caps = await readCapabilities();
+        caps[name] = { ...(caps[name] || {}), ...body.capabilities };
+        await writeCapabilities(caps);
+      }
       return json(res, 200, { ok: true, agent: agents[name] });
     }
 
@@ -724,12 +911,36 @@ async function handleRequest(req, res) {
       return json(res, 201, { ok: true, lesson });
     }
 
+    // ── GET /api/lessons/trending — top lessons by score + recency ────────
+    if (method === 'GET' && path === '/api/lessons/trending') {
+      const limit = parseInt(url.searchParams.get('limit') || '5', 10);
+      const recentDays = parseInt(url.searchParams.get('days') || '7', 10);
+      const lessons = await getTrendingLessons({ limit, recentDays });
+      const context = url.searchParams.get('format') === 'context' ? formatTrendingForHeartbeat(lessons) : null;
+      return json(res, 200, { lessons, context, count: lessons.length });
+    }
+
+    // ── GET /api/lessons/heartbeat — context block for heartbeat ──────────
+    if (method === 'GET' && path === '/api/lessons/heartbeat') {
+      const domains = (url.searchParams.get('domains') || '').split(',').filter(Boolean);
+      const context = await getHeartbeatContext({ domains });
+      return json(res, 200, { context });
+    }
+
     // ── GET /api/lessons?domain=X&q=keyword+keyword ───────────────────────
+    // If no domain specified but q= is present, search across all domains
     if (method === 'GET' && path.startsWith('/api/lessons')) {
-      const domain = url.searchParams.get('domain') || 'general';
+      const domain = url.searchParams.get('domain');
       const q = (url.searchParams.get('q') || '').split(/\s+/).filter(Boolean);
       const limit = parseInt(url.searchParams.get('limit') || '5', 10);
-      const lessons = await queryLessons({ domain, keywords: q, limit });
+
+      let lessons;
+      if (!domain) {
+        // Cross-domain search
+        lessons = await queryAllLessons({ keywords: q, limit });
+      } else {
+        lessons = await queryLessons({ domain, keywords: q, limit });
+      }
       const context = url.searchParams.get('format') === 'context' ? formatLessonsForContext(lessons) : null;
       return json(res, 200, { lessons, context, count: lessons.length });
     }
@@ -784,6 +995,59 @@ async function handleRequest(req, res) {
           const overlay = projectMap.get(r.full_name) || {};
           return { ...base, ...overlay };
         });
+      return json(res, 200, result);
+    }
+
+    // ── GET /api/projects/:owner/:repo/github — live issues + PRs ────────
+    // Must be before projectDetailMatch (which would otherwise eat the /github suffix)
+    const projectGithubMatch = path.match(/^\/api\/projects\/([^/]+(?:\/[^/]+|%2F[^/]+))\/github$/i);
+    if (method === 'GET' && projectGithubMatch) {
+      const fullName = decodeURIComponent(projectGithubMatch[1]);
+      // 5-minute in-memory cache
+      if (!globalThis._githubCache) globalThis._githubCache = new Map();
+      const cached = globalThis._githubCache.get(fullName);
+      const bustCache = url.searchParams.get('refresh') === '1';
+      if (cached && !bustCache && (Date.now() - cached.ts) < 5 * 60 * 1000) {
+        return json(res, 200, cached.data);
+      }
+      const { execSync } = await import('child_process');
+      function ghq(args, fields) {
+        try {
+          const out = execSync(`gh ${args} --json ${fields}`, { encoding: 'utf8', stdio: ['pipe','pipe','pipe'] });
+          return JSON.parse(out);
+        } catch { return null; }
+      }
+      const issues = ghq(`issue list --repo ${fullName} --state open --limit 50`,
+        'number,title,labels,url,author,createdAt,updatedAt,comments') || [];
+      const prs = ghq(`pr list --repo ${fullName} --state open --limit 30`,
+        'number,title,author,url,isDraft,reviewDecision,mergeable,createdAt,updatedAt,labels') || [];
+      const result = {
+        repo: fullName,
+        fetchedAt: new Date().toISOString(),
+        issues: issues.map(i => ({
+          number: i.number,
+          title: i.title,
+          url: i.url,
+          labels: (i.labels || []).map(l => ({ name: l.name, color: l.color })),
+          author: i.author?.login || i.author,
+          createdAt: i.createdAt,
+          updatedAt: i.updatedAt,
+          commentCount: (i.comments || []).length,
+        })),
+        prs: (prs || []).map(p => ({
+          number: p.number,
+          title: p.title,
+          url: p.url,
+          author: p.author?.login || p.author,
+          isDraft: p.isDraft || false,
+          reviewDecision: p.reviewDecision || null,
+          mergeable: p.mergeable || null,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          labels: (p.labels || []).map(l => ({ name: l.name, color: l.color })),
+        })),
+      };
+      globalThis._githubCache.set(fullName, { ts: Date.now(), data: result });
       return json(res, 200, result);
     }
 
