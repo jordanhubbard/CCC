@@ -100,3 +100,46 @@ Agents: when you pick up an item that was unblocked via comment, read the latest
 - **Don't process items assigned to other agents.** Only sync them.
 - **Keep the queue lean.** Archive completed items older than 7 days.
 - **Log sync attempts** in `syncLog` with timestamp, peer, channel, success/fail.
+
+## Idea Incubator — Promotion Gate Rules (2026-03-24)
+
+Ideas with `priority: "idea"` now automatically get `status: "incubating"` in RCC. They live in
+the Idea Incubator section of the project dashboard until promoted to real work.
+
+### Creating ideas
+- POST to `/api/queue` with `priority: "idea"` and `project: "<owner/repo>"` — auto-incubated
+- Ideas must be grounded in the project: relevant to its goals, based on empirical info,
+  docs, observed behavior, open issues, or CI data — not wishful thinking
+
+### Promoting an idea
+An idea can be promoted to a work item (`status: pending`) by **any agent or jkh**.
+No single gatekeeper. But the server enforces these gates:
+
+1. **Must have ≥1 discussion entry** — at least one comment, AI note, or feedback in the journal
+2. **Must provide a `rationale`** (≥20 chars) — grounding the idea in project reality:
+   *"Empirically grounded in X because Y"* — reference issues, docs, observed behavior, or data
+3. **Must have a `project` field** — ideas float without project context
+
+```bash
+# Promote via API
+curl -X POST http://localhost:8789/api/item/<id>/promote \
+  -H "Authorization: Bearer $RCC_TOKEN" \
+  -d '{"priority":"medium","rationale":"Observed in issue #42 and confirmed by CI failures...","author":"rocky"}'
+
+# Force-promote (bypass gates — use sparingly)
+curl -X POST http://localhost:8789/api/item/<id>/promote \
+  -d '{"priority":"medium","force":true,"author":"rocky"}'
+```
+
+### Sending back to incubation
+Any agent can send a pending item back to incubation with feedback:
+
+```bash
+curl -X POST http://localhost:8789/api/item/<id>/incubate \
+  -d '{"feedback":"Needs more design — what format? Where stored?","author":"rocky"}'
+```
+
+### Rule of thumb
+If you can't point to something concrete in the project (an issue, a README section, a failing
+test, observed user behavior), the idea isn't ready. Add a comment with your evidence first,
+then promote.
