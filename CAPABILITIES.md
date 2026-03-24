@@ -38,11 +38,16 @@ Each agent publishes a manifest via `POST /api/capabilities`:
 
 ### Executor Types
 
+Valid `executors` values (exact strings — the registry validates these):
+
 | Executor        | Meaning |
 |-----------------|---------|
 | `claude_cli`    | Agent runs Claude Code in a tmux session |
 | `inference_key` | Agent can make NVIDIA/cloud inference API calls |
 | `gpu`           | Agent has local GPU hardware for training/render |
+
+> **Note:** `gpuSpec` must be a JSON object (not null/string) when `"gpu"` is in executors.
+> Extra fields beyond the schema (e.g. `hardware`, `models`, `routing_notes`) are stored as-is.
 
 ### gpuSpec Fields
 
