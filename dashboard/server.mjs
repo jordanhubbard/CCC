@@ -6,13 +6,28 @@
 
 import express from 'express';
 import { readFile, writeFile, appendFile } from 'fs/promises';
-import { existsSync, createReadStream } from 'fs';
+import { existsSync, createReadStream, readdirSync, readFileSync } from 'fs';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { createInterface } from 'readline';
 import { createReadStream as createRS } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { initCrashReporter } from '../lib/crash-reporter.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Load agent names from rcc/agents/*.capabilities.json (config-driven, no hardcoded list)
+function loadCapabilityNames() {
+  try {
+    const capDir = join(__dirname, '..', 'rcc', 'agents');
+    return readdirSync(capDir)
+      .filter(f => f.endsWith('.capabilities.json'))
+      .map(f => { try { return JSON.parse(readFileSync(join(capDir, f), 'utf8')).name; } catch { return null; } })
+      .filter(Boolean);
+  } catch { return []; }
+}
 
 // Initialize crash reporter early — before anything else can throw
 initCrashReporter({
@@ -28,13 +43,24 @@ const AUTH_TOKEN = process.env.RCC_AUTH_TOKENS || process.env.RCC_AGENT_TOKEN ||
 const QUEUE_PATH = '/home/jkh/.openclaw/workspace/workqueue/queue.json';
 const MC_PATH = '/home/jkh/.local/bin/mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
-const BUS_LOG_PATH = '/home/jkh/.openclaw/workspace/squirrelbus/bus.jsonl';
+const BUS_LOG_PATH  = '/home/jkh/.openclaw/workspace/squirrelbus/bus.jsonl';
+const ACK_LOG_PATH  = '/home/jkh/.openclaw/workspace/squirrelbus/acks.jsonl';
+const DEAD_LOG_PATH = '/home/jkh/.openclaw/workspace/squirrelbus/dead-letter.jsonl';
 
 // ── SquirrelBus peer fan-out registry ─────────────────────────────────────────
 const BUS_PEERS = {
   bullwinkle: process.env.BULLWINKLE_BUS_URL || '',
   natasha:    process.env.NATASHA_BUS_URL    || '',
 };
+
+// Known /bus/receive URLs for delivery confirmation + retry
+const BUS_RECEIVE_URLS = {
+  bullwinkle: process.env.BULLWINKLE_URL || '',
+  natasha:    process.env.NATASHA_URL    || '',
+};
+
+const RETRY_DELAY_MS = parseInt(process.env.BUS_RETRY_DELAY_MS || '') || 5 * 60 * 1000;
+const MAX_RETRIES    = 3;
 const BULLWINKLE_TOKEN = process.env.BULLWINKLE_TOKEN || 'SQUIRRELBUS_TOKEN_REMOVED';
 const NATASHA_TOKEN    = process.env.NATASHA_TOKEN    || 'RCC_AUTH_TOKEN_REMOVED';
 const PEER_TOKENS = { bullwinkle: BULLWINKLE_TOKEN, natasha: NATASHA_TOKEN };
@@ -120,7 +146,7 @@ async function getHeartbeats() {
   // Start with in-memory heartbeats (includes any agent that has posted)
   const result = { ...heartbeats };
   // Also check MinIO for known persistent agents (fills gaps on cold start)
-  const knownAgents = ['rocky', 'bullwinkle', 'natasha', 'boris'];
+  const knownAgents = loadCapabilityNames();
   for (const agent of knownAgents) {
     if (!result[agent]) {
       const minio = await fetchMinIOHeartbeat(agent);
@@ -713,7 +739,7 @@ function renderUnifiedPage() {
       try {
         const hbs = await fetch('/api/heartbeats').then(r => r.json());
         const el = document.getElementById('agent-cards');
-        const agentNames = Object.keys(hbs).length > 0 ? Object.keys(hbs) : ['rocky', 'bullwinkle', 'natasha'];
+        const agentNames = Object.keys(hbs);
         el.innerHTML = agentNames.map(name => {
           const hb = hbs[name] || {};
           const emoji = EMOJIS[name] || '📨';
@@ -1019,11 +1045,16 @@ function renderUnifiedPage() {
     let busMessages = [];
     let busFilter = 'all';
     let lastBusTs = null;
+    let busDeliveryStatus = {}; // messageId → 'acked'|'pending-ack'|'dead'
 
     async function loadBus(initial) {
       try {
         const url = initial ? '/bus/messages?limit=50' : '/bus/messages?limit=50' + (lastBusTs ? '&since=' + encodeURIComponent(lastBusTs) : '');
-        const msgs = await fetch(url).then(r => r.json());
+        const [msgs, delivery] = await Promise.all([
+          fetch(url).then(r => r.json()),
+          fetch('/bus/delivery-status').then(r => r.json()).catch(() => ({})),
+        ]);
+        busDeliveryStatus = delivery;
         if (initial) {
           busMessages = msgs;
         } else if (msgs.length > 0) {
@@ -1105,11 +1136,15 @@ function renderUnifiedPage() {
           bodyHtml = '<pre style="background:#0d1117;padding:6px;border-radius:4px;overflow-x:auto;font-size:11px">' + esc(JSON.stringify(msg, null, 2)) + '</pre>';
       }
 
+      const dStatus = busDeliveryStatus[msg.id];
+      const dIcon = dStatus === 'acked' ? ' ✅' : dStatus === 'dead' ? ' 💀' : dStatus === 'pending-ack' ? ' 🔴' : '';
+
       return '<div class="bus-msg" data-from="' + esc(msg.from) + '">' +
         '<div class="bus-header">' +
           '<div>' + fromEmoji + ' <strong style="color:#f0f6fc">' + esc(msg.from) + '</strong>' +
           ' <span style="color:#484f58">→</span> <strong>' + esc(toLabel) + '</strong>' +
-          ' <span class="type-badge" style="background:' + typeColor + '">' + esc(msg.type) + '</span></div>' +
+          ' <span class="type-badge" style="background:' + typeColor + '">' + esc(msg.type) + '</span>' +
+          (dIcon ? '<span title="' + (dStatus || '') + '" style="margin-left:6px;font-size:13px">' + dIcon + '</span>' : '') + '</div>' +
           '<div style="color:#484f58;font-size:11px">#' + msg.seq + ' · ' + esc(ts) + '</div>' +
         '</div>' +
         subject + bodyHtml +
@@ -1625,6 +1660,88 @@ let busSeq = 0;
 const busSSEClients = new Set();
 const busPresence = {};
 
+// Delivery confirmation state
+const busAcks       = new Map(); // messageId → { messageId, agent, ts }
+const busRetryQueue = new Map(); // messageId → { msg, targetAgent, retryCount, nextRetryAt, lastAttemptAt, timer }
+const busDeadLetters = [];       // [{ ...msg, _deadReason, _deadAt, _retryCount }]
+
+async function persistAck(ack) {
+  try { await appendFile(ACK_LOG_PATH, JSON.stringify(ack) + '\n', 'utf8'); } catch {}
+}
+
+async function persistDead(entry) {
+  try { await appendFile(DEAD_LOG_PATH, JSON.stringify(entry) + '\n', 'utf8'); } catch {}
+}
+
+function moveToDead(messageId, reason) {
+  const entry = busRetryQueue.get(messageId);
+  if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
+  busRetryQueue.delete(messageId);
+  const dead = { ...entry.msg, _deadReason: reason, _deadAt: new Date().toISOString(), _retryCount: entry.retryCount };
+  busDeadLetters.push(dead);
+  persistDead(dead);
+  console.log(`[bus-dead] ${messageId} → dead letter (${reason})`);
+}
+
+async function attemptRetry(messageId) {
+  // Already acked?
+  if (busAcks.has(messageId)) { busRetryQueue.delete(messageId); return; }
+  const entry = busRetryQueue.get(messageId);
+  if (!entry) return;
+
+  entry.retryCount++;
+  entry.lastAttemptAt = new Date().toISOString();
+  const url   = BUS_RECEIVE_URLS[entry.targetAgent];
+  const token = PEER_TOKENS[entry.targetAgent];
+
+  if (url) {
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 10000);
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(entry.msg),
+        signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      console.log(`[bus-retry] → ${entry.targetAgent} (attempt ${entry.retryCount}): HTTP ${resp.status}`);
+    } catch (err) {
+      console.warn(`[bus-retry] → ${entry.targetAgent} (attempt ${entry.retryCount}): ${err.message}`);
+    }
+  }
+
+  if (entry.retryCount >= MAX_RETRIES) {
+    moveToDead(messageId, 'max-retries');
+  } else {
+    scheduleRetry(messageId);
+  }
+}
+
+function scheduleRetry(messageId) {
+  const entry = busRetryQueue.get(messageId);
+  if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.nextRetryAt = new Date(Date.now() + RETRY_DELAY_MS).toISOString();
+  entry.timer = setTimeout(() => attemptRetry(messageId), RETRY_DELAY_MS);
+}
+
+function trackMessageForRetry(msg) {
+  // Only track directed messages to known agents with a receive URL
+  if (msg.to === 'all' || !BUS_RECEIVE_URLS[msg.to]) return;
+  busRetryQueue.set(msg.id, {
+    msg,
+    targetAgent: msg.to,
+    retryCount: 0,
+    createdAt: new Date().toISOString(),
+    nextRetryAt: null,
+    lastAttemptAt: null,
+    timer: null,
+  });
+  scheduleRetry(msg.id);
+}
+
 async function initBusSeq() {
   try {
     if (!existsSync(BUS_LOG_PATH)) return;
@@ -1692,6 +1809,9 @@ async function appendBusMessage(msg) {
 
   // Fire-and-forget fan-out to registered peer endpoints
   fanOutBusMessage(full);
+
+  // Track for delivery confirmation + retry (directed messages only)
+  trackMessageForRetry(full);
 
   return full;
 }
@@ -1765,14 +1885,65 @@ app.get('/bus/presence', (req, res) => {
   res.json(busPresence);
 });
 
+// POST /bus/ack — recipient confirms delivery
+app.post('/bus/ack', requireAuth, async (req, res) => {
+  const { messageId, agent } = req.body;
+  if (!messageId || !agent) return res.status(400).json({ error: 'messageId and agent required' });
+  const ack = { messageId, agent, ts: new Date().toISOString() };
+  busAcks.set(messageId, ack);
+  // Clear retry timer
+  const retryEntry = busRetryQueue.get(messageId);
+  if (retryEntry) {
+    if (retryEntry.timer) clearTimeout(retryEntry.timer);
+    busRetryQueue.delete(messageId);
+  }
+  await persistAck(ack);
+  res.json({ ok: true, ack });
+});
+
+// GET /bus/dead — inspect dead letter queue
+app.get('/bus/dead', (req, res) => {
+  res.json(busDeadLetters);
+});
+
+// GET /bus/message/:id/status — delivery status for a message
+app.get('/bus/message/:id/status', async (req, res) => {
+  const id = req.params.id;
+  const ack   = busAcks.get(id) || null;
+  const retry = busRetryQueue.get(id) || null;
+  const dead  = busDeadLetters.find(d => d.id === id) || null;
+
+  let ackState = 'fire-and-forget';
+  if (dead)  ackState = 'dead';
+  else if (ack) ackState = 'acked';
+  else if (retry) ackState = 'pending-ack';
+
+  res.json({
+    id,
+    ackState,
+    ack: ack || null,
+    retryCount: retry?.retryCount ?? dead?._retryCount ?? 0,
+    nextRetryAt: retry?.nextRetryAt ?? null,
+    deadReason: dead?._deadReason ?? null,
+  });
+});
+
+// GET /bus/delivery-status — bulk status map for dashboard
+app.get('/bus/delivery-status', (req, res) => {
+  const result = {};
+  for (const [id] of busAcks) result[id] = 'acked';
+  for (const [id] of busRetryQueue) result[id] = 'pending-ack';
+  for (const d of busDeadLetters) result[d.id] = 'dead';
+  res.json(result);
+});
+
 // ── Agent Status Digest ────────────────────────────────────────────────────────
 
-const DIGEST_AGENTS = [
-  { name: 'rocky',      emoji: '🐿️',  healthFile: 'agent-health-rocky.json' },
-  { name: 'bullwinkle', emoji: '🫎',   healthFile: 'agent-health-bullwinkle.json' },
-  { name: 'natasha',    emoji: '🕵️‍♀️', healthFile: 'agent-health-natasha.json' },
-  { name: 'boris',      emoji: '🕵️‍♂️', healthFile: 'agent-heartbeat-boris.json' },
-];
+const DIGEST_AGENTS = loadCapabilityNames().map(name => ({
+  name,
+  emoji: '📨',
+  healthFile: `agent-health-${name}.json`,
+}));
 
 async function fetchMinIOJson(path) {
   try {

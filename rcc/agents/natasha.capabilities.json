@@ -1,0 +1,12 @@
+{
+  "name": "natasha",
+  "gpu": true,
+  "gpu_model": "nvidia-blackwell",
+  "gpu_vram_gb": 192,
+  "gpu_count": 1,
+  "claude_cli": true,
+  "context_size": "large",
+  "arch": "aarch64",
+  "tools": ["bash", "python", "node", "git", "cuda", "nvcc", "docker"],
+  "preferred_tasks": ["training", "inference", "render", "code", "gpu"]
+}

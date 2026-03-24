@@ -1,0 +1,12 @@
+{
+  "name": "boris",
+  "gpu": true,
+  "gpu_model": "nvidia-l40",
+  "gpu_vram_gb": 96,
+  "gpu_count": 2,
+  "claude_cli": false,
+  "context_size": "medium",
+  "arch": "x86_64",
+  "tools": ["bash", "python", "docker", "cuda", "nvcc", "ffmpeg"],
+  "preferred_tasks": ["render", "training", "inference", "gpu", "video"]
+}

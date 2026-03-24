@@ -24,7 +24,7 @@ const GEN_SCRIPT = path.join(WORKSPACE, 'workqueue', 'scripts', 'gen-dashboard.p
 const AZURE_SAS = 'https://loomdd566f62.blob.core.windows.net/assets/agent-dashboard.html?se=2029-03-19T02%3A25Z&sp=rwdlcu&spr=https&sv=2026-02-06&ss=b&srt=sco&sig=Dn4faVsJCz0ufWyHmiKCFCrgiLQkSIRtp7MLmqXKiUA%3D';
 
 const PORT = 8787;
-const TOKEN = 'wq-rocky-8787'; // simple bearer token for button requests
+const TOKEN = process.env.WQ_API_TOKEN || 'wq-api-token'; // set WQ_API_TOKEN in .env
 
 // ── Slack DM helper ───────────────────────────────────────────────────────────
 const SLACK_TOKEN = process.env.SLACK_TOKEN || ''; // set via environment, not hardcoded
