@@ -1392,7 +1392,9 @@ async function handleRequest(req, res) {
 
   } catch (err) {
     console.error('[rcc-api] Error:', err.message);
-    json(res, 500, { error: err.message });
+    if (!res.headersSent) {
+      json(res, 500, { error: err.message });
+    }
   }
 }
 
