@@ -302,6 +302,7 @@ function projectDetailHtml(projectId) {
   <script>
     const projectId=${JSON.stringify(projectId)};
     const encodedId=${JSON.stringify(encodedId)};
+    function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
     function timeAgo(ds){if(!ds)return'';const s=Math.floor((Date.now()-new Date(ds))/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
     function labelFg(hex){if(!hex||hex==='000000')return'#8b949e';const r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);return(r*299+g*587+b*114)/1000>128?'#0d1117':'#f0f6fc';}
     function labelChip(l){const bg='#'+((l.color&&l.color!=='000000')?l.color:'333');const fg=labelFg(l.color);return\`<span class="label-chip" style="background:\${bg}33;border-color:\${bg}88;color:\${fg}">\${esc(l.name||'')}</span>\`;}
@@ -711,7 +712,8 @@ async function handleRequest(req, res) {
         tags: body.tags || [],
         // Scout dedup key — preserved for itemAlreadyExists() checks
         scout_key: body.scout_key || null,
-        repo: body.repo || null,
+        repo: body.repo || body.project || null,
+        project: body.project || body.repo || null,
       };
       if (!q.items) q.items = [];
       q.items.push(item);
@@ -771,7 +773,7 @@ async function handleRequest(req, res) {
       const q = await readQueue();
       const item = q.items?.find(i => i.id === id);
       if (!item) return json(res, 404, { error: 'Item not found' });
-      const allowed = ['title','description','priority','assignee','status','notes','choices','claimedBy','claimedAt','result','completedAt'];
+      const allowed = ['title','description','priority','assignee','status','notes','choices','claimedBy','claimedAt','result','completedAt','project','repo'];
       const now = new Date().toISOString();
       const changed = [];
       for (const field of allowed) {
