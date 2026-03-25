@@ -1388,6 +1388,49 @@ async function handleRequest(req, res) {
       return json(res, 200, { ok: true, itemsCreated: created });
     }
 
+    // ── POST /api/slack/send — send a message via Slack as a named agent ──
+    if (method === 'POST' && path === '/api/slack/send') {
+      const slackToken = process.env.SLACK_TOKEN;
+      if (!slackToken) {
+        return json(res, 503, { error: 'Slack not configured on this RCC server' });
+      }
+      const body = await readBody(req);
+      const { text, channel, as_agent, thread_ts } = body;
+      if (!text || !channel) {
+        return json(res, 400, { error: 'text and channel are required' });
+      }
+
+      // Load agent display config from capabilities file if available
+      let username = as_agent ? (as_agent.charAt(0).toUpperCase() + as_agent.slice(1)) : 'Agent';
+      let icon_emoji = ':robot_face:';
+      if (as_agent) {
+        try {
+          const capPath = new URL(`../agents/${as_agent}.capabilities.json`, import.meta.url).pathname;
+          const capRaw = await readFile(capPath, 'utf8');
+          const cap = JSON.parse(capRaw);
+          if (cap.slack?.username) username = cap.slack.username;
+          if (cap.slack?.icon_emoji) icon_emoji = cap.slack.icon_emoji;
+        } catch { /* no capabilities file — use defaults */ }
+      }
+
+      const payload = { channel, text, username, icon_emoji };
+      if (thread_ts) payload.thread_ts = thread_ts;
+
+      const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${slackToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const slackData = await slackRes.json();
+      if (!slackData.ok) {
+        return json(res, 502, { error: slackData.error || 'Slack API error' });
+      }
+      return json(res, 200, { ok: true, ts: slackData.ts });
+    }
+
     return json(res, 404, { error: 'Not found' });
 
   } catch (err) {

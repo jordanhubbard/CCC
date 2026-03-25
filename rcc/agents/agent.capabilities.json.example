@@ -13,5 +13,9 @@
   "host": "hub-node",
   "always_on": true,
   "tools": ["bash", "node", "python", "git", "gh", "docker", "mc", "curl"],
-  "preferred_tasks": ["code", "review", "debug", "triage", "ci", "deploy", "coordination"]
+  "preferred_tasks": ["code", "review", "debug", "triage", "ci", "deploy", "coordination"],
+  "slack": {
+    "username": "Agent Name",
+    "icon_emoji": ":robot_face:"
+  }
 }
