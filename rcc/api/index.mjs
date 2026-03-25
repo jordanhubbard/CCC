@@ -447,6 +447,258 @@ function verifySlackSignature(rawBody, headers) {
   try { return timingSafeEqual(Buffer.from(expected), Buffer.from(sig)); } catch { return false; }
 }
 
+// ── Shared Slack event/command handlers ────────────────────────────────────
+
+// Handle an inbound Slack event (app_mention or DM). Called by HTTP handler and Socket Mode.
+async function handleSlackEvent(event, teamId) {
+  const token = getSlackToken(teamId);
+  if (!token) return;
+
+  // ── app_mention ──────────────────────────────────────────────────────────
+  if (event.type === 'app_mention') {
+    const { channel, user, text, thread_ts, ts } = event;
+    const cleanText = (text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
+    const replyThread = thread_ts || ts;
+
+    await postSlackReply(token, channel, '...', replyThread);
+
+    let ctxNote = '';
+    try {
+      const repos = await getPump().listRepos();
+      const projects = await readProjects();
+      let repo = repos.find(r => r.ownership?.slack_channel === channel);
+      if (!repo) {
+        const pe = projects.find(p => (p.slack_channels || []).some(c => c.channel_id === channel));
+        if (pe) repo = repos.find(r => r.full_name === pe.id);
+      }
+      if (repo) ctxNote = ` Context: project ${repo.full_name}. ${repo.description || ''}`.trimEnd();
+    } catch {}
+
+    const reply = await askBrain(
+      [
+        { role: 'system', content: `You are Rocky, an AI assistant. Be concise and helpful.${ctxNote}` },
+        { role: 'user', content: cleanText || '(no message text)' },
+      ],
+      { channel, user, teamId },
+    ).catch(() => "Sorry, I timed out thinking about that 🐿️");
+
+    await postSlackReply(token, channel, reply, replyThread);
+  }
+
+  // ── DM messages (not from bots) ─────────────────────────────────────────
+  if (event.type === 'message' && !event.bot_id && event.channel?.startsWith('D')) {
+    const { channel, user, text, thread_ts, ts } = event;
+    if (!text) return;
+    const replyThread = thread_ts || ts;
+
+    const reply = await askBrain(
+      [
+        { role: 'system', content: 'You are Rocky, an AI assistant. Be concise and helpful.' },
+        { role: 'user', content: text },
+      ],
+      { channel, user, teamId },
+    ).catch(() => "Sorry, I timed out thinking about that 🐿️");
+
+    await postSlackReply(token, channel, reply, replyThread);
+  }
+}
+
+// Handle an inbound slash command payload. Returns { text, response_type } or null if handled inline.
+// For commands that need async responses, caller must handle the response_url follow-up.
+async function handleSlackCommand(payload) {
+  const { text = '', response_url, channel_id, team_id, user_id } = payload;
+  const args = (text || '').trim().split(/\s+/);
+  const sub = args[0]?.toLowerCase() || '';
+
+  if (!sub || sub === 'help') {
+    return {
+      response_type: 'ephemeral',
+      text: '*Rocky Command Center — Available Commands*\n' +
+        '• `/rcc status` — agent health summary\n' +
+        '• `/rcc queue` — top 5 pending work items\n' +
+        '• `/rcc ask <question>` — ask Rocky a question\n' +
+        '• `/rcc help` — this message',
+    };
+  }
+
+  if (sub === 'status') {
+    const agents = await readAgents();
+    const q = await readQueue();
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    const agentEntries = Object.entries(agents);
+    const onlineNames = new Set(
+      agentEntries.filter(([name]) => heartbeats[name] && new Date(heartbeats[name].ts).getTime() > cutoff).map(([n]) => n)
+    );
+    const pending = (q.items || []).filter(i => !['completed', 'cancelled'].includes(i.status));
+    const lines = [
+      `*RCC Status* — ${onlineNames.size}/${agentEntries.length} agents online, ${pending.length} pending`,
+      ...agentEntries.map(([name]) => `${onlineNames.has(name) ? '✅' : '⬛'} ${name}`),
+    ];
+    return { response_type: 'in_channel', text: lines.join('\n') };
+  }
+
+  if (sub === 'queue') {
+    const q = await readQueue();
+    const pending = (q.items || []).filter(i => !['completed', 'cancelled'].includes(i.status)).slice(0, 5);
+    if (!pending.length) {
+      return { response_type: 'in_channel', text: '*Queue is empty* ✓' };
+    }
+    const lines = pending.map((item, i) =>
+      `${i + 1}. *${item.title || 'Untitled'}* — \`${item.status || 'pending'}\`${item.project ? ` [${item.project}]` : ''}`
+    );
+    return { response_type: 'in_channel', text: `*Top ${pending.length} Queue Items*\n${lines.join('\n')}` };
+  }
+
+  if (sub === 'ask') {
+    const question = args.slice(1).join(' ').trim();
+    if (!question) {
+      return { response_type: 'ephemeral', text: 'Usage: `/rcc ask <your question>`' };
+    }
+    // Fire async — caller handles immediate ack
+    setImmediate(async () => {
+      const answer = await askBrain(
+        [
+          { role: 'system', content: 'You are Rocky, an AI assistant. Be concise and helpful.' },
+          { role: 'user', content: question },
+        ],
+        { channel: channel_id, user: user_id, teamId: team_id },
+      ).catch(() => "Sorry, I timed out thinking about that 🐿️");
+
+      try {
+        if (response_url) {
+          await fetch(response_url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response_type: 'in_channel', text: answer, replace_original: false }),
+          });
+        } else {
+          const token = getSlackToken(team_id);
+          if (token && channel_id) await postSlackReply(token, channel_id, answer);
+        }
+      } catch (err) {
+        console.error('[rcc-api] Slash command reply error:', err.message);
+      }
+    });
+    return { response_type: 'in_channel', text: '...thinking 🐿️', _async: true };
+  }
+
+  return {
+    response_type: 'ephemeral',
+    text: `Unknown command \`/rcc ${sub}\`. Try \`/rcc help\`.`,
+  };
+}
+
+// ── Socket Mode client ──────────────────────────────────────────────────────
+
+let _socketRetries = 0;
+const SOCKET_MAX_RETRIES = 10;
+
+async function startSocketMode() {
+  const appToken = process.env.SLACK_APP_TOKEN;
+  if (!appToken) return;
+
+  if (_socketRetries >= SOCKET_MAX_RETRIES) {
+    console.warn('[rcc-api] Socket Mode: max retries reached, giving up');
+    return;
+  }
+
+  let wssUrl;
+  try {
+    const r = await fetch('https://slack.com/api/apps.connections.open', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${appToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'apps.connections.open failed');
+    wssUrl = data.url;
+  } catch (err) {
+    console.error('[rcc-api] Socket Mode: failed to get WSS URL:', err.message);
+    _socketRetries++;
+    setTimeout(startSocketMode, 5000);
+    return;
+  }
+
+  let ws;
+  try {
+    ws = new WebSocket(wssUrl);
+  } catch (err) {
+    console.error('[rcc-api] Socket Mode: WebSocket constructor failed:', err.message);
+    _socketRetries++;
+    setTimeout(startSocketMode, 5000);
+    return;
+  }
+
+  ws.addEventListener('open', () => {
+    _socketRetries = 0;
+    console.log('[rcc-api] Slack Socket Mode connected');
+  });
+
+  ws.addEventListener('message', async (msgEvent) => {
+    let envelope;
+    try {
+      envelope = JSON.parse(msgEvent.data);
+    } catch {
+      return; // ignore non-JSON
+    }
+
+    const { envelope_id, type, payload } = envelope;
+
+    // ACK immediately
+    if (envelope_id) {
+      try { ws.send(JSON.stringify({ envelope_id })); } catch {}
+    }
+
+    try {
+      if (type === 'hello') {
+        console.log('[rcc-api] Socket Mode: hello received');
+
+      } else if (type === 'disconnect') {
+        console.log('[rcc-api] Socket Mode: disconnect received, reconnecting in 2s');
+        ws.close();
+        setTimeout(startSocketMode, 2000);
+
+      } else if (type === 'events_api') {
+        const event = payload?.event;
+        const teamId = payload?.team_id;
+        if (event && teamId) {
+          // Dedup
+          const eventId = payload?.event_id;
+          if (!eventId || trackEventId(eventId)) {
+            handleSlackEvent(event, teamId).catch(err =>
+              console.error('[rcc-api] Socket Mode event error:', err.message)
+            );
+          }
+        }
+
+      } else if (type === 'slash_commands') {
+        const result = await handleSlackCommand(payload || {}).catch(err => {
+          console.error('[rcc-api] Socket Mode command error:', err.message);
+          return null;
+        });
+        // For slash commands over Socket Mode, Slack expects the ACK to carry the response
+        // Re-send ACK with payload (second ACK with body)
+        if (result && envelope_id && !result._async) {
+          const { _async: _, ...response } = result;
+          try { ws.send(JSON.stringify({ envelope_id, payload: response })); } catch {}
+        }
+      }
+    } catch (err) {
+      console.error('[rcc-api] Socket Mode message handler error:', err.message);
+    }
+  });
+
+  ws.addEventListener('close', (evt) => {
+    if (evt.code === 1000) return; // clean close, no reconnect
+    console.warn(`[rcc-api] Socket Mode: connection closed (code ${evt.code}), reconnecting in 5s`);
+    _socketRetries++;
+    setTimeout(startSocketMode, 5000);
+  });
+
+  ws.addEventListener('error', (err) => {
+    console.error('[rcc-api] Socket Mode WebSocket error:', err.message || err);
+  });
+}
+
 // Ask brain and return the response text, with 25s timeout
 async function askBrain(messages, metadata = {}) {
   const b = await getBrain();
@@ -1500,63 +1752,10 @@ async function handleRequest(req, res) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
 
-      setImmediate(async () => {
-        try {
-          const token = getSlackToken(teamId);
-          if (!token) return;
-
-          // ── app_mention ────────────────────────────────────────────────
-          if (event.type === 'app_mention') {
-            const { channel, user, text, thread_ts, ts } = event;
-            const cleanText = (text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
-            const replyThread = thread_ts || ts;
-
-            // Post thinking indicator in thread
-            await postSlackReply(token, channel, '...', replyThread);
-
-            // Resolve project context from channel mapping
-            let ctxNote = '';
-            try {
-              const repos = await getPump().listRepos();
-              const projects = await readProjects();
-              let repo = repos.find(r => r.ownership?.slack_channel === channel);
-              if (!repo) {
-                const pe = projects.find(p => (p.slack_channels || []).some(c => c.channel_id === channel));
-                if (pe) repo = repos.find(r => r.full_name === pe.id);
-              }
-              if (repo) ctxNote = ` Context: project ${repo.full_name}. ${repo.description || ''}`.trimEnd();
-            } catch {}
-
-            const reply = await askBrain(
-              [
-                { role: 'system', content: `You are Rocky, an AI assistant. Be concise and helpful.${ctxNote}` },
-                { role: 'user', content: cleanText || '(no message text)' },
-              ],
-              { channel, user, teamId },
-            ).catch(() => "Sorry, I timed out thinking about that 🐿️");
-
-            await postSlackReply(token, channel, reply, replyThread);
-          }
-
-          // ── DM messages (not from bots) ────────────────────────────────
-          if (event.type === 'message' && !event.bot_id && event.channel?.startsWith('D')) {
-            const { channel, user, text, thread_ts, ts } = event;
-            if (!text) return;
-            const replyThread = thread_ts || ts;
-
-            const reply = await askBrain(
-              [
-                { role: 'system', content: 'You are Rocky, an AI assistant. Be concise and helpful.' },
-                { role: 'user', content: text },
-              ],
-              { channel, user, teamId },
-            ).catch(() => "Sorry, I timed out thinking about that 🐿️");
-
-            await postSlackReply(token, channel, reply, replyThread);
-          }
-        } catch (err) {
-          console.error('[rcc-api] Slack event processing error:', err.message);
-        }
+      setImmediate(() => {
+        handleSlackEvent(event, teamId).catch(err =>
+          console.error('[rcc-api] Slack event processing error:', err.message)
+        );
       });
 
       return; // already responded
@@ -1571,97 +1770,15 @@ async function handleRequest(req, res) {
       const body = parseFormBody(rawBody);
       const { text = '', response_url, channel_id, team_id, user_id } = body;
 
-      const args = text.trim().split(/\s+/);
-      const sub = args[0]?.toLowerCase() || '';
-
-      // /rcc help
-      if (!sub || sub === 'help') {
-        return json(res, 200, {
-          response_type: 'ephemeral',
-          text: '*Rocky Command Center — Available Commands*\n' +
-            '• `/rcc status` — agent health summary\n' +
-            '• `/rcc queue` — top 5 pending work items\n' +
-            '• `/rcc ask <question>` — ask Rocky a question\n' +
-            '• `/rcc help` — this message',
-        });
-      }
-
-      // /rcc status
-      if (sub === 'status') {
-        const agents = await readAgents();
-        const q = await readQueue();
-        const cutoff = Date.now() - 10 * 60 * 1000;
-        const agentEntries = Object.entries(agents);
-        const onlineNames = new Set(
-          agentEntries.filter(([name]) => heartbeats[name] && new Date(heartbeats[name].ts).getTime() > cutoff).map(([n]) => n)
-        );
-        const pending = (q.items || []).filter(i => !['completed', 'cancelled'].includes(i.status));
-        const lines = [
-          `*RCC Status* — ${onlineNames.size}/${agentEntries.length} agents online, ${pending.length} pending`,
-          ...agentEntries.map(([name]) => `${onlineNames.has(name) ? '✅' : '⬛'} ${name}`),
-        ];
-        return json(res, 200, { response_type: 'in_channel', text: lines.join('\n') });
-      }
-
-      // /rcc queue
-      if (sub === 'queue') {
-        const q = await readQueue();
-        const pending = (q.items || []).filter(i => !['completed', 'cancelled'].includes(i.status)).slice(0, 5);
-        if (!pending.length) {
-          return json(res, 200, { response_type: 'in_channel', text: '*Queue is empty* ✓' });
-        }
-        const lines = pending.map((item, i) =>
-          `${i + 1}. *${item.title || 'Untitled'}* — \`${item.status || 'pending'}\`${item.project ? ` [${item.project}]` : ''}`
-        );
-        return json(res, 200, {
-          response_type: 'in_channel',
-          text: `*Top ${pending.length} Queue Items*\n${lines.join('\n')}`,
-        });
-      }
-
-      // /rcc ask <question>
-      if (sub === 'ask') {
-        const question = args.slice(1).join(' ').trim();
-        if (!question) {
-          return json(res, 200, { response_type: 'ephemeral', text: 'Usage: `/rcc ask <your question>`' });
-        }
-        // Ack immediately with a placeholder, then post real answer
+      const result = await handleSlackCommand({ text, response_url, channel_id, team_id, user_id });
+      const { _async, ...response } = result;
+      if (_async) {
+        // /rcc ask: already fired async; send placeholder ack
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ response_type: 'in_channel', text: '...thinking 🐿️' }));
-
-        setImmediate(async () => {
-          const answer = await askBrain(
-            [
-              { role: 'system', content: 'You are Rocky, an AI assistant. Be concise and helpful.' },
-              { role: 'user', content: question },
-            ],
-            { channel: channel_id, user: user_id, teamId: team_id },
-          ).catch(() => "Sorry, I timed out thinking about that 🐿️");
-
-          try {
-            if (response_url) {
-              await fetch(response_url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ response_type: 'in_channel', text: answer, replace_original: false }),
-              });
-            } else {
-              const token = getSlackToken(team_id);
-              if (token && channel_id) await postSlackReply(token, channel_id, answer);
-            }
-          } catch (err) {
-            console.error('[rcc-api] Slash command reply error:', err.message);
-          }
-        });
-
-        return; // already responded
+        res.end(JSON.stringify(response));
+        return;
       }
-
-      // Unknown subcommand
-      return json(res, 200, {
-        response_type: 'ephemeral',
-        text: `Unknown command \`/rcc ${sub}\`. Try \`/rcc help\`.`,
-      });
+      return json(res, 200, response);
     }
 
     // ── POST /api/slack/send — send a message via Slack as a named agent ──
@@ -1741,6 +1858,9 @@ export function startServer(port = PORT) {
   server.listen(port, '0.0.0.0', () => {
     console.log(`[rcc-api] 🐿️ RCC API running on http://0.0.0.0:${port}`);
     console.log(`[rcc-api] Auth: ${AUTH_TOKENS.size > 0 ? `${AUTH_TOKENS.size} token(s) configured` : 'OPEN (no tokens set)'}`);
+    if (process.env.SLACK_APP_TOKEN) {
+      startSocketMode().catch(err => console.error('[rcc-api] Socket Mode startup error:', err.message));
+    }
   });
   return server;
 }
