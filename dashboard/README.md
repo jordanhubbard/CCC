@@ -10,7 +10,7 @@ Live dashboard for the Rocky/Bullwinkle/Natasha agent workqueue system.
 
 - **Port:** 8788 (public, bound to 0.0.0.0)
 - **Framework:** Node.js + Express
-- **Data:** Reads `/home/jkh/.openclaw/workspace/workqueue/queue.json` live on every request
+- **Data:** Reads `~/.openclaw/workspace/workqueue/queue.json` live on every request
 - **Heartbeats:** Merges MinIO heartbeat files + in-memory agent POSTs
 - **systemd unit:** `wq-dashboard.service` (enabled, auto-restart)
 
@@ -28,7 +28,7 @@ Live dashboard for the Rocky/Bullwinkle/Natasha agent workqueue system.
 
 ## Auth
 
-Write endpoints require `Authorization: Bearer RCC_AUTH_TOKEN_REMOVED`.
+Write endpoints require `Authorization: Bearer <your-rcc-token>`.
 
 The browser dashboard prompts for the token on first action and stores it in sessionStorage.
 

@@ -44,9 +44,7 @@ You can replicate it. Here's how.
 | `deploy/` | Setup scripts and systemd/launchd units for deploying agents |
 | `skills/` | Shared skill configuration |
 | `lib/` | Shared utilities (crash reporter, etc.) |
-| `nvidiaman/` | NVIDIA HORDE management interface |
 | `public-www/` | Static web assets |
-| `squirrel-bounce/` | Important. |
 
 ---
 
@@ -171,7 +169,7 @@ These are the four agents I built this with. They are documented here because th
 
 **Natasha** — GPU box with serious Blackwell compute. Handles renders, inference, and anything that benefits from raw GPU power.
 
-**Boris** — dual L40 GPU machine in a datacenter, no Tailscale. Joined last, broke the most assumptions, improved the system the most. If your architecture can handle Boris, it can handle anyone.
+**Boris** — dual-GPU machine in a remote datacenter, no Tailscale access. Joined last, broke the most assumptions, improved the system the most. If your architecture can handle Boris, it can handle anyone.
 
 None of these names appear in the code. You can call your agents whatever you want. The system doesn't care.
 

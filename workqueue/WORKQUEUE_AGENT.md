@@ -71,7 +71,7 @@ Ideas need peer review before becoming real work — set `status = "pending"`, `
 
 When a **new** item is added to the queue with `assignee == "jkh"` (i.e., it didn't exist in the previous cycle):
 - Send jkh a **Slack DM** (channel=slack, target=UDYR7H4SC) via the message tool
-- Format: `👤 *New task assigned to you:* \`<id>\` — <title>\n<description>\nMark it done at https://loomdd566f62.blob.core.windows.net/assets/agent-dashboard.html`
+- Format: `👤 *New task assigned to you:* \`<id>\` — <title>\n<description>\nMark it done at $DASHBOARD_URL`
 - **Only notify once** — track notified IDs in `workqueue/state-rocky.json` under `jkhNotified: [...]`
 - Do NOT re-notify on status changes or re-syncs
 

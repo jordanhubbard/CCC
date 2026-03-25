@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * jkh-intent-tracker.mjs
- * wq-R-012: jkh intent tracker — passive want-log from conversations.
+ * intent-tracker.mjs
+ * Operator intent tracker — passive want-log from conversations.
  *
- * Maintains agents/shared/jkh-intents.json on MinIO.
- * When any agent notices jkh mention wanting something in passing,
+ * Maintains agents/shared/operator-intents.json on MinIO.
+ * When any agent notices the operator mention wanting something in passing,
  * this script adds a low-confidence intent entry.
  *
  * Intent entries:
@@ -16,10 +16,10 @@
  *   - suggestIdeas()  — return intents not yet in the workqueue
  *
  * Usage (CLI):
- *   node jkh-intent-tracker.mjs --list
- *   node jkh-intent-tracker.mjs --add '{"phrase":"...","intent":"...","channel":"mattermost","confidence":"low","tags":["gpu"]}'
- *   node jkh-intent-tracker.mjs --suggest    # intents not yet tasked
- *   node jkh-intent-tracker.mjs --status <id> tasked  # mark an intent as actioned
+ *   node intent-tracker.mjs --list
+ *   node intent-tracker.mjs --add '{"phrase":"...","intent":"...","channel":"mattermost","confidence":"low","tags":["gpu"]}'
+ *   node intent-tracker.mjs --suggest    # intents not yet tasked
+ *   node intent-tracker.mjs --status <id> tasked  # mark an intent as actioned
  */
 
 import { execSync, spawnSync } from 'child_process';
@@ -30,8 +30,8 @@ import crypto from 'crypto';
 
 const __dir        = dirname(fileURLToPath(import.meta.url));
 const QUEUE_PATH   = resolve(__dir, '../queue.json');
-const LOCAL_CACHE  = resolve(__dir, '../jkh-intents-cache.json');
-const MINIO_PATH   = (process.env.MINIO_ALIAS || 'local') + '/agents/shared/jkh-intents.json';
+const LOCAL_CACHE  = resolve(__dir, '../operator-intents-cache.json');
+const MINIO_PATH   = (process.env.MINIO_ALIAS || 'local') + '/agents/shared/operator-intents.json';
 const AGENT_NAME   = process.env.AGENT_NAME || 'rocky';
 
 // ── MinIO helpers ──────────────────────────────────────────────────────────────
@@ -83,8 +83,8 @@ function saveIntents(data) {
  * addIntent(entry) → saved intent object
  *
  * @param {object} entry
- * @param {string} entry.phrase         - jkh's exact or paraphrased phrase
- * @param {string} entry.intent         - What jkh wants (normalized)
+ * @param {string} entry.phrase         - operator's exact or paraphrased phrase
+ * @param {string} entry.intent         - What the operator wants (normalized)
  * @param {string} entry.channel        - Source channel (mattermost, slack, telegram, etc.)
  * @param {string} [entry.agent]        - Observing agent (default: AGENT_NAME)
  * @param {'low'|'medium'|'high'} [entry.confidence] - How confident the observation is
@@ -178,7 +178,7 @@ export function updateIntentStatus(intentId, status, workqueueId = null) {
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────────
-if (process.argv[1]?.endsWith('jkh-intent-tracker.mjs')) {
+if (process.argv[1]?.endsWith('intent-tracker.mjs')) {
   const args = process.argv.slice(2);
   const cmd  = args[0];
 
@@ -190,7 +190,7 @@ if (process.argv[1]?.endsWith('jkh-intent-tracker.mjs')) {
     if (!intents.length) {
       console.log('No intents found.');
     } else {
-      console.log(`jkh intent log (${intents.length} entries):\n`);
+      console.log(`operator intent log (${intents.length} entries):\n`);
       for (const i of intents) {
         const age = Math.round((Date.now() - new Date(i.ts).getTime()) / 3600000);
         console.log(`[${i.id}] (${i.confidence}/${i.status}) ${i.intent}`);
@@ -216,7 +216,7 @@ if (process.argv[1]?.endsWith('jkh-intent-tracker.mjs')) {
     if (!suggestions.length) {
       console.log('No open intents to suggest.');
     } else {
-      console.log(`💡 Open jkh intents (not yet tasked):\n`);
+      console.log(`💡 Open operator intents (not yet tasked):\n`);
       for (const i of suggestions) {
         console.log(`  • [${i.confidence}] ${i.intent}`);
         if (i.tags.length) console.log(`    tags: ${i.tags.join(', ')}`);
@@ -245,7 +245,7 @@ if (process.argv[1]?.endsWith('jkh-intent-tracker.mjs')) {
     const open    = intents.filter(i => i.status === 'open').length;
     const tasked  = intents.filter(i => i.status === 'tasked').length;
     const done    = intents.filter(i => ['completed','dismissed'].includes(i.status)).length;
-    console.log(`jkh Intent Tracker — ${intents.length} total intents`);
+    console.log(`Operator Intent Tracker — ${intents.length} total intents`);
     console.log(`  open: ${open} | tasked: ${tasked} | resolved: ${done}`);
     console.log(`  last updated: ${data.lastUpdated || 'never'}`);
     console.log('');

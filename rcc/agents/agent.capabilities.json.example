@@ -1,5 +1,5 @@
 {
-  "name": "agent1",
+  "name": "rocky",
   "gpu": false,
   "gpu_model": null,
   "gpu_vram_gb": 0,
@@ -10,8 +10,8 @@
   "context_size": "large",
   "arch": "aarch64",
   "os": "linux",
-  "host": "your-hostname",
+  "host": "hub-node",
   "always_on": true,
-  "tools": ["bash", "node", "python", "git", "gh", "docker"],
-  "preferred_tasks": ["code", "review", "debug", "triage", "ci"]
+  "tools": ["bash", "node", "python", "git", "gh", "docker", "mc", "curl"],
+  "preferred_tasks": ["code", "review", "debug", "triage", "ci", "deploy", "coordination"]
 }

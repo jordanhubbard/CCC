@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * jkh-morning-context.mjs
- * wq-R-003: jkh morning context injection
+ * morning-context.mjs
+ * Morning context injection for agent fleet
  *
- * At 08:00 PT each day, reads jkh-state.json from MinIO (agents/shared/jkh-state.json)
- * and writes a condensed context summary to memory/jkh-morning-YYYY-MM-DD.md.
- * Any agent session spinning up that day can read this file instead of fetching
- * MinIO mid-conversation — reduces latency and ensures all agents start the day
- * with the same jkh situational awareness.
+ * At 08:00 (operator timezone) each day, reads operator-state.json from MinIO
+ * (agents/shared/operator-state.json) and writes a condensed context summary to
+ * memory/morning-YYYY-MM-DD.md. Any agent session spinning up that day can read
+ * this file instead of fetching MinIO mid-conversation — reduces latency and
+ * ensures all agents start the day with the same operator situational awareness.
  *
- * Usage: node jkh-morning-context.mjs [--date YYYY-MM-DD]
- * Designed to be triggered by cron at 08:00 PT.
+ * Usage: node morning-context.mjs [--date YYYY-MM-DD]
+ * Designed to be triggered by cron at 08:00 local time.
  */
 
 import { execSync } from 'child_process';
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = join(__dirname, '../../');
-const MC = process.env.MC_BIN || '/home/jkh/.local/bin/mc';
+const MC = process.env.MC_BIN || 'mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
 const SHARED_PREFIX = `${MINIO_ALIAS}/agents/shared`;
 
@@ -55,48 +55,47 @@ const today = getTodayPT();
 const now = new Date().toISOString();
 
 // Fetch source data
-const jkhState = mcCat(`${SHARED_PREFIX}/jkh-state.json`);
+const operatorState = mcCat(`${SHARED_PREFIX}/operator-state.json`);
 const peerStatus = mcCat(`${SHARED_PREFIX}/peer-status.json`);
 const skillsDrift = mcCat(`${SHARED_PREFIX}/skills-drift.json`);
 
-if (!jkhState) {
-  console.error('[jkh-morning-context] ERROR: Could not fetch jkh-state.json from MinIO');
+if (!operatorState) {
+  console.error('[morning-context] ERROR: Could not fetch operator-state.json from MinIO');
   process.exit(1);
 }
 
 // Build markdown summary
 const lines = [];
-lines.push(`# jkh Morning Context — ${today}`);
+lines.push(`# Operator Morning Context — ${today}`);
 lines.push(`_Generated at ${now} by ${process.env.AGENT_NAME || 'agent'}_`);
 lines.push('');
-lines.push('## jkh Status');
-lines.push(`- **Last seen:** ${jkhState.last_seen_ts || 'unknown'} on ${jkhState.last_seen_channel || 'unknown'}`);
-lines.push(`- **Timezone:** America/Los_Angeles`);
-lines.push(`- **Phone:** +18312277540`);
+lines.push('## Operator Status');
+lines.push(`- **Last seen:** ${operatorState.last_seen_ts || 'unknown'} on ${operatorState.last_seen_channel || 'unknown'}`);
+lines.push(`- **Timezone:** ${operatorState.operator?.timezone || 'unknown'}`);
 lines.push('');
 
-if (jkhState.recent_context) {
+if (operatorState.recent_context) {
   lines.push('## Recent Context');
-  lines.push(jkhState.recent_context);
+  lines.push(operatorState.recent_context);
   lines.push('');
 }
 
-if (jkhState.active_topics && jkhState.active_topics.length > 0) {
+if (operatorState.active_topics && operatorState.active_topics.length > 0) {
   lines.push('## Active Topics');
-  jkhState.active_topics.forEach(t => lines.push(`- ${t}`));
+  operatorState.active_topics.forEach(t => lines.push(`- ${t}`));
   lines.push('');
 }
 
-if (jkhState.open_asks && jkhState.open_asks.length > 0) {
-  lines.push('## Open Asks (jkh waiting on agents)');
-  jkhState.open_asks.forEach(a => lines.push(`- ${a}`));
+if (operatorState.open_asks && operatorState.open_asks.length > 0) {
+  lines.push('## Open Asks (operator waiting on agents)');
+  operatorState.open_asks.forEach(a => lines.push(`- ${a}`));
   lines.push('');
 }
 
 // Add per-agent last seen
-if (jkhState.agents) {
+if (operatorState.agents) {
   lines.push('## Per-Agent Last Contact');
-  for (const [agent, data] of Object.entries(jkhState.agents)) {
+  for (const [agent, data] of Object.entries(operatorState.agents)) {
     lines.push(`- **${agent}:** ${data.last_seen_ts || 'unknown'} (${data.last_seen_channel || 'unknown'})`);
   }
   lines.push('');
@@ -133,17 +132,17 @@ const markdown = lines.join('\n');
 const memoryDir = join(WORKSPACE, 'memory');
 if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
 
-// Write to memory/jkh-morning-YYYY-MM-DD.md
-const localPath = join(memoryDir, `jkh-morning-${today}.md`);
+// Write to memory/morning-YYYY-MM-DD.md
+const localPath = join(memoryDir, `morning-${today}.md`);
 writeFileSync(localPath, markdown, 'utf8');
-console.log(`[jkh-morning-context] Written: ${localPath}`);
+console.log(`[morning-context] Written: ${localPath}`);
 
 // Also mirror to MinIO for cross-agent access
-const remoteOk = mcPut(localPath, `${SHARED_PREFIX}/jkh-morning-${today}.md`);
+const remoteOk = mcPut(localPath, `${SHARED_PREFIX}/morning-${today}.md`);
 if (remoteOk) {
-  console.log(`[jkh-morning-context] Mirrored to MinIO: agents/shared/jkh-morning-${today}.md`);
+  console.log(`[morning-context] Mirrored to MinIO: agents/shared/morning-${today}.md`);
 } else {
-  console.warn(`[jkh-morning-context] WARNING: MinIO mirror failed — local copy still available`);
+  console.warn(`[morning-context] WARNING: MinIO mirror failed — local copy still available`);
 }
 
 process.exit(0);

@@ -8,7 +8,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 const BASE = 'http://localhost:8788';
-const AUTH = 'Bearer RCC_AUTH_TOKEN_REMOVED';
+const AUTH = 'Bearer test-token';
 const BAD_AUTH = 'Bearer wrong-token';
 
 async function api(path, opts = {}) {

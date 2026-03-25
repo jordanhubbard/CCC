@@ -21,14 +21,14 @@ const MC = process.env.MC_PATH || '/usr/local/bin/mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
 const AGENT_NAME  = process.env.AGENT_NAME  || 'agent';
 const GEN_SCRIPT = path.join(WORKSPACE, 'workqueue', 'scripts', 'gen-dashboard.py');
-const AZURE_SAS = 'https://loomdd566f62.blob.core.windows.net/assets/agent-dashboard.html?se=2029-03-19T02%3A25Z&sp=rwdlcu&spr=https&sv=2026-02-06&ss=b&srt=sco&sig=Dn4faVsJCz0ufWyHmiKCFCrgiLQkSIRtp7MLmqXKiUA%3D';
+const AZURE_SAS = process.env.AZURE_BLOB_SAS_URL || ''; // set AZURE_BLOB_SAS_URL in .env
 
 const PORT = 8787;
 const TOKEN = process.env.WQ_API_TOKEN || 'wq-api-token'; // set WQ_API_TOKEN in .env
 
 // ── Slack DM helper ───────────────────────────────────────────────────────────
 const SLACK_TOKEN = process.env.SLACK_TOKEN || ''; // set via environment, not hardcoded
-const JKH_SLACK_ID = 'UDYR7H4SC';
+const JKH_SLACK_ID = process.env.OPERATOR_SLACK_ID || '';
 
 async function slackDm(text) {
   try {

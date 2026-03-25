@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE   = join(__dirname, '../../');
 const ALERTS_FILE = join(WORKSPACE, 'workqueue/alerts.jsonl');
-const MC          = process.env.MC_BIN || '/home/jkh/.local/bin/mc';
+const MC          = process.env.MC_BIN || 'mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
 const SHARED_PATH = `${MINIO_ALIAS}/agents/shared`;
 

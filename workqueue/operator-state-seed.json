@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "description": "Shared operator session state — updated by any agent after significant conversation. Last-write-wins on ts; append context, do not overwrite.",
+  "last_updated_by": "hub-agent",
+  "last_updated_ts": "2026-01-01T00:00:00Z",
+  "operator": {
+    "name": "Your Name",
+    "handle": "yourhandle",
+    "telegram_id": "",
+    "phone": "",
+    "timezone": "America/Los_Angeles"
+  },
+  "current_location": "Your City",
+  "travel_status": {
+    "in_transit": false,
+    "current_city": "Home",
+    "next_city": null,
+    "eta": null,
+    "watch_alert": "If operator goes silent >24h, notify designated contact"
+  },
+  "last_seen": {
+    "channel": "mattermost",
+    "ts": "2026-01-01T00:00:00Z",
+    "note": "Initial seed"
+  },
+  "active_topics": [
+    "Example: work queue system setup",
+    "Example: agent fleet deployment"
+  ],
+  "open_asks": [],
+  "delegated_authority": {
+    "delegate": null,
+    "slack_id": null,
+    "channel": null,
+    "scope": null,
+    "authorized_ts": null
+  },
+  "recent_context": [],
+  "agent_awareness": {
+    "hub-agent": {
+      "host": "your-hub-host",
+      "status": "online",
+      "note": "Primary hub agent, always-on."
+    }
+  }
+}

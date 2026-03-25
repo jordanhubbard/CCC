@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# update-jkh-state.sh — Read or patch jkh-state.json on MinIO
+# update-operator-state.sh — Read or patch operator-state.json on MinIO
 # Usage:
-#   update-jkh-state.sh read                  # Print current state
-#   update-jkh-state.sh patch <jq-filter>     # Apply a jq patch and re-upload
-#   update-jkh-state.sh append-context <json> # Append a context entry to recent_context[]
-#   update-jkh-state.sh set-last-seen <channel> <note> # Update last_seen
+#   update-operator-state.sh read                  # Print current state
+#   update-operator-state.sh patch <jq-filter>     # Apply a jq patch and re-upload
+#   update-operator-state.sh append-context <json> # Append a context entry to recent_context[]
+#   update-operator-state.sh set-last-seen <channel> <note> # Update last_seen
 #
 # Examples:
-#   update-jkh-state.sh read
-#   update-jkh-state.sh patch '.current_location = "Taipei, Taiwan"'
-#   update-jkh-state.sh append-context '{"ts":"2026-03-20T00:00:00Z","summary":"jkh arrived in Taipei"}'
-#   update-jkh-state.sh set-last-seen "slack-your-workspace" "Discussed render pipeline"
+#   update-operator-state.sh read
+#   update-operator-state.sh patch '.current_location = "Taipei, Taiwan"'
+#   update-operator-state.sh append-context '{"ts":"2026-03-20T00:00:00Z","summary":"operator arrived in destination"}'
+#   update-operator-state.sh set-last-seen "slack-your-workspace" "Discussed render pipeline"
 
 set -e
 
-MC=/home/jkh/.local/bin/mc
+MC=${MC_BIN:-mc}
 ALIAS="${MINIO_ALIAS:-local}"
-BUCKET="agents/shared/jkh-state.json"
-TMPFILE=$(mktemp /tmp/jkh-state-XXXXXX.json)
+BUCKET="agents/shared/operator-state.json"
+TMPFILE=$(mktemp /tmp/operator-state-XXXXXX.json)
 AGENT="${JKH_STATE_AGENT:-rocky}"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 

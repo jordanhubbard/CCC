@@ -25,7 +25,7 @@ import { dirname, join, resolve } from 'path';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const REPOS_PATH = process.env.REPOS_PATH || resolve(__dir, '../api/repos.json');
 const RCC_API    = process.env.RCC_API    || 'http://localhost:8789';
-const RCC_TOKEN  = process.env.RCC_TOKEN  || 'RCC_AUTH_TOKEN_REMOVED';
+const RCC_TOKEN  = process.env.RCC_TOKEN  || '';
 const RCC_PUBLIC = process.env.RCC_PUBLIC || 'http://localhost:8788';
 
 // Slack tokens per workspace
@@ -103,9 +103,7 @@ async function getOrCreateChannel(workspace, name) {
 }
 
 function channelName(repo) {
-  // e.g. "NVIDIA-dev/horde" → "project-horde"
-  //      "your-org/your-repo" → "project-your-repo"
-  //      "NVIDIA-dev/omniverse-kit" → "project-omniverse-kit"
+  // e.g. "yourorg/myproject" → "project-myproject"
   const base = repo.full_name.split('/')[1].toLowerCase().replace(/[^a-z0-9-]/g, '-');
   return `project-${base}`;
 }
