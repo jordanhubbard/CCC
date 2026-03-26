@@ -167,6 +167,37 @@ Existing page + add:
 - Active agent badge (who's currently working on it)
 - Direct link to Kanban filtered to this project
 
+### Project Deep-Dive View (new)
+
+Clicking into a project card opens a full project page with **three integrated panels**:
+
+**1. Project Kanban (scoped)**
+Same kanban component as the main board, but filtered to only this project's items. Still shows per-agent columns — so you can see which agent owns what on this specific project. Cards still have type colors and blocking annotations. Drag-to-reassign works the same way.
+
+**2. Communications Channels (project-scoped)**
+All channels that are wired to this project:
+```
+┌──────────────────────────────────────────────────────────┐
+│ 📡 Communications                                        │
+│                                                          │
+│ Slack #usdagent (omgjkh)          🟢 active  last: 2h   │
+│ Slack #itsallgeektome (offtera)   🟡 linked  last: 8h   │
+│ GitHub Issues                     🔴 3 open             │
+│ GitHub PRs                        🟣 1 open             │
+│ SquirrelBus (tag: usdagent)       🟢 12 msgs today      │
+└──────────────────────────────────────────────────────────┘
+```
+- Channels sourced from `project.slack_channels[]` + inferred from GitHub repo
+- SquirrelBus row auto-populates if any messages in the log carry this project's tag
+- Status dots: active (recent message), linked (configured but quiet), unconfigured (grey)
+- Click a channel row → jump to SquirrelBus tab filtered to that channel + project
+
+**3. Existing panels (retained)**
+- GitHub issues + PRs panel (already built)
+- Active queue items
+- Recent completed items
+- Project metadata (description, notes, scouts, links)
+
 ---
 
 ## 5. SquirrelBus (Moved to Tab)
