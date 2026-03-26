@@ -574,6 +574,7 @@ function renderUnifiedPage() {
       <h1 style="font-size:24px;margin:0;color:#f0f6fc">🐿️ Rocky Command Center</h1>
       <div style="display:flex;gap:8px;align-items:center">
         <a href="/activity" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;text-decoration:none;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🗺️ Activity Map</a>
+        <a href="/geek" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;text-decoration:none;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🖥️ Geek View</a>
         <button onclick="openDigestModal()" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">📊 Status</button>
         <button onclick="authFlow()" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🔑 Auth</button>
       </div>
@@ -1863,6 +1864,10 @@ app.use('/bus', (req, res, next) => {
 app.post('/bus/send', requireAuth, async (req, res) => {
   try {
     const msg = await appendBusMessage(req.body);
+    // Emit geek topology traffic event for live particle animations
+    if (msg.from && msg.to) {
+      _emitGeekOnBusSend(msg.from, msg.to, msg.type || msg.kind || 'message');
+    }
     res.json({ ok: true, message: msg });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2391,6 +2396,338 @@ app.delete('/s3/:bucket/*splat', requireAuth, async (req, res) => {
 
 // Initialize bus sequence on startup
 initBusSeq();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /geek — Infrastructure Topology View
+// Hybrid model: machines as primary nodes, service chips hanging off each.
+// Shared infrastructure (Milvus, MinIO, SearXNG) get their own nodes with
+// edges from each agent that calls them.
+// SSE stream at /api/geek/stream feeds live traffic particles along edges.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// In-memory SSE clients for /api/geek/stream
+const geekSseClients = new Set();
+
+// Broadcast a traffic event to all geek SSE clients
+function broadcastGeekEvent(event) {
+  const data = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of geekSseClients) {
+    try { res.write(data); } catch { geekSseClients.delete(res); }
+  }
+}
+
+// Emit a geek traffic event (called from bus/send hook)
+const _emitGeekOnBusSend = (from, to, type) => {
+  broadcastGeekEvent({ from, to, type, ts: new Date().toISOString() });
+};
+
+// SSE endpoint — geek traffic stream
+app.get('/api/geek/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 3000\n\n');
+  geekSseClients.add(res);
+  req.on('close', () => geekSseClients.delete(res));
+  const hb = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch { clearInterval(hb); geekSseClients.delete(res); }
+  }, 20000);
+  req.on('close', () => clearInterval(hb));
+});
+
+// Pull soul commit timeline for the geek view
+async function getSoulTimeline() {
+  try {
+    const { stdout } = await execFileP('git', [
+      'log', '--pretty=format:%H|%ai|%s',
+      '--', 'openclaw/souls/rocky.md', 'openclaw/souls/bullwinkle.md', 'openclaw/souls/natasha.md'
+    ], { cwd: __dirname + '/..', timeout: 5000 });
+    return stdout.trim().split('\n').filter(Boolean).slice(0, 20).map(line => {
+      const [hash, date, ...msgParts] = line.split('|');
+      const msg = msgParts.join('|');
+      const agent = /natasha/i.test(msg) ? 'natasha' : /bullwinkle/i.test(msg) ? 'bullwinkle' : 'rocky';
+      return { hash: hash?.slice(0, 7), date, msg, agent };
+    });
+  } catch { return []; }
+}
+
+// API endpoint: soul timeline data
+app.get('/api/geek/souls', async (req, res) => {
+  const timeline = await getSoulTimeline();
+  res.json(timeline);
+});
+
+// Geek view HTML
+function renderGeekPage() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geek View — RCC Infrastructure</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+  #header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: #161b22; border-bottom: 1px solid #30363d; flex-shrink: 0; }
+  #header h1 { font-size: 15px; font-weight: 700; color: #f0f6fc; }
+  #header .subtitle { font-size: 11px; color: #8b949e; }
+  #header a { color: #58a6ff; text-decoration: none; font-size: 12px; margin-left: auto; }
+  #header a:hover { text-decoration: underline; }
+  #main { display: flex; flex: 1; overflow: hidden; }
+  #topology { flex: 1; position: relative; overflow: hidden; }
+  #topology svg { width: 100%; height: 100%; }
+  #sidebar { width: 280px; border-left: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+  #soul-panel { flex: 1; overflow-y: auto; padding: 12px; }
+  #traffic-panel { height: 220px; border-top: 1px solid #30363d; overflow-y: auto; padding: 8px 12px; flex-shrink: 0; }
+  .panel-title { font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .soul-entry { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+  .soul-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .soul-dot.rocky { background: #f85149; }
+  .soul-dot.bullwinkle { background: #a371f7; }
+  .soul-dot.natasha { background: #3fb950; }
+  .soul-hash { font-size: 10px; color: #484f58; font-family: 'SF Mono', Consolas, monospace; }
+  .soul-msg { font-size: 12px; color: #c9d1d9; line-height: 1.4; }
+  .soul-date { font-size: 10px; color: #6e7681; }
+  .traffic-entry { font-size: 11px; color: #8b949e; margin-bottom: 4px; border-bottom: 1px solid #21262d; padding-bottom: 4px; font-family: 'SF Mono', Consolas, monospace; }
+  .traffic-entry .from { color: #58a6ff; }
+  .traffic-entry .to { color: #3fb950; }
+  .traffic-entry .type { color: #d29922; }
+  @keyframes particleMove { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+  .machine-node:hover rect { stroke: #58a6ff !important; }
+  .service-node:hover circle { stroke: #58a6ff !important; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>🖥️ Geek View — Fleet Topology</h1>
+  <span class="subtitle" id="live-status">connecting…</span>
+  <a href="/">← Dashboard</a>
+</div>
+<div id="main">
+  <div id="topology">
+    <svg id="topo-svg" viewBox="0 0 900 580" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#30363d"/>
+        </marker>
+        <marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L6,3 z" fill="#58a6ff"/>
+        </marker>
+      </defs>
+      <!-- Edges -->
+      <path id="edge-rocky-natasha" fill="none" stroke="#30363d" stroke-width="1.5" opacity="0.5" d="M 300,160 C 450,100 550,100 600,160" marker-end="url(#arrow)"/>
+      <path id="edge-rocky-bullwinkle" fill="none" stroke="#30363d" stroke-width="1.5" opacity="0.5" d="M 220,280 C 200,380 200,420 220,460" marker-end="url(#arrow)"/>
+      <path id="edge-natasha-bullwinkle" fill="none" stroke="#30363d" stroke-width="1.5" opacity="0.5" d="M 650,280 C 640,380 500,440 360,460" marker-end="url(#arrow)"/>
+      <path id="edge-rocky-milvus" fill="none" stroke="#21262d" stroke-width="1" stroke-dasharray="4,3" d="M 300,200 L 440,300"/>
+      <path id="edge-rocky-minio" fill="none" stroke="#21262d" stroke-width="1" stroke-dasharray="4,3" d="M 260,200 L 390,330"/>
+      <path id="edge-rocky-searxng" fill="none" stroke="#21262d" stroke-width="1" stroke-dasharray="4,3" d="M 240,200 L 350,340"/>
+      <path id="edge-natasha-milvus" fill="none" stroke="#21262d" stroke-width="1" stroke-dasharray="4,3" d="M 600,200 L 480,300"/>
+      <path id="edge-natasha-minio" fill="none" stroke="#21262d" stroke-width="1" stroke-dasharray="4,3" d="M 620,200 L 490,330"/>
+      <path id="edge-boris-rocky" fill="none" stroke="#30363d" stroke-width="1.5" opacity="0.4" stroke-dasharray="5,3" d="M 800,200 C 700,180 400,180 300,200" marker-end="url(#arrow)"/>
+      <path id="edge-natasha-nvidia" fill="none" stroke="#1a3a2a" stroke-width="1" stroke-dasharray="4,3" d="M 700,130 L 820,70"/>
+      <!-- Particle container -->
+      <g id="particles"></g>
+      <!-- Rocky (do-host1) -->
+      <g class="machine-node" id="node-rocky" transform="translate(140,130)">
+        <rect width="180" height="130" rx="10" fill="#161b22" stroke="#f85149" stroke-width="1.5"/>
+        <text x="10" y="20" font-size="12" font-weight="700" fill="#f85149">🐿️ Rocky</text>
+        <text x="10" y="34" font-size="9" fill="#6e7681">do-host1 · CPU-only VPS</text>
+        <text x="10" y="52" font-size="9" fill="#8b949e" font-family="monospace">[RCC API :8789]</text>
+        <text x="10" y="64" font-size="9" fill="#8b949e" font-family="monospace">[Dashboard :8788]</text>
+        <text x="10" y="76" font-size="9" fill="#8b949e" font-family="monospace">[SearXNG :8888]</text>
+        <text x="10" y="88" font-size="9" fill="#8b949e" font-family="monospace">[MinIO :9000/:9001]</text>
+        <text x="10" y="100" font-size="9" fill="#8b949e" font-family="monospace">[Milvus :19530]</text>
+        <text x="10" y="112" font-size="9" fill="#8b949e" font-family="monospace">[SquirrelBus :8788/bus]</text>
+        <circle id="dot-rocky" cx="168" cy="12" r="5" fill="#3fb950"/>
+      </g>
+      <!-- Natasha (sparky) -->
+      <g class="machine-node" id="node-natasha" transform="translate(570,130)">
+        <rect width="200" height="150" rx="10" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+        <text x="10" y="20" font-size="12" font-weight="700" fill="#3fb950">🕵️ Natasha</text>
+        <text x="10" y="34" font-size="9" fill="#6e7681">sparky · GB10 · 128GB unified</text>
+        <text x="10" y="52" font-size="9" fill="#8b949e" font-family="monospace">[OpenClaw :18789]</text>
+        <text x="10" y="64" font-size="9" fill="#8b949e" font-family="monospace">[SquirrelBus /bus→:18799]</text>
+        <text x="10" y="76" font-size="9" fill="#8b949e" font-family="monospace">[Ollama :11434 ✓]</text>
+        <text x="10" y="88" font-size="9" fill="#484f58" font-family="monospace"> qwen2.5-coder:32b</text>
+        <text x="10" y="100" font-size="9" fill="#484f58" font-family="monospace"> qwen3-coder:latest</text>
+        <text x="10" y="112" font-size="9" fill="#3fb950" font-family="monospace">[CUDA/RTX ⚡]</text>
+        <text x="10" y="124" font-size="9" fill="#8b949e" font-family="monospace">[Milvus :19530]</text>
+        <circle id="dot-natasha" cx="188" cy="12" r="5" fill="#3fb950"/>
+      </g>
+      <!-- Bullwinkle (puck) -->
+      <g class="machine-node" id="node-bullwinkle" transform="translate(140,430)">
+        <rect width="180" height="110" rx="10" fill="#161b22" stroke="#a371f7" stroke-width="1.5"/>
+        <text x="10" y="20" font-size="12" font-weight="700" fill="#a371f7">🫎 Bullwinkle</text>
+        <text x="10" y="34" font-size="9" fill="#6e7681">puck · Mac · CPU-only</text>
+        <text x="10" y="52" font-size="9" fill="#8b949e" font-family="monospace">[OpenClaw :18789]</text>
+        <text x="10" y="64" font-size="9" fill="#8b949e" font-family="monospace">[Calendar / iMessage]</text>
+        <text x="10" y="76" font-size="9" fill="#8b949e" font-family="monospace">[Google Workspace]</text>
+        <text x="10" y="88" font-size="9" fill="#8b949e" font-family="monospace">[Sonos]</text>
+        <circle id="dot-bullwinkle" cx="168" cy="12" r="5" fill="#3fb950"/>
+      </g>
+      <!-- Boris (l40-sweden) -->
+      <g class="machine-node" id="node-boris" transform="translate(760,130)">
+        <rect width="120" height="110" rx="10" fill="#161b22" stroke="#d29922" stroke-width="1.5" stroke-dasharray="5,3"/>
+        <text x="10" y="20" font-size="12" font-weight="700" fill="#d29922">⚡ Boris</text>
+        <text x="10" y="34" font-size="9" fill="#6e7681">l40-sweden</text>
+        <text x="10" y="52" font-size="9" fill="#8b949e" font-family="monospace">[4x L40]</text>
+        <text x="10" y="64" font-size="9" fill="#8b949e" font-family="monospace">[128GB RAM]</text>
+        <text x="10" y="76" font-size="9" fill="#8b949e" font-family="monospace">[Omniverse]</text>
+        <text x="10" y="88" font-size="9" fill="#d29922" font-family="monospace">[Isaac Lab]</text>
+        <circle id="dot-boris" cx="108" cy="12" r="5" fill="#484f58"/>
+      </g>
+      <!-- Shared infra nodes -->
+      <g class="service-node" transform="translate(430,280)">
+        <circle cx="0" cy="0" r="32" fill="#161b22" stroke="#1f6feb" stroke-width="1.5"/>
+        <text x="0" y="-8" font-size="10" font-weight="700" fill="#1f6feb" text-anchor="middle">Milvus</text>
+        <text x="0" y="6" font-size="8" fill="#6e7681" text-anchor="middle">:19530</text>
+        <text x="0" y="18" font-size="8" fill="#484f58" text-anchor="middle">do-host1</text>
+      </g>
+      <g class="service-node" transform="translate(430,360)">
+        <circle cx="0" cy="0" r="30" fill="#161b22" stroke="#1f6feb" stroke-width="1.5"/>
+        <text x="0" y="-6" font-size="10" font-weight="700" fill="#1f6feb" text-anchor="middle">MinIO</text>
+        <text x="0" y="8" font-size="8" fill="#6e7681" text-anchor="middle">:9000/:9001</text>
+        <text x="0" y="19" font-size="8" fill="#484f58" text-anchor="middle">do-host1</text>
+      </g>
+      <g class="service-node" transform="translate(350,420)">
+        <circle cx="0" cy="0" r="28" fill="#161b22" stroke="#1f6feb" stroke-width="1.5"/>
+        <text x="0" y="-5" font-size="10" font-weight="700" fill="#1f6feb" text-anchor="middle">SearXNG</text>
+        <text x="0" y="9" font-size="8" fill="#6e7681" text-anchor="middle">:8888</text>
+        <text x="0" y="19" font-size="8" fill="#484f58" text-anchor="middle">do-host1</text>
+      </g>
+      <!-- External: NVIDIA Gateway -->
+      <g transform="translate(820,30)">
+        <rect width="70" height="38" rx="6" fill="#0d1117" stroke="#3fb95044" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="35" y="14" font-size="9" fill="#3fb950" text-anchor="middle">NVIDIA</text>
+        <text x="35" y="26" font-size="9" fill="#3fb950" text-anchor="middle">Gateway</text>
+        <text x="35" y="35" font-size="8" fill="#484f58" text-anchor="middle">cloud</text>
+      </g>
+    </svg>
+  </div>
+  <div id="sidebar">
+    <div id="soul-panel">
+      <div class="panel-title">🧠 Soul Commits</div>
+      <div id="soul-timeline"><span style="font-size:11px;color:#484f58">Loading…</span></div>
+    </div>
+    <div id="traffic-panel">
+      <div class="panel-title">📡 Live Traffic <span id="traffic-count" style="color:#484f58;font-weight:400">(0)</span></div>
+      <div id="traffic-log"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  fetch('/api/geek/souls').then(r => r.json()).then(entries => {
+    const el = document.getElementById('soul-timeline');
+    if (!entries.length) { el.innerHTML = '<span style="font-size:11px;color:#484f58">No soul commits yet.</span>'; return; }
+    el.innerHTML = entries.map(e => {
+      const d = new Date(e.date);
+      const rel = formatRel(d);
+      return \`<div class="soul-entry">
+        <div class="soul-dot \${esc(e.agent)}"></div>
+        <div>
+          <div class="soul-msg">\${esc(e.msg)}</div>
+          <div class="soul-hash">\${esc(e.hash)} · \${esc(rel)} · \${esc(e.agent)}</div>
+        </div>
+      </div>\`;
+    }).join('');
+  }).catch(() => {
+    document.getElementById('soul-timeline').innerHTML = '<span style="font-size:11px;color:#484f58">Unavailable.</span>';
+  });
+
+  let trafficCount = 0;
+  const trafficLog = document.getElementById('traffic-log');
+  const trafficCountEl = document.getElementById('traffic-count');
+  const statusEl = document.getElementById('live-status');
+  const particles = document.getElementById('particles');
+  const edgeMap = {
+    'rocky\u2192natasha': 'edge-rocky-natasha', 'natasha\u2192rocky': 'edge-rocky-natasha',
+    'rocky\u2192bullwinkle': 'edge-rocky-bullwinkle', 'bullwinkle\u2192rocky': 'edge-rocky-bullwinkle',
+    'natasha\u2192bullwinkle': 'edge-natasha-bullwinkle', 'bullwinkle\u2192natasha': 'edge-natasha-bullwinkle',
+  };
+  const agentColors = { rocky: '#f85149', natasha: '#3fb950', bullwinkle: '#a371f7', boris: '#d29922' };
+
+  function spawnParticle(from, to, color) {
+    const edgeId = edgeMap[from + '\u2192' + to] || edgeMap[to + '\u2192' + from];
+    if (!edgeId) return;
+    const edgeEl = document.getElementById(edgeId);
+    if (!edgeEl) return;
+    const dur = 1200 + Math.random() * 800;
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('r', '3');
+    circle.setAttribute('fill', color || '#58a6ff');
+    circle.style.offsetPath = 'path("' + edgeEl.getAttribute('d') + '")';
+    circle.style.offsetDistance = '0%';
+    circle.style.animation = 'particleMove ' + dur + 'ms linear forwards';
+    particles.appendChild(circle);
+    setTimeout(() => circle.remove(), dur + 100);
+    edgeEl.setAttribute('stroke', color || '#58a6ff');
+    edgeEl.setAttribute('marker-end', 'url(#arrow-active)');
+    setTimeout(() => {
+      edgeEl.setAttribute('stroke', '#30363d');
+      edgeEl.setAttribute('marker-end', 'url(#arrow)');
+    }, Math.max(dur, 1500));
+  }
+
+  function addTrafficEntry(evt) {
+    trafficCount++;
+    trafficCountEl.textContent = '(' + trafficCount + ')';
+    const div = document.createElement('div');
+    div.className = 'traffic-entry';
+    const time = new Date(evt.ts || Date.now()).toLocaleTimeString();
+    div.innerHTML = '<span style="color:#484f58">' + esc(time) + '</span> <span class="from">' + esc(evt.from||'?') + '</span> → <span class="to">' + esc(evt.to||'?') + '</span> <span class="type">' + esc(evt.type||evt.kind||'msg') + '</span>';
+    trafficLog.insertBefore(div, trafficLog.firstChild);
+    while (trafficLog.children.length > 20) trafficLog.removeChild(trafficLog.lastChild);
+    spawnParticle(evt.from, evt.to, agentColors[evt.from] || '#58a6ff');
+  }
+
+  function connectSSE() {
+    statusEl.textContent = 'connecting…';
+    statusEl.style.color = '#8b949e';
+    const es = new EventSource('/api/geek/stream');
+    es.onopen = () => { statusEl.textContent = '● live'; statusEl.style.color = '#3fb950'; };
+    es.onerror = () => { statusEl.textContent = '○ reconnecting…'; statusEl.style.color = '#d29922'; es.close(); setTimeout(connectSSE, 4000); };
+    es.onmessage = e => { try { addTrafficEntry(JSON.parse(e.data)); } catch {} };
+  }
+  connectSSE();
+
+  function updateDots() {
+    fetch('/api/heartbeats').then(r => r.json()).then(data => {
+      for (const a of ['rocky','natasha','bullwinkle','boris']) {
+        const dot = document.getElementById('dot-' + a);
+        if (!dot) continue;
+        const hb = data[a];
+        if (!hb || !hb.ts) { dot.setAttribute('fill', '#484f58'); continue; }
+        const age = (Date.now() - new Date(hb.ts).getTime()) / 1000;
+        dot.setAttribute('fill', age < 120 ? '#3fb950' : age < 300 ? '#d29922' : '#f85149');
+      }
+    }).catch(() => {});
+  }
+  updateDots();
+  setInterval(updateDots, 30000);
+
+  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function formatRel(d) {
+    const diff = Date.now() - d.getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+})();
+</script>
+</body>
+</html>`;
+}
+
+// Route: /geek
+app.get('/geek', (req, res) => {
+  res.type('html').send(renderGeekPage());
+});
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
