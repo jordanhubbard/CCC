@@ -302,7 +302,7 @@ Services get **their own nodes** only when they are shared infrastructure called
 
 Everything else renders as **service chips** on their host machine node:
 - Rocky chips: RCC API (:8789), WQ Dashboard (:8788), RCC Brain, SquirrelBus hub, Tailscale proxy
-- Bullwinkle chips: OpenClaw gateway (:18789), SquirrelBus sidecar (:18799), launchd crons
+- Bullwinkle chips: OpenClaw gateway (:18789, reachability-checked), SquirrelBus push endpoint (:8788), launchd crons (heartbeat-rcc.plist + openclaw), disk free, uptime, tmux session count
 - Natasha/Sparky chips: OpenClaw gateway (:18789), SquirrelBus sidecar (:18799), Milvus (:19530), CUDA/RTX ⚡, Ollama (⚠️ unverified — show greyed with `?` until health-confirmed)
 - Boris chips: OpenClaw gateway, L40 GPU ⚡, Omniverse headless
 
@@ -395,6 +395,22 @@ Six operational pain points, all incorporated into the design:
 6. **Soul commit timeline** — last commit per agent in the `souls/` repo. jkh would like seeing this. It's semantically meaningful and earns its dashboard real estate.
 
 Bullwinkle's column scope: crons, providers, session health, Google Workspace connectivity. Not GPU metrics, container status, or Boris-specific.
+
+**Bullwinkle agent card specifics (puck):**
+- LaunchAgent status: `heartbeat-rcc.plist` + OpenClaw launchd jobs — green/red per job
+- Disk space: "X GB free" — Mac minis fill up quietly
+- OpenClaw gateway reachability (port 18789 via Tailscale) — #1 failure mode, must be prominent
+- Uptime / last reboot (battery irrelevant — Mac mini, always plugged in)
+
+**Bullwinkle Geek View service chips:**
+- OpenClaw gateway (:18789) — with live reachability check
+- SquirrelBus push endpoint (:8788, if running)
+- Active tmux sessions (e.g. claude-puck worker) — show count
+
+**Calendar scope clarification (Bullwinkle):**
+RCC calendar = agent events only (cron schedules, planned work windows, maintenance blocks).
+NOT a mirror of jkh's personal Google Calendar (jkh uses `gog` for that — no duplication needed).
+The two calendars are separate concerns.
 
 ---
 
