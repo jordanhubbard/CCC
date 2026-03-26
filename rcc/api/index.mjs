@@ -27,7 +27,8 @@ const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
 const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://localhost:8789';
 const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
 const START_TIME   = Date.now();
-const CALENDAR_PATH = process.env.CALENDAR_PATH || './data/calendar.json';
+const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
+const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
 
 // ── Slack config ───────────────────────────────────────────────────────────
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
@@ -146,6 +147,18 @@ async function readQueue() {
 
 async function writeQueue(data) {
   const p = new URL(QUEUE_PATH, import.meta.url).pathname;
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
+// ── Request tickets I/O ───────────────────────────────────────────────────
+async function readRequests() {
+  const p = new URL(REQUESTS_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return [];
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeRequests(data) {
+  const p = new URL(REQUESTS_PATH, import.meta.url).pathname;
   await writeFile(p, JSON.stringify(data, null, 2));
 }
 
@@ -983,13 +996,44 @@ async function handleRequest(req, res) {
     const completeMatch = path.match(/^\/api\/complete\/([^/]+)$/);
     if (method === 'POST' && completeMatch) {
       const id = decodeURIComponent(completeMatch[1]);
+      const body = await readBody(req);
       const q = await readQueue();
       const item = q.items?.find(i => i.id === id);
       if (!item) return json(res, 404, { error: 'Item not found' });
       item.status = 'completed';
       item.completedAt = new Date().toISOString();
       item.itemVersion = (item.itemVersion || 0) + 1;
+      if (body?.result) item.result = body.result;
       await writeQueue(q);
+
+      // ── requestId linkage: resolve matching delegation on parent ticket ──
+      if (item.requestId) {
+        try {
+          const reqs = await readRequests();
+          const ticket = reqs.find(r => r.id === item.requestId);
+          if (ticket) {
+            const outcome = item.result || `Queue item ${item.id} completed`;
+            // Find unresolved delegation matching this queue item
+            const delIdx = (ticket.delegations || []).findIndex(d =>
+              !d.resolvedAt && (d.queueItemId === id || d.summary?.includes(id) || d.summary?.includes(item.title))
+            );
+            if (delIdx >= 0) {
+              ticket.delegations[delIdx].resolvedAt = new Date().toISOString();
+              ticket.delegations[delIdx].outcome = outcome;
+            }
+            // If all delegations resolved, mark ticket resolved
+            const allResolved = (ticket.delegations || []).every(d => d.resolvedAt);
+            if (allResolved && ticket.status === 'delegated') {
+              ticket.status = 'resolved';
+              ticket.resolution = outcome;
+            }
+            await writeRequests(reqs);
+          }
+        } catch (e) {
+          console.error('[rcc-api] requestId linkage error:', e.message);
+        }
+      }
+
       return json(res, 200, { ok: true, item });
     }
 
@@ -1675,6 +1719,134 @@ async function handleRequest(req, res) {
     if (method === 'GET' && path === '/api/cron-status') {
       if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
       return json(res, 200, cronStatus);
+    }
+
+    // ── POST /api/requests — create request ticket ────────────────────────
+    if (method === 'POST' && path === '/api/requests') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.summary) return json(res, 400, { error: 'summary required' });
+      const ticket = {
+        id: `req-${Date.now()}`,
+        created: new Date().toISOString(),
+        requester: body.requester || { type: 'human', id: 'jkh', channel: 'telegram' },
+        summary: body.summary,
+        status: 'open',
+        owner: body.owner || 'rocky',
+        delegations: [],
+        resolution: null,
+        notifiedRequesterAt: null,
+        closedAt: null,
+      };
+      const reqs = await readRequests();
+      reqs.push(ticket);
+      await writeRequests(reqs);
+      return json(res, 201, { ok: true, ticket });
+    }
+
+    // ── GET /api/requests — list tickets ─────────────────────────────────
+    if (method === 'GET' && path === '/api/requests') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      let reqs = await readRequests();
+      const ownerFilter = url.searchParams.get('owner');
+      const statusFilter = url.searchParams.get('status');
+      const requesterFilter = url.searchParams.get('requester');
+      if (ownerFilter) reqs = reqs.filter(r => r.owner === ownerFilter);
+      if (statusFilter) {
+        const statuses = statusFilter.split(',');
+        reqs = reqs.filter(r => statuses.includes(r.status));
+      }
+      if (requesterFilter) reqs = reqs.filter(r => r.requester?.id === requesterFilter);
+      return json(res, 200, reqs);
+    }
+
+    // ── GET /api/requests/:id — get one ticket ────────────────────────────
+    const reqIdMatch = path.match(/^\/api\/requests\/([^/]+)$/);
+    if (method === 'GET' && reqIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(reqIdMatch[1]);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      return json(res, 200, ticket);
+    }
+
+    // ── PATCH /api/requests/:id — update ticket fields ────────────────────
+    if (method === 'PATCH' && reqIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(reqIdMatch[1]);
+      const body = await readBody(req);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      const allowed = ['summary', 'status', 'owner', 'resolution', 'notifiedRequesterAt'];
+      for (const k of allowed) { if (k in body) ticket[k] = body[k]; }
+      await writeRequests(reqs);
+      return json(res, 200, { ok: true, ticket });
+    }
+
+    // ── POST /api/requests/:id/delegate — add delegation ─────────────────
+    const delegateMatch = path.match(/^\/api\/requests\/([^/]+)\/delegate$/);
+    if (method === 'POST' && delegateMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(delegateMatch[1]);
+      const body = await readBody(req);
+      if (!body.to || !body.summary) return json(res, 400, { error: 'to and summary required' });
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      const delegation = {
+        to: body.to,
+        at: new Date().toISOString(),
+        summary: body.summary,
+        queueItemId: body.queueItemId || null,
+        resolvedAt: null,
+        outcome: null,
+      };
+      ticket.delegations.push(delegation);
+      if (ticket.status === 'open') ticket.status = 'delegated';
+      await writeRequests(reqs);
+      return json(res, 201, { ok: true, delegation, delegationIndex: ticket.delegations.length - 1 });
+    }
+
+    // ── PATCH /api/requests/:id/delegations/:idx — resolve delegation ─────
+    const delegResMatch = path.match(/^\/api\/requests\/([^/]+)\/delegations\/(\d+)$/);
+    if (method === 'PATCH' && delegResMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(delegResMatch[1]);
+      const idx = parseInt(delegResMatch[2], 10);
+      const body = await readBody(req);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      if (!ticket.delegations[idx]) return json(res, 404, { error: 'Delegation not found' });
+      ticket.delegations[idx].resolvedAt = new Date().toISOString();
+      ticket.delegations[idx].outcome = body.outcome || '';
+      // If all delegations resolved, set status to resolved
+      if (ticket.delegations.every(d => d.resolvedAt) && ticket.status === 'delegated') {
+        ticket.status = 'resolved';
+        if (body.outcome) ticket.resolution = body.outcome;
+      }
+      await writeRequests(reqs);
+      return json(res, 200, { ok: true, ticket });
+    }
+
+    // ── POST /api/requests/:id/close — notify requester and close ─────────
+    const closeMatch = path.match(/^\/api\/requests\/([^/]+)\/close$/);
+    if (method === 'POST' && closeMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(closeMatch[1]);
+      const body = await readBody(req);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      const now = new Date().toISOString();
+      ticket.notifiedRequesterAt = now;
+      ticket.closedAt = now;
+      ticket.status = 'closed';
+      if (body?.resolution) ticket.resolution = body.resolution;
+      await writeRequests(reqs);
+      return json(res, 200, { ok: true, ticket });
     }
 
     return json(res, 404, { error: 'Not found' });

@@ -607,7 +607,31 @@ function renderUnifiedPage() {
       </div>
     </div>
 
-    <!-- Section 3: SquirrelBus -->
+    <!-- Section 3: Request Tickets -->
+    <div class="section">
+      <div class="section-header" style="display:flex;align-items:center;justify-content:space-between">
+        <span>🎫 Request Tickets</span>
+        <span id="requests-badge" style="font-size:12px;color:#8b949e"></span>
+      </div>
+      <div id="requests-table-wrap" class="q-table-wrap" style="margin-top:12px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:12px;text-align:left">
+              <th style="padding:8px 12px">ID</th>
+              <th style="padding:8px 12px">Requester</th>
+              <th style="padding:8px 12px">Owner</th>
+              <th style="padding:8px 12px">Summary</th>
+              <th style="padding:8px 12px">Status</th>
+              <th style="padding:8px 12px">Age</th>
+              <th style="padding:8px 12px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="requests-tbody"><tr><td colspan="7" style="padding:12px;color:#8b949e">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 4: SquirrelBus -->
     <div class="section">
       <div class="section-header">📡 SquirrelBus</div>
       <details class="send-form">
@@ -762,7 +786,7 @@ function renderUnifiedPage() {
       if (h < 24) return h + 'h ago';
       return Math.floor(h / 24) + 'd ago';
     }
-    const OPERATOR_HANDLE = process.env.OPERATOR_HANDLE || 'operator';
+    const OPERATOR_HANDLE = '${process.env.OPERATOR_HANDLE || "operator"}';
     const EMOJIS = { rocky: '🐿️', bullwinkle: '🫎', natasha: '🕵️‍♀️', boris: '🕵️‍♂️', [OPERATOR_HANDLE]: '👤' };
     const TYPE_COLORS = { text: '#58a6ff', memo: '#3fb950', blob: '#a371f7', heartbeat: '#8b949e', queue_sync: '#d29922', ping: '#3fb950', pong: '#3fb950', event: '#f85149', handoff: '#f0883e' };
 
@@ -1038,7 +1062,7 @@ function renderUnifiedPage() {
       const resp = await fetch('/api/item/' + modalItemId + '/comment', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, author: process.env.OPERATOR_HANDLE || 'operator' })
+        body: JSON.stringify({ text, author: OPERATOR_HANDLE })
       });
       const data = await resp.json();
       if (data.ok) { input.value = ''; showToast('Comment added!'); openItemModal(modalItemId); loadQueue(); }
@@ -1317,10 +1341,59 @@ function renderUnifiedPage() {
       }
     }
 
+    // === Request Tickets ===
+    async function loadRequests() {
+      try {
+        const r = await authedFetch('/api/requests');
+        if (!r) return;
+        const tickets = await r.json();
+        const tbody = document.getElementById('requests-tbody');
+        const badge = document.getElementById('requests-badge');
+        const open = tickets.filter(t => t.status !== 'closed');
+        badge.textContent = open.length ? open.length + ' open' : 'all closed';
+        if (!tickets.length) {
+          tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;color:#8b949e">No tickets</td></tr>';
+          return;
+        }
+        const now = Date.now();
+        tbody.innerHTML = tickets.map(t => {
+          const age = now - new Date(t.created).getTime();
+          const ageStr = age < 60000 ? '<1m' : age < 3600000 ? Math.round(age/60000)+'m' : age < 86400000 ? Math.round(age/3600000)+'h' : Math.round(age/86400000)+'d';
+          const stale = age > 24*3600000 && t.status !== 'closed';
+          const rowStyle = stale ? 'background:#2d1b1b' : '';
+          const statusColor = {open:'#3fb950',delegated:'#d29922',resolved:'#58a6ff',closed:'#8b949e'}[t.status]||'#8b949e';
+          const reqId = esc(t.requester?.id||'?') + (t.requester?.channel ? ' ('+esc(t.requester.channel)+')' : '');
+          const delegHtml = (t.delegations||[]).length ? '<details style="margin-top:4px"><summary style="cursor:pointer;color:#58a6ff;font-size:11px">'+t.delegations.length+' delegation(s)</summary><div style="margin-top:4px;padding:4px 8px;background:#0d1117;border-radius:4px;font-size:11px">'+(t.delegations.map((d,i) => '<div style="margin:4px 0"><b>→ '+esc(d.to)+'</b>: '+esc(d.summary)+(d.resolvedAt?' ✅ '+esc(d.outcome||''):'')+'</div>').join(''))+'</div></details>' : '';
+          const closeBtn = t.status !== 'closed' ? '<button onclick="closeTicket(\''+esc(t.id)+'\')" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer">Close</button>' : '';
+          return '<tr style="border-bottom:1px solid #21262d;'+rowStyle+'">'
+            + '<td style="padding:8px 12px;font-size:11px;color:#8b949e;white-space:nowrap">'+esc(t.id)+'</td>'
+            + '<td style="padding:8px 12px;font-size:12px">'+reqId+'</td>'
+            + '<td style="padding:8px 12px;font-size:12px">'+esc(t.owner||'?')+'</td>'
+            + '<td style="padding:8px 12px;font-size:12px">'+esc(t.summary)+''+delegHtml+'</td>'
+            + '<td style="padding:8px 12px"><span style="color:'+statusColor+';font-size:12px;font-weight:600">'+t.status+'</span>'+(stale?' <span style="color:#f85149;font-size:10px">⚠️ stale</span>':'')+'</td>'
+            + '<td style="padding:8px 12px;font-size:12px;white-space:nowrap">'+ageStr+'</td>'
+            + '<td style="padding:8px 12px">'+closeBtn+'</td>'
+            + '</tr>';
+        }).join('');
+      } catch(e) { console.error('Requests load error:', e); }
+    }
+
+    async function closeTicket(id) {
+      const resolution = prompt('Resolution summary (shown to requester):');
+      if (resolution === null) return;
+      const r = await authedFetch('/api/requests/'+id+'/close', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ resolution }),
+      });
+      if (r?.ok) { showToast('Ticket closed'); loadRequests(); }
+    }
+
     // === Init & refresh ===
     loadAgents();
     loadQueue();
     loadBus(true);
+    loadRequests();
 
     // Auto-refresh agent cards every 30s
     // Master clock — tick every second
@@ -1331,6 +1404,8 @@ function renderUnifiedPage() {
     setInterval(loadQueue, 60000);
     // Auto-refresh bus every 10s (incremental)
     setInterval(() => loadBus(false), 10000);
+    // Auto-refresh requests every 60s
+    setInterval(loadRequests, 60000);
 
     document.getElementById('footer').textContent = '🐿️ Rocky Command Center · Auto-refreshing · Rendered: ' + new Date().toLocaleString();
   </script>
@@ -2198,7 +2273,7 @@ app.get('/api/activity', async (req, res) => {
     const peopleMap = new Map();
 
     // jkh is always present
-    const op = process.env.OPERATOR_HANDLE || 'operator'; const jkhItems = allItems.filter(i => i.assignee === op);
+    const op = OPERATOR_HANDLE; const jkhItems = allItems.filter(i => i.assignee === op);
     const jkhLastAct = jkhItems.sort((a,b) =>
       new Date(b.completedAt||b.created||0) - new Date(a.completedAt||a.created||0))[0];
     const jkhScore = recencyScore(jkhLastAct?.completedAt || jkhLastAct?.created);
@@ -2520,6 +2595,81 @@ app.delete('/api/calendar/:id', requireAuth, async (req, res) => {
     if (idx === -1) return res.status(404).json({ error: 'Event not found' });
     const [removed] = v2CalendarStore.splice(idx, 1);
     res.json({ ok: true, removed });
+  }
+});
+
+// ── Request tickets proxy ─────────────────────────────────────────────────────
+app.get('/api/requests', async (req, res) => {
+  try {
+    const qs = new URLSearchParams(req.query).toString();
+    const data = await rccFetch(req.headers.authorization, `/api/requests${qs ? '?' + qs : ''}`);
+    return res.json(data);
+  } catch (e) {
+    res.json([]);
+  }
+});
+
+app.post('/api/requests', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, '/api/requests', {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.get('/api/requests/:id', async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/requests/${req.params.id}`);
+    return res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.patch('/api/requests/:id', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/requests/${req.params.id}`, {
+      method: 'PATCH', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.post('/api/requests/:id/delegate', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/requests/${req.params.id}/delegate`, {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.patch('/api/requests/:id/delegations/:idx', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/requests/${req.params.id}/delegations/${req.params.idx}`, {
+      method: 'PATCH', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.post('/api/requests/:id/close', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/requests/${req.params.id}/close`, {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
   }
 });
 

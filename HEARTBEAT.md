@@ -27,6 +27,16 @@ RCC API healthy (uptime 17564s). Queue: 22 items, all ideas or jkh-resolved.
 
 3. **Git sync**: After completing any task, commit + push to `jordanhubbard/rockyandfriends`.
 
+### Open request tickets
+
+```
+curl -s 'http://localhost:8789/api/requests?owner=rocky&status=open,delegated' \
+  -H 'Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb'
+```
+
+- If any tickets have **all delegations resolved** but `notifiedRequesterAt` is null → POST `/api/requests/:id/close` with resolution summary.
+- If any tickets are **open >30min with no delegation** → message the requester with a status update.
+
 ### Resolved today
 - `wq-JKH-security-rotation` ✅ closed — git audit confirmed no tokens leaked
 - `wq-API-1774289122890` ✅ closed — Azure/DO split is intentional, no migration needed
