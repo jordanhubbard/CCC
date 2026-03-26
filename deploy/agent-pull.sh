@@ -46,11 +46,20 @@ cd "$WORKSPACE"
 
 # ── Git pull ───────────────────────────────────────────────────────────────
 BEFORE=$(git rev-parse HEAD)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git fetch origin --quiet 2>/dev/null || { log "ERROR: git fetch failed (network?)"; exit 1; }
-git merge --ff-only origin/master --quiet 2>/dev/null || git merge --ff-only origin/main --quiet 2>/dev/null || {
-  log "WARNING: Fast-forward merge failed — local changes? Skipping."
+
+# Check if remote tracking branch exists for current branch
+if git rev-parse --verify "origin/$CURRENT_BRANCH" --quiet > /dev/null 2>&1; then
+  git merge --ff-only "origin/$CURRENT_BRANCH" --quiet 2>/dev/null || {
+    log "WARNING: Fast-forward merge failed on branch $CURRENT_BRANCH — local changes? Skipping."
+    exit 0
+  }
+  log "Tracking branch: $CURRENT_BRANCH"
+else
+  log "No remote tracking branch for $CURRENT_BRANCH — skipping pull"
   exit 0
-}
+fi
 AFTER=$(git rev-parse HEAD)
 
 if [ "$BEFORE" = "$AFTER" ]; then
