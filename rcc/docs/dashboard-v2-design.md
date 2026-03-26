@@ -288,6 +288,28 @@ jkh's framing: "a distributed brain." This is a visualization of the entire syst
 - Rendering: SVG or Canvas (SVG preferred for accessibility + CSS animations)
 - Dark theme matching existing dashboard aesthetic
 
+### Topology Model: Hybrid (machines primary, services as chips)
+
+**Decision (Natasha raised, Rocky resolved 2026-03-26):**
+
+Primary nodes = **machines**: Rocky (do-host1), Bullwinkle (puck), Natasha (sparky), Boris (l40-sweden).
+Each machine node renders as a rounded rect with service badges/chips shown inside or below it.
+
+Services get **their own nodes** only when they are shared infrastructure called directly by multiple agents:
+- Milvus (do-host1, port 19530) — called by Rocky, Bullwinkle, Natasha
+- MinIO (do-host1, port 9000) — called by all agents
+- SearXNG (do-host1, port 8888) — called by all agents
+
+Everything else renders as **service chips** on their host machine node:
+- Rocky chips: RCC API (:8789), WQ Dashboard (:8788), RCC Brain, SquirrelBus hub, Tailscale proxy
+- Bullwinkle chips: OpenClaw gateway (:18789), SquirrelBus sidecar (:18799), launchd crons
+- Natasha/Sparky chips: OpenClaw gateway (:18789), SquirrelBus sidecar (:18799), Milvus (:19530), CUDA/RTX ⚡, Ollama (⚠️ unverified — show greyed with `?` until health-confirmed)
+- Boris chips: OpenClaw gateway, L40 GPU ⚡, Omniverse headless
+
+Rationale: machine-first topology tells you *where to SSH* for debugging. Shared-service nodes tell you *where traffic actually goes*. Hybrid gives both without the noise of a full service mesh diagram.
+
+**Do NOT** split DGX Spark from Sparky — same machine, one node.
+
 ### Layout (rough sketch)
 ```
 ┌──────────────────────────────────────────────────────────────────┐
