@@ -2389,6 +2389,1332 @@ app.delete('/s3/:bucket/*splat', requireAuth, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Dashboard v2 — Phase 2 Frontend
+// New tabs: Overview, Kanban, Calendar, Projects, SquirrelBus, Settings
+// API stubs for endpoints Rocky is building in parallel (Phase 1)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Stub / Mock Data ───────────────────────────────────────────────────────────
+
+const V2_CALENDAR_EVENTS = [
+  { id: 'cal-001', title: 'jkh in Taiwan', start: '2026-03-20T00:00:00Z', end: '2026-03-31T23:59:00Z', owner: 'rocky', type: 'travel', allDay: true, description: 'jkh traveling — async-first communication' },
+  { id: 'cal-002', title: 'Sparky GPU block — render job', start: '2026-03-26T02:00:00Z', end: '2026-03-26T06:00:00Z', owner: 'natasha', type: 'block', resource: 'sparky-gpu', allDay: false, description: 'RTX 4090 reserved for diffusion run' },
+  { id: 'cal-003', title: 'PR review deadline — usdagent #12', start: '2026-03-27T17:00:00Z', end: '2026-03-27T17:00:00Z', owner: 'bullwinkle', type: 'deadline', allDay: false, description: 'jordanhubbard/usdagent PR #12 needs review' },
+  { id: 'cal-004', title: 'NVIDIA all-hands', start: '2026-03-28T16:00:00Z', end: '2026-03-28T18:00:00Z', owner: 'jkh', type: 'event', allDay: false, description: 'jkh attending NVIDIA all-hands' },
+  { id: 'cal-005', title: 'Puck maintenance window', start: '2026-03-29T04:00:00Z', end: '2026-03-29T05:00:00Z', owner: 'bullwinkle', type: 'maintenance', resource: 'puck', allDay: false, description: 'macOS update + disk cleanup' },
+  { id: 'cal-006', title: 'Boris L40 benchmark run', start: '2026-03-30T08:00:00Z', end: '2026-03-30T12:00:00Z', owner: 'boris', type: 'block', resource: 'l40-sweden', allDay: false, description: 'Omniverse headless rendering benchmark' },
+  { id: 'cal-007', title: 'RCC weekly sync (soul commits)', start: '2026-04-01T14:00:00Z', end: '2026-04-01T14:30:00Z', owner: 'rocky', type: 'event', allDay: false, description: 'Weekly soul commit review and lessons sync' },
+];
+
+const V2_APPEAL_ITEMS = [
+  { id: 'wq-appeal-001', title: 'Merge strategy for usdagent PR #12 — 3 conflicting approaches', agent: 'bullwinkle', reason: 'Need jkh to pick the architecture direction before we write more code on top', waitingSince: new Date(Date.now() - 14 * 3600 * 1000).toISOString(), priority: 'high', tags: ['usdagent', 'architecture'] },
+  { id: 'wq-appeal-002', title: 'GPU budget approval — $80/mo Vast.ai for Boris overflow', agent: 'rocky', reason: 'L40 in Sweden is saturated during EU hours. Need cost approval to rent burst capacity.', waitingSince: new Date(Date.now() - 52 * 3600 * 1000).toISOString(), priority: 'normal', tags: ['budget', 'infrastructure'] },
+  { id: 'wq-appeal-003', title: 'Delete old souls/ branch from 2025 experiment?', agent: 'natasha', reason: 'Branch is stale (180d), but has uncommitted experiments. Confirm before purge.', waitingSince: new Date(Date.now() - 3 * 3600 * 1000).toISOString(), priority: 'low', tags: ['git', 'cleanup'] },
+];
+
+const V2_CRON_STATUS = {
+  rocky: [
+    { name: 'heartbeat-rcc', schedule: '*/5 * * * *', lastSuccess: new Date(Date.now() - 3 * 60 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+    { name: 'queue-sync', schedule: '*/15 * * * *', lastSuccess: new Date(Date.now() - 11 * 60 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+    { name: 'minio-backup', schedule: '0 3 * * *', lastSuccess: new Date(Date.now() - 18 * 3600 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+  ],
+  bullwinkle: [
+    { name: 'heartbeat-rcc.plist', schedule: '*/5 * * * *', lastSuccess: new Date(Date.now() - 4 * 60 * 1000).toISOString(), lastFailure: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), streak: 0, status: 'ok' },
+    { name: 'openclaw-plist', schedule: 'launchd', lastSuccess: new Date(Date.now() - 90 * 60 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+  ],
+  natasha: [
+    { name: 'heartbeat-rcc', schedule: '*/5 * * * *', lastSuccess: new Date(Date.now() - 2 * 60 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+    { name: 'cuda-health-check', schedule: '*/30 * * * *', lastSuccess: new Date(Date.now() - 28 * 60 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+    { name: 'ollama-keepalive', schedule: '*/10 * * * *', lastSuccess: new Date(Date.now() - 7 * 60 * 1000).toISOString(), lastFailure: null, streak: 0, status: 'ok' },
+  ],
+  boris: [
+    { name: 'heartbeat-rcc', schedule: '*/5 * * * *', lastSuccess: new Date(Date.now() - 23 * 60 * 1000).toISOString(), lastFailure: new Date(Date.now() - 28 * 60 * 1000).toISOString(), streak: 1, status: 'warning' },
+    { name: 'omniverse-watchdog', schedule: '*/15 * * * *', lastSuccess: null, lastFailure: new Date(Date.now() - 47 * 3600 * 1000).toISOString(), streak: 47, status: 'error' },
+  ],
+};
+
+const V2_PROVIDER_HEALTH = {
+  rocky:      { model: 'claude-sonnet-4-6', provider: 'NVIDIA/Azure/Anthropic', status: 'ok', lastError: null, lastErrorTs: null, requestsToday: 142 },
+  bullwinkle: { model: 'claude-sonnet-4-6', provider: 'OpenClaw gateway', status: 'ok', lastError: null, lastErrorTs: null, requestsToday: 89 },
+  natasha:    { model: 'qwen2.5-coder:32b', provider: 'Ollama (local)', status: 'ok', lastError: null, lastErrorTs: null, requestsToday: 34 },
+  boris:      { model: 'claude-sonnet-4-6', provider: 'NVIDIA Inference', status: 'degraded', lastError: 'HTTP 400 — invalid_request_error', lastErrorTs: new Date(Date.now() - 3 * 3600 * 1000).toISOString(), requestsToday: 0 },
+};
+
+const V2_MOCK_PROJECTS = [
+  { id: 'rockyandfriends', full_name: 'jordanhubbard/rockyandfriends', display_name: 'rockyandfriends', description: 'The shared workspace for Rocky, Bullwinkle, Natasha', kind: 'team', activeAgent: 'rocky', lastCommit: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), branch: 'main', openIssues: 3, openPRs: 1, queueItems: 2, slackChannel: '#rockyandfriends (omgjkh)', ciStatus: 'passing' },
+  { id: 'usdagent', full_name: 'jordanhubbard/usdagent', display_name: 'usdagent', description: 'USD-native AI agent for 3D scene manipulation', kind: 'team', activeAgent: 'bullwinkle', lastCommit: new Date(Date.now() - 8 * 3600 * 1000).toISOString(), branch: 'main', openIssues: 7, openPRs: 2, queueItems: 5, slackChannel: '#usdagent (omgjkh)', ciStatus: 'failing' },
+  { id: 'openclaw', full_name: 'jordanhubbard/openclaw', display_name: 'openclaw', description: 'Claude Code gateway + agent orchestration layer', kind: 'personal', activeAgent: 'rocky', lastCommit: new Date(Date.now() - 30 * 60 * 1000).toISOString(), branch: 'main', openIssues: 1, openPRs: 0, queueItems: 1, slackChannel: null, ciStatus: 'passing' },
+  { id: 'itsallgeektome', full_name: 'jordanhubbard/itsallgeektome', display_name: 'itsallgeektome', description: 'The geek blog — posts, tools, long-form writing', kind: 'personal', activeAgent: 'natasha', lastCommit: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString(), branch: 'main', openIssues: 0, openPRs: 0, queueItems: 0, slackChannel: '#itsallgeektome (offtera)', ciStatus: 'passing' },
+];
+
+// In-memory stores (fallback when RCC is unreachable)
+const v2CalendarStore = [...V2_CALENDAR_EVENTS];
+const v2CronStore     = JSON.parse(JSON.stringify(V2_CRON_STATUS));
+const v2ProviderStore = JSON.parse(JSON.stringify(V2_PROVIDER_HEALTH));
+
+// ── RCC Proxy Helper ───────────────────────────────────────────────────────────
+
+const RCC_BASE = 'http://localhost:8789';
+
+async function rccFetch(authHeader, path, options = {}) {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const resp = await fetch(`${RCC_BASE}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authHeader ? { Authorization: authHeader } : {}),
+        ...options.headers,
+      },
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) throw new Error(`RCC ${resp.status}`);
+    return await resp.json();
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+// ── API Routes (proxy to RCC, fallback to stub) ────────────────────────────────
+
+app.get('/api/calendar', async (req, res) => {
+  try {
+    const qs = new URLSearchParams(req.query).toString();
+    const data = await rccFetch(req.headers.authorization, `/api/calendar${qs ? '?' + qs : ''}`);
+    return res.json(data);
+  } catch {
+    let events = v2CalendarStore;
+    if (req.query.start) events = events.filter(e => new Date(e.end) >= new Date(req.query.start));
+    if (req.query.end)   events = events.filter(e => new Date(e.start) <= new Date(req.query.end));
+    if (req.query.resource) events = events.filter(e => e.resource === req.query.resource);
+    res.json({ ok: true, events });
+  }
+});
+
+app.post('/api/calendar', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, '/api/calendar', {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch {
+    const event = { id: 'cal-' + Date.now(), ...req.body, created: new Date().toISOString() };
+    v2CalendarStore.push(event);
+    res.json({ ok: true, event });
+  }
+});
+
+app.delete('/api/calendar/:id', requireAuth, async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/calendar/${req.params.id}`, { method: 'DELETE' });
+    return res.json(data);
+  } catch {
+    const idx = v2CalendarStore.findIndex(e => e.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Event not found' });
+    const [removed] = v2CalendarStore.splice(idx, 1);
+    res.json({ ok: true, removed });
+  }
+});
+
+app.get('/api/appeal', async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, '/api/appeal');
+    return res.json(data);
+  } catch {
+    res.json({ ok: true, items: V2_APPEAL_ITEMS });
+  }
+});
+
+app.post('/api/appeal/:id', requireAuth, async (req, res) => {
+  const { action, comment } = req.body;
+  if (!action) return res.status(400).json({ error: 'action required' });
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/appeal/${req.params.id}`, {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch {
+    res.json({ ok: true, id: req.params.id, action, comment, ts: new Date().toISOString() });
+  }
+});
+
+app.get('/api/heartbeat/:agent/history', async (req, res) => {
+  const agent = req.params.agent;
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/heartbeat/${agent}/history`);
+    return res.json(data);
+  } catch {
+    // Synthetic fallback: 288 5-min slots for the last 24h
+    const now = Date.now();
+    const slots = [];
+    for (let i = 287; i >= 0; i--) {
+      const ts = new Date(now - i * 5 * 60 * 1000).toISOString();
+      let status = 'online';
+      if (agent === 'boris' && i >= 84 && i <= 168) status = 'offline';
+      else if (agent === 'boris' && i >= 169 && i <= 180) status = 'stale';
+      else if (Math.random() < 0.015) status = 'stale';
+      slots.push({ ts, status });
+    }
+    res.json({ ok: true, agent, slots });
+  }
+});
+
+app.get('/api/crons', async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, '/api/cron-status');
+    return res.json(data);
+  } catch {
+    res.json({ ok: true, crons: v2CronStore });
+  }
+});
+
+app.post('/api/crons/:agent', requireAuth, async (req, res) => {
+  const agent = req.params.agent;
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/cron-status/${agent}`, {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch {
+    if (!v2CronStore[agent]) v2CronStore[agent] = [];
+    const { name, status, lastSuccess, lastFailure, streak } = req.body;
+    const existing = v2CronStore[agent].find(c => c.name === name);
+    if (existing) {
+      Object.assign(existing, { status, lastSuccess, lastFailure, streak, updatedAt: new Date().toISOString() });
+    } else {
+      v2CronStore[agent].push({ name, status, lastSuccess, lastFailure, streak: streak || 0, schedule: req.body.schedule || '?' });
+    }
+    res.json({ ok: true });
+  }
+});
+
+app.get('/api/provider-health', async (req, res) => {
+  try {
+    const data = await rccFetch(req.headers.authorization, '/api/provider-health');
+    return res.json(data);
+  } catch {
+    res.json({ ok: true, providers: v2ProviderStore });
+  }
+});
+
+app.post('/api/provider-health/:agent', requireAuth, async (req, res) => {
+  const agent = req.params.agent;
+  try {
+    const data = await rccFetch(req.headers.authorization, `/api/provider-health/${agent}`, {
+      method: 'POST', body: JSON.stringify(req.body),
+    });
+    return res.json(data);
+  } catch {
+    v2ProviderStore[agent] = { ...v2ProviderStore[agent], ...req.body, updatedAt: new Date().toISOString() };
+    res.json({ ok: true });
+  }
+});
+
+// ── Shared v2 Rendering Helpers ────────────────────────────────────────────────
+
+function v2Head(title, extraStyle = '') {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} — RCC</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; min-height: 100vh; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #fff; }
+    .pill-pending   { background: #1f6feb; }
+    .pill-progress  { background: #a371f7; }
+    .pill-blocked   { background: #f85149; }
+    .pill-completed { background: #3fb950; }
+    .pill-idea      { background: #d29922; }
+    .toast { position: fixed; bottom: 20px; right: 20px; background: #238636; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 9999; box-shadow: 0 4px 12px #000a; }
+    .toast.error { background: #f85149; }
+    ${extraStyle}
+  </style>
+</head>
+<body>`;
+}
+
+function v2Nav(active) {
+  const tabs = [
+    { id: 'overview',    label: 'Overview',    href: '/overview',    icon: '🏠' },
+    { id: 'kanban',      label: 'Kanban',      href: '/kanban',      icon: '📋' },
+    { id: 'calendar',    label: 'Calendar',    href: '/calendar',    icon: '📅' },
+    { id: 'projects',    label: 'Projects',    href: '/projects',    icon: '📁' },
+    { id: 'squirrelbus', label: 'SquirrelBus', href: '/squirrelbus', icon: '📡' },
+  ];
+  const tabHtml = tabs.map(t => {
+    const isActive = t.id === active;
+    return `<a href="${t.href}" style="display:flex;align-items:center;gap:6px;padding:12px 16px;font-size:13px;font-weight:${isActive ? '600' : '400'};color:${isActive ? '#f0f6fc' : '#8b949e'};border-bottom:2px solid ${isActive ? '#58a6ff' : 'transparent'};transition:color .15s,border-color .15s;text-decoration:none" onmouseover="if(!this.classList.contains('active'))this.style.color='#c9d1d9'" onmouseout="if(!this.classList.contains('active'))this.style.color='#8b949e'">${t.icon} ${t.label}</a>`;
+  }).join('');
+  const settingsActive = active === 'settings';
+  return `<nav style="background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;position:sticky;top:0;z-index:100">
+  <div style="display:flex;align-items:center;padding:0 16px;border-right:1px solid #30363d;flex-shrink:0">
+    <a href="/overview" style="font-size:15px;font-weight:700;color:#f0f6fc;text-decoration:none">🐿️ RCC</a>
+  </div>
+  <div style="display:flex;align-items:stretch;flex:1;overflow-x:auto">${tabHtml}</div>
+  <div style="padding:0 12px;flex-shrink:0;border-left:1px solid #30363d">
+    <a href="/settings" style="display:flex;align-items:center;padding:12px 8px;font-size:16px;color:${settingsActive ? '#f0f6fc' : '#8b949e'};text-decoration:none;border-bottom:2px solid ${settingsActive ? '#58a6ff' : 'transparent'}" title="Settings">⚙️</a>
+  </div>
+  <div style="padding:0 12px;flex-shrink:0;border-left:1px solid #30363d">
+    <a href="/" style="font-size:11px;color:#484f58;padding:12px 4px;display:flex;align-items:center;text-decoration:none" title="Legacy dashboard">v1</a>
+  </div>
+</nav>`;
+}
+
+function v2Foot(js = '') {
+  return `<div class="toast" id="toast"></div>
+<script>
+function getToken(){let t=localStorage.getItem('wq-token');if(!t){t=prompt('Enter auth token:');if(t){t=t.trim();localStorage.setItem('wq-token',t);}}return t?t.trim():t;}
+function showToast(msg,isErr){const el=document.getElementById('toast');el.textContent=msg;el.className='toast'+(isErr?' error':'');el.style.display='block';setTimeout(()=>el.style.display='none',3500);}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function timeAgo(ds){if(!ds)return'never';const diff=Date.now()-new Date(ds).getTime();const m=Math.floor(diff/60000);if(m<1)return'just now';if(m<60)return m+'m ago';const h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
+async function authedFetch(url,opts={}){const token=getToken();if(!token)return null;opts.headers=Object.assign({},opts.headers,{'Authorization':'Bearer '+token});const r=await fetch(url,opts);if(r.status===401){showToast('⚠️ Unauthorized — update token',true);return null;}return r;}
+const EMOJIS={rocky:'🐿️',bullwinkle:'🫎',natasha:'🕵️',boris:'🕵️',jkh:'👤'};
+${js}
+</script>
+</body>
+</html>`;
+}
+
+// ── Overview Page ─────────────────────────────────────────────────────────────
+
+app.get('/overview', (req, res) => {
+  res.type('html').send(v2Head('Overview', `
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+    .panel-title { font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+    .agent-strip { display: flex; gap: 10px; flex-wrap: wrap; }
+    .agent-hb-card { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px 14px; min-width: 200px; flex: 1; cursor: pointer; transition: border-color .15s; }
+    .agent-hb-card:hover { border-color: #58a6ff; }
+    .sparkline { display: flex; gap: 1px; align-items: flex-end; height: 20px; margin-top: 6px; }
+    .sparkline-dot { width: 3px; border-radius: 1px; flex-shrink: 0; }
+    .appeal-card { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; transition: border-color .15s; }
+    .appeal-card:hover { border-color: #58a6ff; }
+    .cron-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+    .cron-row:last-child { border-bottom: none; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .provider-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #21262d; font-size: 12px; }
+    .provider-row:last-child { border-bottom: none; }
+    .digest-event { font-size: 12px; color: #8b949e; padding: 4px 0; border-bottom: 1px solid #1a1f26; }
+    .digest-event:last-child { border-bottom: none; }
+  `) + v2Nav('overview') + `
+  <div class="container">
+
+    <!-- Agent Status Strip -->
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-title">🟢 Agent Status</div>
+      <div class="agent-strip" id="agent-strip">
+        <div style="color:#8b949e;font-size:13px">Loading…</div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:16px">
+      <!-- jkh Appeal Queue -->
+      <div class="panel">
+        <div class="panel-title">⏳ jkh Appeal Queue <span id="appeal-count" style="background:#f0883e;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700"></span></div>
+        <div id="appeal-list"><div style="color:#8b949e;font-size:13px">Loading…</div></div>
+      </div>
+
+      <!-- Session Digest -->
+      <div class="panel">
+        <div class="panel-title">📊 Session Digest</div>
+        <div id="session-digest" style="font-size:12px;color:#8b949e">Loading…</div>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-bottom:16px">
+      <!-- Heartbeat Sparklines -->
+      <div class="panel">
+        <div class="panel-title">💓 Heartbeat (24h)</div>
+        <div id="sparklines"><div style="color:#8b949e;font-size:13px">Loading…</div></div>
+      </div>
+
+      <!-- Cron Status -->
+      <div class="panel">
+        <div class="panel-title">⏰ Cron Jobs</div>
+        <div id="cron-panel"><div style="color:#8b949e;font-size:13px">Loading…</div></div>
+      </div>
+
+      <!-- Provider Health -->
+      <div class="panel">
+        <div class="panel-title">🤖 Provider Health</div>
+        <div id="provider-panel"><div style="color:#8b949e;font-size:13px">Loading…</div></div>
+      </div>
+    </div>
+
+  </div>
+` + v2Foot(`
+async function loadOverview() {
+  const [hbs, appeals, cronData, provData, digest] = await Promise.all([
+    fetch('/api/heartbeats').then(r=>r.json()).catch(()=>({})),
+    fetch('/api/appeal').then(r=>r.json()).catch(()=>({items:[]})),
+    fetch('/api/crons').then(r=>r.json()).catch(()=>({crons:{}})),
+    fetch('/api/provider-health').then(r=>r.json()).catch(()=>({providers:{}})),
+    fetch('/api/digest').then(r=>r.json()).catch(()=>({digest:'(unavailable)'})),
+  ]);
+
+  // Agent status strip
+  const strip = document.getElementById('agent-strip');
+  const agents = ['rocky','bullwinkle','natasha','boris'];
+  strip.innerHTML = agents.map(name => {
+    const hb = hbs[name] || {};
+    const age = hb.ts ? Date.now() - new Date(hb.ts).getTime() : Infinity;
+    let dot = '🔴', cls = '#f85149', label = 'offline';
+    if (age < 5*60*1000)  { dot='🟢'; cls='#3fb950'; label='online'; }
+    else if (age < 30*60*1000) { dot='🟡'; cls='#d29922'; label='stale'; }
+    const emoji = EMOJIS[name]||'🤖';
+    const activity = hb.activity || 'idle';
+    return '<div class="agent-hb-card" style="border-color:'+cls+'33">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
+        '<span style="font-weight:700;font-size:14px">'+emoji+' '+name.charAt(0).toUpperCase()+name.slice(1)+'</span>' +
+        '<span style="color:'+cls+';font-size:11px;font-weight:600">'+dot+' '+label+'</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#8b949e">'+esc(hb.host||'—')+'</div>' +
+      '<div style="font-size:11px;color:#c9d1d9;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(activity)+'</div>' +
+      '<div style="font-size:10px;color:#484f58;margin-top:2px">'+timeAgo(hb.ts)+'</div>' +
+    '</div>';
+  }).join('');
+
+  // Appeal queue
+  const items = appeals.items || [];
+  const aCount = document.getElementById('appeal-count');
+  if (aCount) aCount.textContent = items.length;
+  const appealList = document.getElementById('appeal-list');
+  if (items.length === 0) {
+    appealList.innerHTML = '<div style="color:#3fb950;font-size:13px;padding:8px 0">✅ Nothing awaiting your judgment</div>';
+  } else {
+    appealList.innerHTML = items.map(item => {
+      const waitMs = Date.now() - new Date(item.waitingSince).getTime();
+      const waitH = waitMs / 3600000;
+      let bg = 'transparent', border = '#30363d';
+      if (waitH > 72) { bg='#f8514920'; border='#f85149'; }
+      else if (waitH > 24) { bg='#d2992220'; border='#d29922'; }
+      else if (waitH > 2) { bg='#f0883e10'; border='#f0883e44'; }
+      const waitBadge = waitH > 72 ? '⚠️ ' : '';
+      return '<div class="appeal-card" style="background:'+bg+';border-color:'+border+'">' +
+        '<div style="font-weight:600;font-size:13px;margin-bottom:3px">'+waitBadge+esc(item.title)+'</div>' +
+        '<div style="font-size:11px;color:#8b949e;margin-bottom:6px">'+esc(EMOJIS[item.agent]||'🤖')+' '+esc(item.agent)+' · '+timeAgo(item.waitingSince)+' waiting</div>' +
+        '<div style="font-size:11px;color:#c9d1d9;margin-bottom:8px">'+esc(item.reason)+'</div>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button onclick="appealAction(\''+item.id+'\',\'approve\')" style="background:#238636;border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">✅ Approve</button>' +
+          '<button onclick="appealAction(\''+item.id+'\',\'reject\')" style="background:#6e7681;border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">❌ Reject</button>' +
+          '<button onclick="appealAction(\''+item.id+'\',\'comment\')" style="background:#1f6feb;border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">💬 Comment</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Session digest
+  const sd = document.getElementById('session-digest');
+  if (digest.digest) {
+    const lines = digest.digest.split('\\n').slice(0,12);
+    sd.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px;line-height:1.7;color:#8b949e">'+esc(lines.join('\\n'))+'</pre>';
+  }
+
+  // Sparklines — load for each agent
+  const sparkDiv = document.getElementById('sparklines');
+  const sparkResults = await Promise.all(['rocky','bullwinkle','natasha','boris'].map(a=>
+    fetch('/api/heartbeat/'+a+'/history').then(r=>r.json()).catch(()=>({slots:[]}))
+  ));
+  sparkDiv.innerHTML = ['rocky','bullwinkle','natasha','boris'].map((name,i) => {
+    const slots = sparkResults[i].slots || [];
+    const recent = slots.slice(-96); // last 8h at 5min intervals
+    const dots = recent.map(s => {
+      const c = s.status==='online'?'#3fb950':s.status==='stale'?'#d29922':'#f85149';
+      return '<div class="sparkline-dot" style="background:'+c+';height:'+(s.status==='online'?14:s.status==='stale'?8:4)+'px" title="'+s.status+' at '+new Date(s.ts).toLocaleTimeString()+'"></div>';
+    }).join('');
+    return '<div style="margin-bottom:10px">' +
+      '<div style="font-size:12px;font-weight:600;margin-bottom:4px">'+EMOJIS[name]+' '+name+'</div>' +
+      '<div class="sparkline">'+dots+'</div>' +
+    '</div>';
+  }).join('');
+
+  // Cron status
+  const crons = cronData.crons || {};
+  const cronDiv = document.getElementById('cron-panel');
+  let cronHtml = '';
+  for (const [agentName, jobs] of Object.entries(crons)) {
+    if (!jobs || jobs.length === 0) continue;
+    cronHtml += '<div style="font-size:11px;font-weight:600;color:#8b949e;margin:8px 0 4px 0">'+EMOJIS[agentName]+' '+agentName+'</div>';
+    cronHtml += jobs.map(job => {
+      const dot = job.status==='ok'?'#3fb950':job.status==='warning'?'#d29922':'#f85149';
+      const streak = job.streak > 0 ? '<span style="color:#f85149;margin-left:4px">⚠️ '+job.streak+' fails</span>' : '';
+      return '<div class="cron-row">' +
+        '<div class="status-dot" style="background:'+dot+'"></div>' +
+        '<div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(job.name)+'</div>' +
+        streak +
+        '<div style="color:#484f58;flex-shrink:0">'+timeAgo(job.lastSuccess)+'</div>' +
+      '</div>';
+    }).join('');
+  }
+  cronDiv.innerHTML = cronHtml || '<div style="color:#8b949e">No cron data</div>';
+
+  // Provider health
+  const providers = provData.providers || {};
+  const pDiv = document.getElementById('provider-panel');
+  pDiv.innerHTML = Object.entries(providers).map(([name, p]) => {
+    const dot = p.status==='ok'?'#3fb950':p.status==='degraded'?'#d29922':'#f85149';
+    const errLine = p.lastError ? '<div style="font-size:10px;color:#f85149;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.lastError)+'</div>' : '';
+    return '<div class="provider-row">' +
+      '<div>' +
+        '<div style="display:flex;align-items:center;gap:6px">' +
+          '<div class="status-dot" style="background:'+dot+'"></div>' +
+          '<span style="font-weight:600">'+EMOJIS[name]+' '+name+'</span>' +
+        '</div>' +
+        '<div style="font-size:10px;color:#8b949e;margin-left:14px">'+esc(p.model)+'</div>' +
+        errLine +
+      '</div>' +
+      '<div style="text-align:right;flex-shrink:0;margin-left:8px">' +
+        '<div style="font-size:10px;color:#484f58">'+p.requestsToday+' req</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function appealAction(id, action) {
+  const r = await authedFetch('/api/appeal/'+id, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
+  if (r) { showToast('Action sent: '+action); loadOverview(); }
+}
+
+loadOverview();
+setInterval(loadOverview, 30000);
+`));
+});
+
+// ── Kanban Page ───────────────────────────────────────────────────────────────
+
+app.get('/kanban', (req, res) => {
+  res.type('html').send(v2Head('Kanban', `
+    .board { display: flex; gap: 12px; padding: 16px; overflow-x: auto; min-height: calc(100vh - 53px); align-items: flex-start; }
+    .column { background: #161b22; border: 1px solid #30363d; border-radius: 8px; min-width: 240px; max-width: 280px; flex-shrink: 0; display: flex; flex-direction: column; }
+    .col-header { padding: 12px 14px; border-bottom: 1px solid #30363d; display: flex; align-items: center; justify-content: space-between; }
+    .col-title { font-size: 13px; font-weight: 700; color: #f0f6fc; display: flex; align-items: center; gap: 6px; }
+    .col-count { font-size: 11px; background: #21262d; border-radius: 10px; padding: 1px 7px; color: #8b949e; }
+    .col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 100px; }
+    .kcard { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px 12px; cursor: grab; transition: border-color .15s, box-shadow .15s; user-select: none; }
+    .kcard:hover { border-color: #58a6ff; box-shadow: 0 2px 8px #0005; }
+    .kcard.dragging { opacity: .5; cursor: grabbing; }
+    .kcard-type-bug      { border-left: 3px solid #f85149 !important; }
+    .kcard-type-feature  { border-left: 3px solid #3fb950 !important; }
+    .kcard-type-idea     { border-left: 3px solid #d29922 !important; }
+    .kcard-type-proposal { border-left: 3px solid #a371f7 !important; }
+    .kcard-type-task     { border-left: 3px solid #30363d !important; }
+    .type-chip { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; margin-right: 4px; }
+    .drop-zone { border: 2px dashed #30363d; border-radius: 6px; min-height: 40px; background: transparent; transition: border-color .15s, background .15s; }
+    .drop-zone.drag-over { border-color: #58a6ff; background: #58a6ff10; }
+    .filter-bar { display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid #21262d; flex-wrap: wrap; align-items: center; background: #0d1117; }
+    .fbtn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 4px 12px; border-radius: 16px; cursor: pointer; font-size: 12px; }
+    .fbtn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    .appeal-mini { background: #f0883e15; border-color: #f0883e44; }
+  `) + v2Nav('kanban') + `
+  <div class="filter-bar">
+    <span style="font-size:12px;color:#8b949e;margin-right:4px">Type:</span>
+    <button class="fbtn active" id="f-all"     onclick="setTypeFilter('all')">All</button>
+    <button class="fbtn"       id="f-bug"     onclick="setTypeFilter('bug')">🔴 Bugs</button>
+    <button class="fbtn"       id="f-feature" onclick="setTypeFilter('feature')">🟢 Features</button>
+    <button class="fbtn"       id="f-idea"    onclick="setTypeFilter('idea')">💡 Ideas</button>
+    <button class="fbtn"       id="f-proposal"onclick="setTypeFilter('proposal')">🟣 Proposals</button>
+    <span style="margin-left:12px;font-size:12px;color:#8b949e">Priority:</span>
+    <button class="fbtn active" id="p-all"    onclick="setPrioFilter('all')">All</button>
+    <button class="fbtn"        id="p-urgent" onclick="setPrioFilter('urgent')">Urgent</button>
+    <button class="fbtn"        id="p-high"   onclick="setPrioFilter('high')">High</button>
+    <label style="font-size:12px;color:#8b949e;margin-left:12px;display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="show-completed" onchange="renderBoard()"> Show completed
+    </label>
+    <span style="margin-left:auto;font-size:11px;color:#484f58" id="kb-status">Loading…</span>
+  </div>
+  <div class="board" id="board">
+    <div style="color:#8b949e;padding:20px">Loading…</div>
+  </div>
+` + v2Foot(`
+const AGENTS = ['rocky','bullwinkle','natasha','boris'];
+let kItems = [], kAppeals = [], kHeartbeats = {}, kTypeFilter = 'all', kPrioFilter = 'all';
+
+const TYPE_COLORS = { bug:'#f85149', feature:'#3fb950', idea:'#d29922', proposal:'#a371f7', task:'#8b949e' };
+const TYPE_EMOJIS = { bug:'🔴', feature:'🟢', idea:'💡', proposal:'🟣', task:'⬜' };
+
+function itemType(item) {
+  const tags = item.tags || [];
+  for (const t of ['bug','feature','idea','proposal']) if (tags.includes(t)) return t;
+  if (item.type) return item.type;
+  if (item.priority === 'idea') return 'idea';
+  return 'task';
+}
+
+function setTypeFilter(f) {
+  kTypeFilter = f;
+  document.querySelectorAll('[id^="f-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('f-'+f)?.classList.add('active');
+  renderBoard();
+}
+function setPrioFilter(f) {
+  kPrioFilter = f;
+  document.querySelectorAll('[id^="p-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('p-'+f)?.classList.add('active');
+  renderBoard();
+}
+
+function filterItems(items) {
+  const showCompleted = document.getElementById('show-completed')?.checked;
+  return items.filter(item => {
+    if (!showCompleted && (item.status === 'completed' || item.status === 'cancelled')) return false;
+    if (kTypeFilter !== 'all' && itemType(item) !== kTypeFilter) return false;
+    if (kPrioFilter !== 'all' && item.priority !== kPrioFilter) return false;
+    return true;
+  });
+}
+
+function renderCard(item) {
+  const type = itemType(item);
+  const typeColor = TYPE_COLORS[type] || '#8b949e';
+  const typeEmoji = TYPE_EMOJIS[type] || '⬜';
+  const blocked = (item.blockedBy && item.blockedBy.length) || item.status === 'blocked';
+  const needsHuman = item.needsHuman || item.status === 'awaiting-jkh';
+  const statusColor = item.status==='in-progress'?'#a371f7':item.status==='blocked'?'#f85149':item.status==='completed'?'#3fb950':'#58a6ff';
+  return '<div class="kcard kcard-type-'+type+'" draggable="true" data-id="'+item.id+'" data-assignee="'+(item.assignee||'unassigned')+'" ondragstart="onDragStart(event,\''+item.id+'\')" ondblclick="openItemModal(\''+item.id+'\')">' +
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">' +
+      '<div style="font-size:12px;font-weight:600;line-height:1.35;flex:1">'+esc(item.title)+'</div>' +
+      '<span style="font-size:10px;color:#484f58;flex-shrink:0">'+esc(item.id.slice(-6))+'</span>' +
+    '</div>' +
+    '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">' +
+      '<span class="type-chip" style="background:'+typeColor+'">'+typeEmoji+' '+type+'</span>' +
+      '<span style="font-size:10px;padding:1px 5px;background:#21262d;border-radius:3px;color:'+statusColor+'">'+item.status+'</span>' +
+      (blocked ? '<span style="font-size:10px" title="Blocking/blocked">🔗</span>' : '') +
+      (needsHuman ? '<span style="font-size:10px;color:#f0883e" title="Needs jkh">⏳</span>' : '') +
+    '</div>' +
+    (item.description ? '<div style="font-size:11px;color:#8b949e;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(item.description.slice(0,80))+'</div>' : '') +
+    '<div style="margin-top:6px;font-size:10px;color:#484f58">'+timeAgo(item.created)+'</div>' +
+  '</div>';
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  const filtered = filterItems(kItems);
+  const columns = [
+    ...AGENTS.map(a => ({ id:a, label: a.charAt(0).toUpperCase()+a.slice(1), emoji: EMOJIS[a]||'🤖', items: filtered.filter(i=>i.assignee===a) })),
+    { id:'unassigned', label:'Unassigned', emoji:'📥', items: filtered.filter(i=>!i.assignee||i.assignee==='all'||!AGENTS.includes(i.assignee)) },
+  ];
+  // Only show Boris if he has items (keep board clean)
+  const visibleCols = columns.filter(c => c.id !== 'boris' || c.items.length > 0);
+
+  const appealFiltered = filterItems(kAppeals);
+
+  board.innerHTML = visibleCols.map(col => {
+    const hb = kHeartbeats[col.id];
+    const hbAge = hb && hb.ts ? (Date.now() - new Date(hb.ts).getTime()) / 1000 : Infinity;
+    const hbColor = !hb ? '#484f58' : hbAge < 300 ? '#3fb950' : hbAge < 1800 ? '#d29922' : '#f85149';
+    return '<div class="column" id="col-'+col.id+'" ondragover="onDragOver(event)" ondrop="onDrop(event,\''+col.id+'\')" ondragleave="onDragLeave(event)">' +
+      '<div class="col-header">' +
+        '<div class="col-title">'+col.emoji+' '+col.label+'</div>' +
+        '<span class="col-count">'+col.items.length+'</span>' +
+      '</div>' +
+      '<div class="col-body">'+
+        (col.items.length ? col.items.map(renderCard).join('') : '<div style="color:#484f58;font-size:12px;padding:8px 0;text-align:center">Empty</div>') +
+        '<div class="drop-zone" data-col="'+col.id+'"></div>' +
+      '</div>' +
+    '</div>';
+  }).join('') +
+  // Appeal mini-column
+  '<div class="column appeal-mini">' +
+    '<div class="col-header">' +
+      '<div class="col-title">⏳ Appeals</div>' +
+      '<span class="col-count" style="background:#f0883e22;color:#f0883e">'+appealFiltered.length+'</span>' +
+    '</div>' +
+    '<div class="col-body">' +
+      (appealFiltered.length ? appealFiltered.map(item =>
+        '<div class="kcard" style="border-color:#f0883e44">' +
+          '<div style="font-size:11px;font-weight:600">'+esc(item.title)+'</div>' +
+          '<div style="font-size:10px;color:#f0883e;margin-top:4px">'+timeAgo(item.waitingSince)+' waiting</div>' +
+        '</div>'
+      ).join('') : '<div style="color:#484f58;font-size:12px;padding:8px 0;text-align:center">None pending</div>') +
+    '</div>' +
+  '</div>';
+
+  document.getElementById('kb-status').textContent = filtered.length + ' items · ' + new Date().toLocaleTimeString();
+}
+
+// Drag-to-reassign
+let dragId = null;
+function onDragStart(e, id) { dragId=id; e.currentTarget.classList.add('dragging'); }
+function onDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function onDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+async function onDrop(e, targetAgent) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!dragId) return;
+  const item = kItems.find(i => i.id === dragId);
+  if (!item || item.assignee === targetAgent) { dragId=null; return; }
+  const prev = item.assignee;
+  item.assignee = targetAgent === 'unassigned' ? 'all' : targetAgent;
+  renderBoard();
+  const r = await authedFetch('/api/item/'+dragId, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignee:item.assignee})});
+  if (r && r.ok) {
+    showToast('Reassigned to '+targetAgent);
+    // Undo toast
+    setTimeout(()=>{
+      const undo = confirm('Undo reassignment of "'+item.title+'" to '+targetAgent+'?');
+      if (undo) { item.assignee=prev; authedFetch('/api/item/'+dragId,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignee:prev})}); renderBoard(); }
+    }, 100);
+  } else {
+    item.assignee = prev; renderBoard();
+    showToast('Reassign failed', true);
+  }
+  dragId = null;
+}
+function openItemModal(id) { window.open('/api/item/'+id,'_blank'); }
+
+async function loadKanban() {
+  const [qData, appealData, hbData] = await Promise.all([
+    fetch('/api/queue').then(r=>r.json()).catch(()=>({items:[]})),
+    fetch('/api/appeal').then(r=>r.json()).catch(()=>({items:[]})),
+    fetch('/api/heartbeats').then(r=>r.json()).catch(()=>({})),
+  ]);
+  kItems = qData.items || [];
+  kAppeals = (appealData.items || []).map(a => ({...a, created: a.waitingSince}));
+  kHeartbeats = hbData && typeof hbData === 'object' && !Array.isArray(hbData) ? hbData : {};
+  renderBoard();
+}
+
+loadKanban();
+setInterval(loadKanban, 60000);
+`));
+});
+
+// ── Calendar Page ─────────────────────────────────────────────────────────────
+
+app.get('/calendar', (req, res) => {
+  res.type('html').send(v2Head('Calendar', `
+    .cal-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .cal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .cal-nav-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .cal-nav-btn:hover { border-color: #58a6ff; }
+    .toggle-btn { background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+    .toggle-btn:first-child { border-radius: 6px 0 0 6px; }
+    .toggle-btn:last-child { border-radius: 0 6px 6px 0; }
+    .toggle-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .cal-day-header { text-align: center; padding: 6px; font-size: 11px; color: #8b949e; font-weight: 600; }
+    .cal-cell { background: #161b22; border: 1px solid #21262d; border-radius: 4px; min-height: 90px; padding: 6px; position: relative; cursor: pointer; transition: border-color .15s; }
+    .cal-cell:hover { border-color: #30363d; background: #1c2128; }
+    .cal-cell.today { border-color: #58a6ff55; }
+    .cal-cell.other-month { background: #0d1117; opacity: .6; }
+    .cal-day-num { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+    .cal-day-num.today-num { color: #58a6ff; font-weight: 700; }
+    .cal-event { font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .event-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  `) + v2Nav('calendar') + `
+  <div class="cal-container">
+    <div class="cal-header">
+      <button class="cal-nav-btn" onclick="navMonth(-1)">‹</button>
+      <h2 id="cal-title" style="font-size:18px;font-weight:700;color:#f0f6fc;min-width:180px;text-align:center"></h2>
+      <button class="cal-nav-btn" onclick="navMonth(1)">›</button>
+      <button class="cal-nav-btn" onclick="goToday()">Today</button>
+      <div style="margin-left:auto;display:flex">
+        <button class="toggle-btn active" id="view-month" onclick="setView('month')">Monthly</button>
+        <button class="toggle-btn"       id="view-week"  onclick="setView('week')">Weekly</button>
+      </div>
+      <button onclick="openNewEvent()" style="background:#238636;border:none;color:#fff;border-radius:6px;padding:5px 14px;font-size:13px;cursor:pointer;font-weight:600">＋ Event</button>
+    </div>
+
+    <!-- Legend -->
+    <div style="display:flex;gap:14px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-size:11px;color:#8b949e">Owner:</span>
+      <span style="font-size:11px;display:flex;align-items:center;gap:4px"><span class="legend-dot" style="background:#58a6ff"></span>Rocky</span>
+      <span style="font-size:11px;display:flex;align-items:center;gap:4px"><span class="legend-dot" style="background:#3fb950"></span>Bullwinkle</span>
+      <span style="font-size:11px;display:flex;align-items:center;gap:4px"><span class="legend-dot" style="background:#a371f7"></span>Natasha</span>
+      <span style="font-size:11px;display:flex;align-items:center;gap:4px"><span class="legend-dot" style="background:#f0883e"></span>Boris</span>
+      <span style="font-size:11px;display:flex;align-items:center;gap:4px"><span class="legend-dot" style="background:#d29922"></span>jkh</span>
+      <span style="margin-left:12px;font-size:11px;color:#8b949e">Type:</span>
+      <span style="font-size:11px">✈️ travel</span><span style="font-size:11px">🔒 block</span>
+      <span style="font-size:11px">📅 deadline</span><span style="font-size:11px">🔧 maintenance</span>
+    </div>
+
+    <div id="cal-view"></div>
+
+    <!-- Upcoming events list -->
+    <div class="event-panel">
+      <div style="font-size:13px;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px">Upcoming Events</div>
+      <div id="event-list"><div style="color:#8b949e">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- New Event Modal -->
+  <div id="event-modal" style="display:none;position:fixed;inset:0;background:#00000088;z-index:200;align-items:center;justify-content:center" onclick="if(event.target===this)closeEventModal()">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;width:100%;max-width:460px;margin:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <span style="font-size:1rem;font-weight:600;color:#f0f6fc">＋ New Calendar Event</span>
+        <button onclick="closeEventModal()" style="background:none;border:none;color:#6e7681;font-size:1.2rem;cursor:pointer">✕</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Title *</label><input id="ev-title" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:7px 10px;color:#c9d1d9;font-size:13px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Start</label><input type="datetime-local" id="ev-start" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:7px 10px;color:#c9d1d9;font-size:12px"></div>
+          <div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">End</label><input type="datetime-local" id="ev-end" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:7px 10px;color:#c9d1d9;font-size:12px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Owner</label><select id="ev-owner" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:7px;color:#c9d1d9;font-size:13px"><option value="rocky">Rocky</option><option value="bullwinkle">Bullwinkle</option><option value="natasha">Natasha</option><option value="boris">Boris</option><option value="jkh">jkh</option></select></div>
+          <div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Type</label><select id="ev-type" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:7px;color:#c9d1d9;font-size:13px"><option value="event">event</option><option value="block">block</option><option value="deadline">deadline</option><option value="travel">travel</option><option value="maintenance">maintenance</option></select></div>
+        </div>
+        <div><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:3px">Description</label><textarea id="ev-desc" rows="2" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:7px 10px;color:#c9d1d9;font-size:13px;resize:vertical"></textarea></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+          <button onclick="closeEventModal()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;padding:6px 16px;font-size:13px;cursor:pointer">Cancel</button>
+          <button onclick="submitEvent()" style="background:#238636;border:none;color:#fff;border-radius:6px;padding:6px 18px;font-size:13px;font-weight:600;cursor:pointer">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+` + v2Foot(`
+const OWNER_COLORS = { rocky:'#58a6ff', bullwinkle:'#3fb950', natasha:'#a371f7', boris:'#f0883e', jkh:'#d29922' };
+const TYPE_ICONS = { travel:'✈️', block:'🔒', deadline:'📅', maintenance:'🔧', event:'📆' };
+let calEvents = [], calView = 'month', calDate = new Date();
+
+function navMonth(d) { calDate.setMonth(calDate.getMonth()+d); render(); }
+function goToday() { calDate = new Date(); render(); }
+function setView(v) {
+  calView = v;
+  document.getElementById('view-month').classList.toggle('active', v==='month');
+  document.getElementById('view-week').classList.toggle('active',  v==='week');
+  render();
+}
+
+function eventsForDay(y, m, d) {
+  const dayStr = y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+  return calEvents.filter(e => {
+    const start = e.start.slice(0,10);
+    const end   = e.end.slice(0,10);
+    return dayStr >= start && dayStr <= end;
+  });
+}
+
+function renderMonthly() {
+  const y = calDate.getFullYear(), m = calDate.getMonth();
+  document.getElementById('cal-title').textContent = calDate.toLocaleString('en-US',{month:'long',year:'numeric'});
+  const first = new Date(y,m,1).getDay();
+  const days  = new Date(y,m+1,0).getDate();
+  const today = new Date();
+  let html = '<div class="cal-grid">';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => { html += '<div class="cal-day-header">'+d+'</div>'; });
+  for (let i=0;i<first;i++) {
+    const prevDay = new Date(y,m,0-first+i+2);
+    html += '<div class="cal-cell other-month"><div class="cal-day-num">'+prevDay.getDate()+'</div></div>';
+  }
+  for (let d=1;d<=days;d++) {
+    const isToday = today.getFullYear()===y && today.getMonth()===m && today.getDate()===d;
+    const evs = eventsForDay(y,m,d);
+    html += '<div class="cal-cell'+(isToday?' today':'')+'"><div class="cal-day-num'+(isToday?' today-num':'')+'">'+d+'</div>' +
+      evs.slice(0,3).map(e => '<div class="cal-event" style="background:'+(OWNER_COLORS[e.owner]||'#58a6ff')+'99" title="'+esc(e.title)+'">'+TYPE_ICONS[e.type]+' '+esc(e.title)+'</div>').join('') +
+      (evs.length>3?'<div style="font-size:9px;color:#8b949e">+'+( evs.length-3)+' more</div>':'') +
+    '</div>';
+  }
+  html += '</div>';
+  document.getElementById('cal-view').innerHTML = html;
+}
+
+function renderWeekly() {
+  const startOfWeek = new Date(calDate);
+  startOfWeek.setDate(calDate.getDate() - calDate.getDay());
+  const y = startOfWeek.getFullYear(), m = startOfWeek.getMonth(), d = startOfWeek.getDate();
+  document.getElementById('cal-title').textContent = 'Week of '+startOfWeek.toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const today = new Date();
+  let html = '<div class="cal-grid">';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach((_,i) => {
+    const day = new Date(y,m,d+i);
+    const isToday = today.toDateString()===day.toDateString();
+    const evs = eventsForDay(day.getFullYear(),day.getMonth(),day.getDate());
+    html += '<div class="cal-cell'+(isToday?' today':'')+'"><div class="cal-day-num'+(isToday?' today-num':'')+'">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][i]+' '+day.getDate()+'</div>' +
+      evs.map(e => '<div class="cal-event" style="background:'+(OWNER_COLORS[e.owner]||'#58a6ff')+'" title="'+esc(e.title)+'">'+TYPE_ICONS[e.type]+' '+esc(e.title)+'</div>').join('') +
+    '</div>';
+  });
+  html += '</div>';
+  document.getElementById('cal-view').innerHTML = html;
+}
+
+function renderEventList() {
+  const now = new Date();
+  const upcoming = calEvents.filter(e => new Date(e.end) >= now).sort((a,b)=>new Date(a.start)-new Date(b.start)).slice(0,10);
+  document.getElementById('event-list').innerHTML = upcoming.length ? upcoming.map(e => {
+    const c = OWNER_COLORS[e.owner]||'#58a6ff';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #21262d">' +
+      '<div style="width:3px;height:32px;background:'+c+';border-radius:2px;flex-shrink:0"></div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:13px;font-weight:600">'+TYPE_ICONS[e.type]+' '+esc(e.title)+'</div>' +
+        '<div style="font-size:11px;color:#8b949e">'+esc(e.owner)+' · '+new Date(e.start).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</div>' +
+      '</div>' +
+      '<button onclick="deleteEvent(\''+e.id+'\')" style="background:none;border:none;color:#484f58;cursor:pointer;font-size:14px" title="Delete">🗑️</button>' +
+    '</div>';
+  }).join('') : '<div style="color:#8b949e;font-size:13px">No upcoming events</div>';
+}
+
+function render() {
+  if (calView==='month') renderMonthly(); else renderWeekly();
+  renderEventList();
+}
+
+async function deleteEvent(id) {
+  if (!confirm('Delete this event?')) return;
+  const r = await authedFetch('/api/calendar/'+id, {method:'DELETE'});
+  if (r && r.ok) { calEvents = calEvents.filter(e=>e.id!==id); showToast('Event deleted'); render(); }
+  else showToast('Delete failed', true);
+}
+
+function openNewEvent() { document.getElementById('event-modal').style.display='flex'; }
+function closeEventModal() { document.getElementById('event-modal').style.display='none'; }
+async function submitEvent() {
+  const title = document.getElementById('ev-title').value.trim();
+  if (!title) return showToast('Title required', true);
+  const payload = {
+    title,
+    start: document.getElementById('ev-start').value || new Date().toISOString(),
+    end:   document.getElementById('ev-end').value   || new Date().toISOString(),
+    owner: document.getElementById('ev-owner').value,
+    type:  document.getElementById('ev-type').value,
+    description: document.getElementById('ev-desc').value,
+  };
+  const r = await authedFetch('/api/calendar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if (r && r.ok) {
+    const data = await r.json();
+    calEvents.push(data.event);
+    showToast('Event created'); closeEventModal(); render();
+  } else showToast('Failed to create', true);
+}
+
+async function loadCalendar() {
+  const r = await fetch('/api/calendar').catch(()=>null);
+  if (r && r.ok) { const d = await r.json(); calEvents = d.events || []; }
+  render();
+}
+
+loadCalendar();
+`));
+});
+
+// ── Projects Page (Enhanced) ──────────────────────────────────────────────────
+
+app.get('/projects', async (req, res) => {
+  // Try to load real projects from repos.json; fall back to mock data
+  let projects = V2_MOCK_PROJECTS;
+  try {
+    const raw = await readFile('/home/jkh/.openclaw/workspace/rcc/api/repos.json', 'utf8');
+    const repos = JSON.parse(raw);
+    // Merge mock health data where we have it
+    projects = repos.map(r => {
+      const mock = V2_MOCK_PROJECTS.find(m => m.id === r.full_name?.split('/')[1] || m.full_name === r.full_name) || {};
+      return { ...mock, ...r, id: r.full_name?.split('/')[1] || r.id || r.display_name };
+    });
+  } catch { /* use mock data */ }
+
+  res.type('html').send(v2Head('Projects', `
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+    .project-card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+    .project-card:hover { border-color: #58a6ff; box-shadow: 0 4px 16px #0004; }
+    .project-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
+    .project-name { font-size: 15px; font-weight: 700; color: #f0f6fc; }
+    .project-desc { font-size: 12px; color: #8b949e; margin-bottom: 10px; line-height: 1.4; }
+    .project-stats { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: #8b949e; }
+    .project-stat { display: flex; align-items: center; gap: 4px; }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .ci-chip { padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+    .ci-passing { background: #23863622; color: #3fb950; border: 1px solid #23863644; }
+    .ci-failing { background: #f8514922; color: #f85149; border: 1px solid #f8514944; }
+    .ci-pending { background: #1f6feb22; color: #58a6ff; border: 1px solid #1f6feb44; }
+  `) + v2Nav('projects') + `
+  <div class="container">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h1 style="font-size:20px;font-weight:700;color:#f0f6fc">📁 Projects</h1>
+      <div style="display:flex;gap:8px">
+        <input id="proj-search" placeholder="Search projects…" style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 12px;color:#c9d1d9;font-size:13px;width:200px" oninput="filterProjects()">
+      </div>
+    </div>
+    <div class="projects-grid" id="projects-grid">
+      <div style="color:#8b949e;padding:20px">Loading…</div>
+    </div>
+  </div>
+` + v2Foot(`
+const ALL_PROJECTS = ${JSON.stringify(projects)};
+let visibleProjects = [...ALL_PROJECTS];
+
+function healthColor(lastCommit) {
+  if (!lastCommit) return '#484f58';
+  const age = Date.now() - new Date(lastCommit).getTime();
+  if (age < 24*3600*1000)  return '#3fb950';
+  if (age < 7*24*3600*1000) return '#d29922';
+  return '#f85149';
+}
+
+function filterProjects() {
+  const q = document.getElementById('proj-search').value.toLowerCase();
+  visibleProjects = ALL_PROJECTS.filter(p =>
+    !q || (p.display_name||p.id||'').toLowerCase().includes(q) ||
+    (p.description||'').toLowerCase().includes(q)
+  );
+  renderProjects();
+}
+
+function renderProjects() {
+  const grid = document.getElementById('projects-grid');
+  if (!visibleProjects.length) {
+    grid.innerHTML = '<div style="color:#8b949e;padding:20px">No projects found</div>';
+    return;
+  }
+  grid.innerHTML = visibleProjects.map(p => {
+    const hc = healthColor(p.lastCommit);
+    const ciClass = p.ciStatus==='passing'?'ci-passing':p.ciStatus==='failing'?'ci-failing':'ci-pending';
+    const ciLabel = p.ciStatus==='passing'?'✓ passing':p.ciStatus==='failing'?'✗ failing':'⏳ pending';
+    const kindBadge = p.kind==='team'?'<span style="font-size:10px;background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb44;border-radius:4px;padding:1px 6px">team</span>':'<span style="font-size:10px;background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:4px;padding:1px 6px">personal</span>';
+    const agentEmoji = EMOJIS[p.activeAgent||'rocky']||'🤖';
+    return '<div class="project-card" onclick="window.location.href=\'/projects/'+esc(p.id)+'\'">' +
+      '<div class="project-header">' +
+        '<div>' +
+          '<div class="project-name" style="display:flex;align-items:center;gap:8px">' +
+            '<span class="health-dot" style="background:'+hc+'" title="Last commit: '+timeAgo(p.lastCommit)+'"></span>' +
+            esc(p.display_name||p.id) +
+          '</div>' +
+          '<div style="font-size:10px;color:#484f58;margin-top:2px">'+esc(p.full_name||p.id)+'</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;align-items:center">'+kindBadge+'<span class="ci-chip '+ciClass+'">'+ciLabel+'</span></div>' +
+      '</div>' +
+      '<div class="project-desc">'+esc(p.description||'No description')+'</div>' +
+      '<div class="project-stats">' +
+        '<div class="project-stat">📝 '+timeAgo(p.lastCommit)+'</div>' +
+        (p.openIssues!=null?'<div class="project-stat" style="color:'+(p.openIssues>0?'#f85149':'#8b949e')+'">🔴 '+p.openIssues+' issues</div>':'') +
+        (p.openPRs!=null?'<div class="project-stat" style="color:'+(p.openPRs>0?'#a371f7':'#8b949e')+'">🟣 '+p.openPRs+' PRs</div>':'') +
+        (p.queueItems!=null?'<div class="project-stat">📋 '+p.queueItems+' tasks</div>':'') +
+        (p.activeAgent?'<div class="project-stat">'+agentEmoji+' '+esc(p.activeAgent)+'</div>':'') +
+        (p.slackChannel?'<div class="project-stat" style="color:#8b949e">💬 '+esc(p.slackChannel)+'</div>':'') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+renderProjects();
+`));
+});
+
+// ── SquirrelBus Tab ───────────────────────────────────────────────────────────
+
+app.get('/squirrelbus', (req, res) => {
+  res.type('html').send(v2Head('SquirrelBus', `
+    .sb-container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .sb-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+    .sb-search { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 7px 12px; color: #c9d1d9; font-size: 13px; flex: 1; min-width: 200px; }
+    .sb-search:focus { outline: none; border-color: #58a6ff; }
+    .filter-btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 5px 12px; border-radius: 16px; cursor: pointer; font-size: 12px; }
+    .filter-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    .bus-msg { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; }
+    .bus-msg.compact { background: transparent; border: none; padding: 3px 14px; margin-bottom: 1px; color: #484f58; font-size: 11px; }
+    .bus-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 13px; }
+    .type-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; color: #fff; margin-left: 4px; }
+    .send-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    summary { cursor: pointer; font-weight: 600; color: #58a6ff; font-size: 13px; list-style: none; }
+  `) + v2Nav('squirrelbus') + `
+  <div class="sb-container">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h1 style="font-size:18px;font-weight:700;color:#f0f6fc">📡 SquirrelBus</h1>
+      <span id="sb-status" style="font-size:11px;color:#484f58"></span>
+    </div>
+
+    <!-- Send message panel -->
+    <details class="send-panel">
+      <summary>✉️ Send a message</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px">
+        <div><label style="font-size:11px;color:#8b949e">From</label><select id="msg-from" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:5px;color:#c9d1d9;font-size:12px"><option value="rocky">Rocky</option><option value="jkh">jkh</option></select></div>
+        <div><label style="font-size:11px;color:#8b949e">To</label><select id="msg-to" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:5px;color:#c9d1d9;font-size:12px"><option value="all">All</option><option value="rocky">Rocky</option><option value="bullwinkle">Bullwinkle</option><option value="natasha">Natasha</option><option value="jkh">jkh</option></select></div>
+        <div><label style="font-size:11px;color:#8b949e">Type</label><select id="msg-type" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:5px;color:#c9d1d9;font-size:12px"><option value="text">text</option><option value="memo">memo</option></select></div>
+      </div>
+      <div style="margin-top:8px"><label style="font-size:11px;color:#8b949e">Subject</label><input id="msg-subject" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:5px 8px;color:#c9d1d9;font-size:12px" placeholder="Optional…"></div>
+      <div style="margin-top:6px"><label style="font-size:11px;color:#8b949e">Body</label><textarea id="msg-body" rows="3" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:5px 8px;color:#c9d1d9;font-size:12px;resize:vertical"></textarea></div>
+      <div style="margin-top:6px;text-align:right"><button onclick="sendMsg()" style="background:#238636;border:none;color:#fff;border-radius:4px;padding:5px 16px;font-size:12px;font-weight:600;cursor:pointer">Send</button></div>
+    </details>
+
+    <!-- Filters -->
+    <div class="sb-toolbar">
+      <input class="sb-search" id="sb-search" placeholder="Search messages…" oninput="renderBus()">
+      <span style="font-size:12px;color:#8b949e">Agent:</span>
+      <button class="filter-btn active" id="ba-all"         onclick="setBusAgent('all')">📡 All</button>
+      <button class="filter-btn"       id="ba-rocky"        onclick="setBusAgent('rocky')">🐿️ Rocky</button>
+      <button class="filter-btn"       id="ba-bullwinkle"   onclick="setBusAgent('bullwinkle')">🫎 Bullwinkle</button>
+      <button class="filter-btn"       id="ba-natasha"      onclick="setBusAgent('natasha')">🕵️ Natasha</button>
+      <button class="filter-btn"       id="ba-jkh"          onclick="setBusAgent('jkh')">👤 jkh</button>
+      <span style="margin-left:8px;font-size:12px;color:#8b949e">Type:</span>
+      <button class="filter-btn active" id="bt-all"         onclick="setBusType('all')">All</button>
+      <button class="filter-btn"        id="bt-text"        onclick="setBusType('text')">text</button>
+      <button class="filter-btn"        id="bt-memo"        onclick="setBusType('memo')">memo</button>
+      <button class="filter-btn"        id="bt-event"       onclick="setBusType('event')">event</button>
+      <label style="font-size:12px;color:#8b949e;display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px">
+        <input type="checkbox" id="show-hb" onchange="renderBus()"> Show heartbeats
+      </label>
+    </div>
+
+    <div id="bus-messages"><div style="color:#8b949e;padding:12px">Loading…</div></div>
+  </div>
+` + v2Foot(`
+const TYPE_COLORS_BUS = { text:'#58a6ff', memo:'#3fb950', blob:'#a371f7', heartbeat:'#8b949e', queue_sync:'#d29922', ping:'#3fb950', pong:'#3fb950', event:'#f85149', handoff:'#f0883e' };
+let busMessages=[], busAgent='all', busType='all', lastBusTs=null;
+
+function setBusAgent(a) {
+  busAgent=a;
+  document.querySelectorAll('[id^="ba-"]').forEach(b=>b.classList.remove('active'));
+  document.getElementById('ba-'+a)?.classList.add('active');
+  renderBus();
+}
+function setBusType(t) {
+  busType=t;
+  document.querySelectorAll('[id^="bt-"]').forEach(b=>b.classList.remove('active'));
+  document.getElementById('bt-'+t)?.classList.add('active');
+  renderBus();
+}
+
+function renderBus() {
+  const q     = (document.getElementById('sb-search')?.value||'').toLowerCase();
+  const showHB = document.getElementById('show-hb')?.checked;
+  let msgs = busMessages;
+  if (!showHB) msgs = msgs.filter(m => m.type!=='heartbeat'&&m.type!=='ping'&&m.type!=='pong');
+  if (busAgent !== 'all') msgs = msgs.filter(m => m.from===busAgent||m.to===busAgent);
+  if (busType  !== 'all') msgs = msgs.filter(m => m.type===busType);
+  if (q) msgs = msgs.filter(m => (m.body||'').toLowerCase().includes(q)||(m.subject||'').toLowerCase().includes(q));
+  const el = document.getElementById('bus-messages');
+  document.getElementById('sb-status').textContent = msgs.length+' messages · last updated '+new Date().toLocaleTimeString();
+  if (!msgs.length) { el.innerHTML='<div style="color:#8b949e;padding:12px">No messages match filter</div>'; return; }
+  el.innerHTML = msgs.map(msg => {
+    const fromEmoji = EMOJIS[msg.from]||'📨';
+    const toLabel   = msg.to==='all'?'all':msg.to;
+    const ts        = new Date(msg.ts).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const typeColor = TYPE_COLORS_BUS[msg.type]||'#8b949e';
+    if (msg.type==='heartbeat'||msg.type==='ping'||msg.type==='pong') {
+      return '<div class="bus-msg compact">'+fromEmoji+' '+esc(msg.from)+' 💓 '+msg.type+' · #'+msg.seq+' · '+esc(ts)+'</div>';
+    }
+    let bodyHtml = '';
+    if (msg.type==='text'||msg.type==='memo') bodyHtml = '<div style="white-space:pre-wrap;font-size:13px">'+esc(msg.body||'')+'</div>';
+    else bodyHtml = '<pre style="background:#0d1117;padding:6px;border-radius:4px;overflow-x:auto;font-size:11px">'+esc(typeof msg.body==='string'?msg.body.slice(0,300):JSON.stringify(msg.body,null,2).slice(0,300))+'</pre>';
+    return '<div class="bus-msg">' +
+      '<div class="bus-header">' +
+        '<div>'+fromEmoji+' <strong style="color:#f0f6fc">'+esc(msg.from)+'</strong> <span style="color:#484f58">→</span> <strong>'+esc(toLabel)+'</strong><span class="type-badge" style="background:'+typeColor+'">'+esc(msg.type)+'</span></div>' +
+        '<div style="color:#484f58;font-size:11px">#'+msg.seq+' · '+esc(ts)+'</div>' +
+      '</div>' +
+      (msg.subject?'<div style="font-weight:600;color:#58a6ff;margin-bottom:3px;font-size:13px">'+esc(msg.subject)+'</div>':'') +
+      bodyHtml +
+    '</div>';
+  }).join('');
+}
+
+async function loadBus(initial) {
+  const url = initial ? '/bus/messages?limit=100' : '/bus/messages?limit=100'+(lastBusTs?'&since='+encodeURIComponent(lastBusTs):'');
+  const msgs = await fetch(url).then(r=>r.json()).catch(()=>[]);
+  if (initial) { busMessages = msgs; }
+  else if (msgs.length) {
+    const existingIds = new Set(busMessages.map(m=>m.id));
+    const newMsgs = msgs.filter(m=>!existingIds.has(m.id));
+    if (newMsgs.length) busMessages = [...newMsgs,...busMessages];
+  }
+  if (busMessages.length && busMessages[0].ts) lastBusTs = busMessages[0].ts;
+  renderBus();
+}
+
+async function sendMsg() {
+  const token = getToken();
+  if (!token) return showToast('No token', true);
+  const body = {
+    from: document.getElementById('msg-from').value,
+    to:   document.getElementById('msg-to').value,
+    type: document.getElementById('msg-type').value,
+    subject: document.getElementById('msg-subject').value||null,
+    body: document.getElementById('msg-body').value,
+  };
+  if (!body.body) return showToast('Body required', true);
+  const r = await fetch('/bus/send',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.ok) { showToast('Sent!'); document.getElementById('msg-body').value=''; loadBus(true); }
+  else showToast(d.error||'Error', true);
+}
+
+loadBus(true);
+setInterval(()=>loadBus(false), 10000);
+`));
+});
+
+// ── Settings Page ─────────────────────────────────────────────────────────────
+
+app.get('/settings', (req, res) => {
+  res.type('html').send(v2Head('Settings', `
+    .settings-container { max-width: 960px; margin: 0 auto; padding: 20px; }
+    .settings-section { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .settings-title { font-size: 15px; font-weight: 700; color: #f0f6fc; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 8px 10px; color: #8b949e; font-size: 11px; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid #30363d; }
+    td { padding: 9px 10px; font-size: 13px; border-bottom: 1px solid #21262d; }
+    tr:last-child td { border-bottom: none; }
+    .status-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .status-active  { background: #23863622; color: #3fb950; }
+    .status-linked  { background: #d2992222; color: #d29922; }
+    .status-offline { background: #f8514922; color: #f85149; }
+    .token-masked { font-family: monospace; color: #8b949e; font-size: 12px; letter-spacing: .1em; }
+  `) + v2Nav('settings') + `
+  <div class="settings-container">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h1 style="font-size:20px;font-weight:700;color:#f0f6fc">⚙️ Settings</h1>
+    </div>
+
+    <!-- Communication Channels -->
+    <div class="settings-section">
+      <div class="settings-title">📡 Communication Channels</div>
+      <table>
+        <thead><tr><th>Channel</th><th>Type</th><th>Endpoint</th><th>Status</th><th>Last Activity</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>rocky↔bullwinkle DM</td>
+            <td><span style="color:#8b949e">Mattermost</span></td>
+            <td style="font-size:11px;color:#484f58">chat.yourmom.photos</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td style="color:#8b949e">3m ago</td>
+          </tr>
+          <tr>
+            <td>rocky↔natasha DM</td>
+            <td><span style="color:#8b949e">Mattermost</span></td>
+            <td style="font-size:11px;color:#484f58">chat.yourmom.photos</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td style="color:#8b949e">18m ago</td>
+          </tr>
+          <tr>
+            <td>#agent-shared</td>
+            <td><span style="color:#8b949e">Mattermost</span></td>
+            <td style="font-size:11px;color:#484f58">chat.yourmom.photos</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td style="color:#8b949e">8m ago</td>
+          </tr>
+          <tr>
+            <td>#itsallgeektome</td>
+            <td><span style="color:#8b949e">Slack</span></td>
+            <td style="font-size:11px;color:#484f58">offtera.slack.com</td>
+            <td><span class="status-chip status-linked">🟡 linked</span></td>
+            <td style="color:#8b949e">2h ago</td>
+          </tr>
+          <tr>
+            <td>#rockyandfriends</td>
+            <td><span style="color:#8b949e">Slack</span></td>
+            <td style="font-size:11px;color:#484f58">omgjkh.slack.com</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td style="color:#8b949e">15m ago</td>
+          </tr>
+          <tr>
+            <td>jkh Telegram</td>
+            <td><span style="color:#8b949e">Telegram</span></td>
+            <td style="font-size:11px;color:#484f58">jkh's phone</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td style="color:#8b949e">1h ago</td>
+          </tr>
+          <tr>
+            <td>SquirrelBus (local)</td>
+            <td><span style="color:#8b949e">Internal</span></td>
+            <td style="font-size:11px;color:#484f58">/bus (this host)</td>
+            <td id="sb-local-status"><span class="status-chip status-active">🟢 active</span></td>
+            <td id="sb-local-last" style="color:#8b949e">—</td>
+          </tr>
+          <tr>
+            <td>SquirrelBus → Bullwinkle</td>
+            <td><span style="color:#8b949e">Internal</span></td>
+            <td style="font-size:11px;color:#484f58" id="bw-url">puck:8788</td>
+            <td id="bw-status"><span class="status-chip status-linked">🟡 linked</span></td>
+            <td style="color:#8b949e">—</td>
+          </tr>
+          <tr>
+            <td>Milvus</td>
+            <td><span style="color:#8b949e">Vector DB</span></td>
+            <td style="font-size:11px;color:#484f58">do-host1:19530</td>
+            <td><span class="status-chip status-linked">🟡 unchecked</span></td>
+            <td style="color:#8b949e">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Agent Registry -->
+    <div class="settings-section">
+      <div class="settings-title">🤖 Agent Registry</div>
+      <table>
+        <thead><tr><th>Agent</th><th>Host</th><th>Capabilities</th><th>Status</th><th>Last Seen</th></tr></thead>
+        <tbody id="agent-registry-rows">
+          <tr><td colspan="5" style="color:#8b949e">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Auth Tokens -->
+    <div class="settings-section">
+      <div class="settings-title">🔑 Auth Tokens</div>
+      <table>
+        <thead><tr><th>Token</th><th>Scope</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="token-masked">wq-5dca••••••••••••••••••••••••••••••••</span></td>
+            <td>All agents</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td><button onclick="showToast('Token rotation requires direct server access — see docs',true)" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">🔄 Rotate</button></td>
+          </tr>
+          <tr>
+            <td><span class="token-masked">bw-••••••••••••••••••••••••••••••••••••</span></td>
+            <td>Bullwinkle peer</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td><button onclick="showToast('Peer token rotation via Telegram — jkh only',true)" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">🔄 Rotate</button></td>
+          </tr>
+          <tr>
+            <td><span class="token-masked">nat-••••••••••••••••••••••••••••••••••••</span></td>
+            <td>Natasha peer</td>
+            <td><span class="status-chip status-active">🟢 active</span></td>
+            <td><button onclick="showToast('Peer token rotation via Telegram — jkh only',true)" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer">🔄 Rotate</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Quick Links -->
+    <div class="settings-section">
+      <div class="settings-title">🔗 Quick Links</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="/" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px 16px;font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px">📜 Legacy Dashboard (v1)</a>
+        <a href="/activity" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px 16px;font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px">🗺️ Activity Map</a>
+        <a href="/api/digest" target="_blank" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px 16px;font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px">📊 Digest API</a>
+        <a href="/api/heartbeats" target="_blank" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px 16px;font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px">💓 Heartbeats API</a>
+        <a href="/bus/messages" target="_blank" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px 16px;font-size:13px;color:#c9d1d9;display:flex;align-items:center;gap:6px">📡 Bus Messages API</a>
+      </div>
+    </div>
+  </div>
+` + v2Foot(`
+async function loadSettings() {
+  // Load agent registry from heartbeats
+  const hbs = await fetch('/api/heartbeats').then(r=>r.json()).catch(()=>({}));
+  const rows = document.getElementById('agent-registry-rows');
+  const agents = ['rocky','bullwinkle','natasha','boris'];
+  rows.innerHTML = agents.map(name => {
+    const hb = hbs[name] || {};
+    const age = hb.ts ? Date.now()-new Date(hb.ts).getTime() : Infinity;
+    let dot='🔴', chipCls='status-offline', label='offline';
+    if (age<5*60*1000) {dot='🟢';chipCls='status-active';label='online';}
+    else if (age<30*60*1000) {dot='🟡';chipCls='status-linked';label='stale';}
+    const caps = (hb.capabilities||[]).join(', ') || '—';
+    return '<tr>' +
+      '<td>'+EMOJIS[name]+' '+name+'</td>' +
+      '<td style="font-size:12px;color:#8b949e">'+esc(hb.host||'—')+'</td>' +
+      '<td style="font-size:11px;color:#8b949e">'+esc(caps)+'</td>' +
+      '<td><span class="status-chip '+chipCls+'">'+dot+' '+label+'</span></td>' +
+      '<td style="color:#8b949e">'+timeAgo(hb.ts)+'</td>' +
+    '</tr>';
+  }).join('');
+}
+
+loadSettings();
+`));
+});
+
 // Initialize bus sequence on startup
 initBusSeq();
 
