@@ -778,6 +778,50 @@ async function handleRequest(req, res) {
       return;
     }
 
+    // ── GET /api/bootstrap — public (self-authenticates via bootstrap token) ─
+    // Must be before the auth gate — agent has no token yet at bootstrap time.
+    if (method === 'GET' && path === '/api/bootstrap') {
+      const token = url.searchParams.get('token');
+      if (!token) return json(res, 400, { error: 'token query param required' });
+      const entry = bootstrapTokens.get(token);
+      if (!entry) return json(res, 401, { error: 'Invalid bootstrap token' });
+      if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
+      if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
+      entry.used = true;
+
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      if (!existsSync(keyPath)) return json(res, 500, { error: 'Deploy key not configured' });
+      const keyRecord = JSON.parse(await readFile(keyPath, 'utf8'));
+
+      const agents = await readAgents();
+      let agentToken;
+      if (agents[entry.agent]?.token) {
+        agentToken = agents[entry.agent].token;
+      } else {
+        agentToken = `rcc-agent-${entry.agent}-${randomUUID().slice(0, 8)}`;
+        agents[entry.agent] = { ...(agents[entry.agent] || {}), token: agentToken, registeredAt: new Date().toISOString() };
+        await writeAgents(agents);
+        AUTH_TOKENS.add(agentToken);
+      }
+
+      const secretsPath = new URL('../data/secrets.json', import.meta.url).pathname;
+      let secrets = {};
+      if (existsSync(secretsPath)) {
+        try { secrets = JSON.parse(await readFile(secretsPath, 'utf8')); } catch {}
+      }
+
+      console.log(`[rcc-api] Bootstrap consumed for agent ${entry.agent} from ${req.socket?.remoteAddress}`);
+      return json(res, 200, {
+        ok: true,
+        agent: entry.agent,
+        repoUrl: keyRecord.repoUrl,
+        deployKey: keyRecord.deployKey,
+        agentToken,
+        rccUrl: RCC_PUBLIC_URL,
+        secrets,
+      });
+    }
+
     // ── Auth-required endpoints ───────────────────────────────────────────
     if (!isAuthed(req)) {
       return json(res, 401, { error: 'Unauthorized' });
