@@ -374,3 +374,7 @@ export async function vectorHealth() {
     return { ok: false, error: err.message };
   }
 }
+
+export async function collectionStats() { return {}; }
+
+export { vectorUpsert as upsert, vectorSearch as search };

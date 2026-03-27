@@ -88,6 +88,75 @@ else
   fi
 fi
 
+# ── Sync secrets from RCC ────────────────────────────────────────────────
+# Picks up any rotated secrets without requiring re-bootstrap
+if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ]; then
+  SECRETS_SYNC="$WORKSPACE/deploy/secrets-sync.sh"
+  if [ -f "$SECRETS_SYNC" ]; then
+    if bash "$SECRETS_SYNC" >> "$LOG_FILE" 2>&1; then
+      log "Secrets sync complete"
+      # Reload .env in case secrets changed
+      if [ -f "$ENV_FILE" ]; then
+        set -a
+        # shellcheck source=/dev/null
+        source "$ENV_FILE"
+        set +a
+      fi
+    else
+      log "WARNING: secrets-sync.sh failed (non-fatal)"
+    fi
+  fi
+fi
+
+# ── Sync secrets from RCC ─────────────────────────────────────────────────
+# Refreshes ~/.rcc/.env with latest secret values from the RCC secrets store.
+# Never clobbers RCC_AGENT_TOKEN (identity key) or AGENT_NAME/AGENT_HOST.
+# Runs on every pull to pick up rotated credentials automatically.
+if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ] && command -v node >/dev/null 2>&1; then
+  _env_file="$HOME/.rcc/.env"
+  _sync_count=0
+  # macOS vs Linux sed -i compatibility
+  if [ "$(uname)" = "Darwin" ]; then
+    _sed_i() { sed -i '' "$@"; }
+  else
+    _sed_i() { sed -i "$@"; }
+  fi
+  _set_env_key() {
+    local _key="$1" _val="$2"
+    case "$_key" in RCC_AGENT_TOKEN|RCC_URL|AGENT_NAME|AGENT_HOST) return ;; esac
+    if grep -q "^${_key}=" "$_env_file" 2>/dev/null; then
+      _sed_i "s|^${_key}=.*|${_key}=${_val}|" "$_env_file"
+    else
+      echo "${_key}=${_val}" >> "$_env_file"
+    fi
+    _sync_count=$((_sync_count + 1))
+  }
+  for _alias in slack mattermost minio milvus nvidia github; do
+    _resp=$(curl -sf --max-time 5 \
+      -H "Authorization: Bearer ${RCC_AGENT_TOKEN}" \
+      "${RCC_URL}/api/secrets/${_alias}" 2>/dev/null || true)
+    [ -z "$_resp" ] && continue
+    if echo "$_resp" | grep -q '"secrets"'; then
+      while IFS='=' read -r _k _v; do
+        [ -z "$_k" ] && continue
+        _set_env_key "$_k" "$_v"
+      done < <(node -e "
+        try {
+          const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const s = d.secrets || {};
+          for (const [k,v] of Object.entries(s)) console.log(k+'='+v);
+        } catch(e) {}
+      " <<< "$_resp" 2>/dev/null)
+    fi
+  done
+  if [ "$_sync_count" -gt 0 ]; then
+    chmod 600 "$_env_file"
+    log "Secrets synced from RCC: ${_sync_count} var(s) updated"
+    # Reload env after sync
+    set -a; source "$_env_file"; set +a
+  fi
+fi
+
 # ── Post heartbeat to RCC ─────────────────────────────────────────────────
 if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ]; then
   HEARTBEAT_PAYLOAD="{\"agent\":\"$AGENT_NAME\",\"host\":\"${AGENT_HOST:-$(hostname)}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"online\",\"pullRev\":\"$AFTER\"}"

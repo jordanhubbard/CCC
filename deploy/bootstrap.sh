@@ -286,6 +286,44 @@ ENVEOF
 chmod 600 "$ENV_FILE"
 success "~/.rcc/.env written"
 
+# ── 8b. Fetch secrets from RCC ───────────────────────────────────────────
+# Pull named secret bundles (slack, mattermost, minio, milvus, nvidia, github)
+# and append any env vars not already present in .env. Never overwrites
+# RCC_AGENT_TOKEN or RCC_URL (identity keys owned by bootstrap).
+if [[ "$AGENT_TOKEN" != "offline" ]] && command -v node &>/dev/null; then
+  info "Fetching secrets from RCC..."
+  _secrets_ok=false
+  for _alias in slack mattermost minio milvus nvidia github; do
+    _resp=$(curl -sf -H "Authorization: Bearer ${AGENT_TOKEN}" \
+      "${RCC_URL}/api/secrets/${_alias}" 2>/dev/null || true)
+    [[ -z "$_resp" ]] && continue
+    # Check for bundle (object of env-var→value pairs)
+    if echo "$_resp" | grep -q '"secrets"'; then
+      while IFS='=' read -r _k _v; do
+        [[ -z "$_k" ]] && continue
+        # Never clobber identity keys
+        case "$_k" in RCC_AGENT_TOKEN|RCC_URL|AGENT_NAME|AGENT_HOST) continue ;; esac
+        sed -i "/^${_k}=/d" "$ENV_FILE" 2>/dev/null || true
+        printf '%s=%s\n' "$_k" "$_v" >> "$ENV_FILE"
+      done < <(node -e "
+        try {
+          const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const s = d.secrets || {};
+          for (const [k,v] of Object.entries(s)) console.log(k+'='+v);
+        } catch(e) {}
+      " <<< "$_resp" 2>/dev/null)
+      _secrets_ok=true
+    fi
+  done
+  if $_secrets_ok; then
+    success "Secrets fetched from RCC"
+  else
+    warn "No secrets available from RCC yet — populate via POST /api/secrets/:key (admin only)"
+  fi
+elif [[ "$AGENT_TOKEN" == "offline" ]]; then
+  warn "Offline mode — skipping RCC secrets fetch"
+fi
+
 # ── 9. Start OpenClaw gateway ────────────────────────────────────────────
 info "Starting OpenClaw gateway..."
 

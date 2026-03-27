@@ -32,6 +32,7 @@ const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKE
 const START_TIME   = Date.now();
 const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
 const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
+const SECRETS_PATH    = process.env.SECRETS_PATH    || '../data/secrets.json';
 
 // ── Slack config ───────────────────────────────────────────────────────────
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
@@ -222,6 +223,24 @@ async function readRequests() {
 async function writeRequests(data) {
   const p = new URL(REQUESTS_PATH, import.meta.url).pathname;
   await writeFile(p, JSON.stringify(data, null, 2));
+}
+
+// ── Secrets I/O ───────────────────────────────────────────────────────────
+// secrets.json stores named bundles (service aliases) and scalar key→value pairs.
+// Named aliases: slack, mattermost, minio, milvus, nvidia, github
+// Each alias maps to an object of env-var-name → value.
+// Individual secrets are stored as top-level key → scalar string.
+async function readSecrets() {
+  const p = new URL(SECRETS_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return {};
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeSecrets(data) {
+  const p = new URL(SECRETS_PATH, import.meta.url).pathname;
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2));
+  await chmod(p, 0o600);
 }
 
 // ── Agent registry I/O ────────────────────────────────────────────────────
@@ -2196,6 +2215,45 @@ async function handleRequest(req, res) {
       return json(res, 200, { ok: true, item });
     }
 
+    // ── GET /api/secrets — list secret keys (admin only, no values) ─────────
+    if (method === 'GET' && path === '/api/secrets') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const secrets = await readSecrets();
+      return json(res, 200, { ok: true, keys: Object.keys(secrets) });
+    }
+
+    // ── GET /api/secrets/:key — fetch secret by key (any agent token) ────────
+    // Named aliases (slack/mattermost/minio/milvus/nvidia/github) return a bundle
+    // of related env-var key→value pairs. Individual keys return a scalar value.
+    const secretGetMatch = path.match(/^\/api\/secrets\/([^/]+)$/);
+    if (method === 'GET' && secretGetMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const key = decodeURIComponent(secretGetMatch[1]);
+      const secrets = await readSecrets();
+      if (!(key in secrets)) return json(res, 404, { error: `Secret '${key}' not found` });
+      const value = secrets[key];
+      // Named alias (object) → return bundle; scalar → return single value
+      if (typeof value === 'object' && value !== null) {
+        return json(res, 200, { ok: true, key, secrets: value });
+      }
+      return json(res, 200, { ok: true, key, value });
+    }
+
+    // ── POST /api/secrets/:key — write/update secret (admin only) ───────────
+    const secretPostMatch = path.match(/^\/api\/secrets\/([^/]+)$/);
+    if (method === 'POST' && secretPostMatch) {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const key = decodeURIComponent(secretPostMatch[1]);
+      const body = await readBody(req);
+      if (body.value === undefined && body.secrets === undefined) {
+        return json(res, 400, { error: 'body must include "value" (scalar) or "secrets" (object)' });
+      }
+      const secrets = await readSecrets();
+      secrets[key] = body.secrets !== undefined ? body.secrets : body.value;
+      await writeSecrets(secrets);
+      return json(res, 200, { ok: true, key });
+    }
+
     // ── POST /api/keys/github — store deploy key ──────────────────────────
     if (method === 'POST' && path === '/api/keys/github') {
       if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
@@ -2215,6 +2273,63 @@ async function handleRequest(req, res) {
       if (!existsSync(keyPath)) return json(res, 404, { error: 'No deploy key registered' });
       const record = JSON.parse(await readFile(keyPath, 'utf8'));
       return json(res, 200, record);
+    }
+
+    // ── Secrets Store ─────────────────────────────────────────────────────
+    // RCC is the sole secrets holder. Agents fetch what they need here.
+    // Only admin can write; any authenticated agent can read.
+
+    // GET /api/secrets — list all secret keys (no values)
+    if (method === 'GET' && path === '/api/secrets') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const secretsPath = new URL('../data/secrets.json', import.meta.url).pathname;
+      if (!existsSync(secretsPath)) return json(res, 200, { keys: [] });
+      const store = JSON.parse(await readFile(secretsPath, 'utf8'));
+      return json(res, 200, { keys: Object.keys(store) });
+    }
+
+    // GET /api/secrets/:key — fetch a specific secret (value returned)
+    if (method === 'GET' && path.startsWith('/api/secrets/')) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const key = path.slice('/api/secrets/'.length);
+      if (!key) return json(res, 400, { error: 'Secret key required' });
+      const secretsPath = new URL('../data/secrets.json', import.meta.url).pathname;
+      if (!existsSync(secretsPath)) return json(res, 404, { error: 'Secret not found' });
+      const store = JSON.parse(await readFile(secretsPath, 'utf8'));
+      if (!(key in store)) return json(res, 404, { error: 'Secret not found' });
+      return json(res, 200, { key, value: store[key] });
+    }
+
+    // POST /api/secrets/:key — write or update a secret (admin-only)
+    if (method === 'POST' && path.startsWith('/api/secrets/')) {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const key = path.slice('/api/secrets/'.length);
+      if (!key) return json(res, 400, { error: 'Secret key required' });
+      const body = await readBody(req);
+      if (!('value' in body)) return json(res, 400, { error: 'value required in body' });
+      const secretsPath = new URL('../data/secrets.json', import.meta.url).pathname;
+      let store = {};
+      if (existsSync(secretsPath)) store = JSON.parse(await readFile(secretsPath, 'utf8'));
+      store[key] = body.value;
+      await mkdir(dirname(secretsPath), { recursive: true });
+      await writeFile(secretsPath, JSON.stringify(store, null, 2), 'utf8');
+      await chmod(secretsPath, 0o600);
+      console.log(`[rcc-api] Secret '${key}' written by admin`);
+      return json(res, 200, { ok: true, key });
+    }
+
+    // DELETE /api/secrets/:key — remove a secret (admin-only)
+    if (method === 'DELETE' && path.startsWith('/api/secrets/')) {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const key = path.slice('/api/secrets/'.length);
+      const secretsPath = new URL('../data/secrets.json', import.meta.url).pathname;
+      if (!existsSync(secretsPath)) return json(res, 404, { error: 'Secret not found' });
+      const store = JSON.parse(await readFile(secretsPath, 'utf8'));
+      if (!(key in store)) return json(res, 404, { error: 'Secret not found' });
+      delete store[key];
+      await writeFile(secretsPath, JSON.stringify(store, null, 2), 'utf8');
+      console.log(`[rcc-api] Secret '${key}' deleted by admin`);
+      return json(res, 200, { ok: true, key, deleted: true });
     }
 
     // ── POST /api/bootstrap/token — generate one-time bootstrap token ─────
@@ -2254,6 +2369,13 @@ async function handleRequest(req, res) {
         AUTH_TOKENS.add(agentToken);
       }
 
+      // Load secrets store and include in bootstrap response
+      const secretsPath = new URL('../data/secrets.json', import.meta.url).pathname;
+      let secrets = {};
+      if (existsSync(secretsPath)) {
+        try { secrets = JSON.parse(await readFile(secretsPath, 'utf8')); } catch {}
+      }
+
       console.log(`[rcc-api] Bootstrap consumed for agent ${entry.agent} from ${req.socket?.remoteAddress}`);
       return json(res, 200, {
         ok: true,
@@ -2262,6 +2384,7 @@ async function handleRequest(req, res) {
         deployKey: keyRecord.deployKey,
         agentToken,
         rccUrl: RCC_PUBLIC_URL,
+        secrets,  // full secrets bundle — agent should write to ~/.rcc/.env
       });
     }
 

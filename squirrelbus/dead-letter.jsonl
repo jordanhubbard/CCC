@@ -1,0 +1,1 @@
+{"id":"dc740bae-4bff-406d-adc2-9fe737562367","from":"bullwinkle","to":"bullwinkle","ts":"2026-03-27T04:31:54.959Z","seq":149,"type":"ping","mime":"text/plain","enc":"none","body":"cred-rotation-verified","ref":null,"subject":"heartbeat cred check","ttl":604800,"_deadReason":"max-retries","_deadAt":"2026-03-27T04:46:55.336Z","_retryCount":3}

@@ -109,6 +109,34 @@ set_env_key "AGENT_HOST" "$(hostname)"
 
 echo "      .env updated — RCC_AGENT_TOKEN, RCC_URL, AGENT_NAME, AGENT_HOST set"
 
+# ── Step 4b: Fetch secrets from RCC ─────────────────────────────────────────
+echo "[4b/7] Fetching secrets from RCC..."
+_secrets_synced=0
+if command -v node &>/dev/null; then
+  for _alias in slack mattermost minio milvus nvidia github; do
+    _resp=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
+      "${RCC}/api/secrets/${_alias}" 2>/dev/null || true)
+    [[ -z "$_resp" ]] && continue
+    if echo "$_resp" | grep -q '"secrets"'; then
+      while IFS='=' read -r _k _v; do
+        [[ -z "$_k" ]] && continue
+        case "$_k" in RCC_AGENT_TOKEN|RCC_URL|AGENT_NAME|AGENT_HOST) continue ;; esac
+        set_env_key "$_k" "$_v"
+        _secrets_synced=$((_secrets_synced + 1))
+      done < <(node -e "
+        try {
+          const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+          const s = d.secrets || {};
+          for (const [k,v] of Object.entries(s)) console.log(k+'='+v);
+        } catch(e) {}
+      " <<< "$_resp" 2>/dev/null)
+    fi
+  done
+  echo "      Secrets synced: ${_secrets_synced} env vars fetched from RCC"
+else
+  echo "      node not available — skipping RCC secrets fetch (set keys manually)"
+fi
+
 # ── Step 5: Post heartbeat ───────────────────────────────────────────────────
 echo "[5/7] Posting heartbeat to RCC..."
 HEARTBEAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
@@ -158,7 +186,7 @@ echo ""
 echo "=== Migration complete ==="
 echo "  Agent:     $AGENT"
 echo "  Workspace: $WORKSPACE (on branch $(git -C "$WORKSPACE" rev-parse --abbrev-ref HEAD), $(git -C "$WORKSPACE" rev-parse --short HEAD))"
-echo "  .env:      updated (RCC_AGENT_TOKEN, RCC_URL, AGENT_NAME, AGENT_HOST)"
+echo "  .env:      updated (RCC_AGENT_TOKEN, RCC_URL, AGENT_NAME, AGENT_HOST + RCC secrets)"
 echo "  Heartbeat: HTTP $HEARTBEAT_HTTP"
 echo "  Ingest:    $INGEST_RESULT"
 echo ""
