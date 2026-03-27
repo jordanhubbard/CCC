@@ -4,13 +4,16 @@
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/deploy/bootstrap.sh | \
-#     bash -s -- --rcc=http://146.190.134.110:8789 --token=<bootstrap-token> --agent=boris \
-#                --nvidia-key=<key> [--telegram-token=<tok>] [--mattermost-token=<tok>]
+#     bash -s -- --rcc=http://146.190.134.110:8789 --token=<bootstrap-token> --agent=boris
+#
+# All secrets (NVIDIA key, Mattermost token, etc.) are fetched automatically
+# from RCC via the bootstrap token. No --nvidia-key or channel tokens needed.
 set -euo pipefail
 
 RCC=""
 TOKEN=""
 AGENT=""
+# These may be overridden by CLI args, but RCC secrets take precedence if not provided
 NVIDIA_KEY=""
 TELEGRAM_TOKEN=""
 MATTERMOST_TOKEN=""
@@ -27,7 +30,7 @@ for arg in "$@"; do
 done
 
 if [[ -z "$RCC" || -z "$TOKEN" || -z "$AGENT" ]]; then
-  echo "Usage: bootstrap.sh --rcc=<url> --token=<bootstrap-token> --agent=<name> [--nvidia-key=<key>] [--telegram-token=<tok>] [--mattermost-token=<tok>]" >&2
+  echo "Usage: bootstrap.sh --rcc=<url> --token=<bootstrap-token> --agent=<name>" >&2
   exit 1
 fi
 
@@ -82,26 +85,53 @@ success "RCC workspace ready"
 
 # ── 4. Call bootstrap API ─────────────────────────────────────────────────
 info "Consuming bootstrap token..."
-BOOTSTRAP_JSON=$(curl -sf "${RCC}/api/bootstrap?token=${TOKEN}" || true)
-if [[ -z "$BOOTSTRAP_JSON" ]]; then
-  warn "Bootstrap API returned empty — proceeding without RCC provisioning (offline mode)"
-  AGENT_TOKEN="offline"
-  RCC_URL="$RCC"
-  REPO_URL=""
-  DEPLOY_KEY=""
-else
-  REPO_URL=$(echo    "$BOOTSTRAP_JSON" | grep -o '"repoUrl":"[^"]*"'   | head -1 | cut -d'"' -f4 || true)
-  AGENT_TOKEN=$(echo "$BOOTSTRAP_JSON" | grep -o '"agentToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-  RCC_URL=$(echo     "$BOOTSTRAP_JSON" | grep -o '"rccUrl":"[^"]*"'     | head -1 | cut -d'"' -f4 || true)
-  DEPLOY_KEY=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.stdout.write(d.deployKey||'')}catch(e){}" <<< "$BOOTSTRAP_JSON" 2>/dev/null || true)
+BOOTSTRAP_RESP=$(curl -sf "${RCC}/api/bootstrap?token=${TOKEN}" 2>&1) || true
+BOOTSTRAP_JSON=""
+# Verify it looks like JSON (not an error page or empty)
+if echo "$BOOTSTRAP_RESP" | grep -q '"ok":true'; then
+  BOOTSTRAP_JSON="$BOOTSTRAP_RESP"
+fi
 
-  if [[ -z "$AGENT_TOKEN" ]]; then
-    warn "No agentToken in bootstrap response — continuing without RCC token"
-    AGENT_TOKEN="offline"
-    RCC_URL="$RCC"
-  else
-    success "Bootstrap token consumed"
-  fi
+if [[ -z "$BOOTSTRAP_JSON" ]]; then
+  error "Bootstrap API call failed or returned invalid response.\nResponse: ${BOOTSTRAP_RESP:-<empty>}\nCheck that RCC is reachable at ${RCC} and the token is valid/unexpired."
+fi
+
+# Parse core fields using node (handles nested JSON safely)
+_parse() { node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));process.stdout.write(String(d${1}||''))}catch(e){}" <<< "$BOOTSTRAP_JSON" 2>/dev/null || true; }
+
+REPO_URL=$(_parse   ".repoUrl")
+AGENT_TOKEN=$(_parse ".agentToken")
+RCC_URL=$(_parse    ".rccUrl")
+DEPLOY_KEY=$(_parse  ".deployKey")
+
+if [[ -z "$AGENT_TOKEN" ]]; then
+  error "Bootstrap response missing agentToken. Response: ${BOOTSTRAP_JSON}"
+fi
+success "Bootstrap token consumed — agent token issued"
+
+# ── 4b. Extract secrets from bootstrap response ───────────────────────────
+# The bootstrap API returns the full secrets bundle. Extract what we need now
+# so openclaw.json can be written correctly in step 7. CLI args take precedence
+# if explicitly provided (for testing/overrides); otherwise use RCC secrets.
+info "Extracting secrets from bootstrap response..."
+_secret() { node -e "
+  try {
+    const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+    const s = d.secrets || {};
+    // Try both flat key and namespaced key
+    const v = s['$1'] || s['${2:-}'] || '';
+    process.stdout.write(v);
+  } catch(e) {}
+" <<< "$BOOTSTRAP_JSON" 2>/dev/null || true; }
+
+[[ -z "$NVIDIA_KEY"        ]] && NVIDIA_KEY=$(_secret        "NVIDIA_API_KEY"     "nvidia/api_key")
+[[ -z "$MATTERMOST_TOKEN"  ]] && MATTERMOST_TOKEN=$(_secret  "MATTERMOST_TOKEN"   "mattermost/token")
+[[ -z "$TELEGRAM_TOKEN"    ]] && TELEGRAM_TOKEN=$(_secret    "TELEGRAM_BOT_TOKEN" "telegram/token")
+
+if [[ -n "$NVIDIA_KEY" ]]; then
+  success "NVIDIA API key obtained from RCC secrets"
+else
+  warn "No NVIDIA_API_KEY in RCC secrets — will use anthropic direct (set ANTHROPIC_API_KEY in env)"
 fi
 
 # ── 5. Deploy key + SSH config ────────────────────────────────────────────
@@ -234,7 +264,7 @@ MODEOF
 else
   MODEL_PROVIDER_JSON='{}'
   DEFAULT_MODEL="anthropic/claude-sonnet-4-6"
-  warn "No --nvidia-key provided — defaulting to anthropic direct. Set ANTHROPIC_API_KEY in env."
+  warn "No NVIDIA_API_KEY in secrets or args — defaulting to anthropic direct. Set ANTHROPIC_API_KEY in env or add nvidia/api_key to RCC secrets."
 fi
 
 cat > "$OC_CONFIG" <<OCEOF
@@ -286,99 +316,110 @@ ENVEOF
 chmod 600 "$ENV_FILE"
 success "~/.rcc/.env written"
 
-# ── 8b. Fetch secrets from RCC ───────────────────────────────────────────
-# Pull named secret bundles (slack, mattermost, minio, milvus, nvidia, github)
-# and append any env vars not already present in .env. Never overwrites
-# RCC_AGENT_TOKEN or RCC_URL (identity keys owned by bootstrap).
-if [[ "$AGENT_TOKEN" != "offline" ]] && command -v node &>/dev/null; then
-  info "Fetching secrets from RCC..."
-  _secrets_ok=false
-  for _alias in slack mattermost minio milvus nvidia github; do
-    _resp=$(curl -sf -H "Authorization: Bearer ${AGENT_TOKEN}" \
-      "${RCC_URL}/api/secrets/${_alias}" 2>/dev/null || true)
-    [[ -z "$_resp" ]] && continue
-    # Check for bundle (object of env-var→value pairs)
-    if echo "$_resp" | grep -q '"secrets"'; then
-      while IFS='=' read -r _k _v; do
-        [[ -z "$_k" ]] && continue
-        # Never clobber identity keys
-        case "$_k" in RCC_AGENT_TOKEN|RCC_URL|AGENT_NAME|AGENT_HOST) continue ;; esac
-        sed -i "/^${_k}=/d" "$ENV_FILE" 2>/dev/null || true
-        printf '%s=%s\n' "$_k" "$_v" >> "$ENV_FILE"
-      done < <(node -e "
-        try {
-          const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-          const s = d.secrets || {};
-          for (const [k,v] of Object.entries(s)) console.log(k+'='+v);
-        } catch(e) {}
-      " <<< "$_resp" 2>/dev/null)
-      _secrets_ok=true
-    fi
-  done
-  if $_secrets_ok; then
-    success "Secrets fetched from RCC"
-  else
-    warn "No secrets available from RCC yet — populate via POST /api/secrets/:key (admin only)"
-  fi
-elif [[ "$AGENT_TOKEN" == "offline" ]]; then
-  warn "Offline mode — skipping RCC secrets fetch"
-fi
+# ── 8b. Write full secrets bundle to .env ────────────────────────────────
+# Secrets were already fetched as part of the bootstrap response in step 4b.
+# Write all flat string secrets to .env now. Never overwrites identity keys.
+info "Writing secrets bundle to .env..."
+node -e "
+  try {
+    const fs = require('fs');
+    const d = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+    const s = d.secrets || {};
+    const SKIP = new Set(['RCC_AGENT_TOKEN','RCC_URL','AGENT_NAME','AGENT_HOST']);
+    const env = fs.existsSync('$ENV_FILE') ? fs.readFileSync('$ENV_FILE', 'utf8') : '';
+    const lines = env.split('\n');
+    const written = [];
+    for (const [k, v] of Object.entries(s)) {
+      // Only write flat string values (skip nested objects/alias bundles)
+      if (typeof v !== 'string') continue;
+      if (SKIP.has(k)) continue;
+      // Remove existing line for this key
+      const filtered = lines.filter(l => !l.startsWith(k + '='));
+      lines.length = 0; lines.push(...filtered);
+      lines.push(k + '=' + v);
+      written.push(k);
+    }
+    fs.writeFileSync('$ENV_FILE', lines.join('\n') + '\n');
+    process.stdout.write('Wrote ' + written.length + ' secrets: ' + written.slice(0,8).join(', ') + (written.length > 8 ? '...' : '') + '\n');
+  } catch(e) { process.stderr.write('secrets write error: ' + e.message + '\n'); }
+" <<< "$BOOTSTRAP_JSON" 2>/dev/null && success "Secrets bundle written to .env" || warn "Could not write secrets to .env (non-fatal)"
 
 # ── 9. Start OpenClaw gateway ────────────────────────────────────────────
 info "Starting OpenClaw gateway..."
 
-# Fix systemd user session for headless/container environments
-# This is required on HORDE and similar setups where systemd user bus isn't available
-if command -v loginctl &>/dev/null; then
-  sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
-fi
-
-# Ensure XDG_RUNTIME_DIR is set (required for systemd user services)
-if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
-  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-  mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
-fi
-
-# Persist XDG_RUNTIME_DIR in shell profile
-PROFILE="$HOME/.bashrc"
-if ! grep -q "XDG_RUNTIME_DIR" "$PROFILE" 2>/dev/null; then
-  echo 'export XDG_RUNTIME_DIR=/run/user/$(id -u)' >> "$PROFILE"
-fi
-
-# Kill any existing gateway process
+# Kill any stale gateway process
 pkill -f "openclaw.*gateway" 2>/dev/null || true
 sleep 1
 
-# Try systemd user service first; fall back to tmux background session
+_gateway_running() {
+  curl -sf http://127.0.0.1:18789/health > /dev/null 2>&1
+}
+
+# ── 9a. Try systemd user service (works on full Linux hosts) ──────────────
 if systemctl --user status &>/dev/null 2>&1; then
-  openclaw gateway start --daemon 2>/dev/null && \
-    success "OpenClaw gateway started (systemd)" || \
-    warn "systemd start failed — falling back to tmux"
+  if command -v loginctl &>/dev/null; then
+    sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
+  fi
+  if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  fi
+  openclaw gateway start --daemon 2>/dev/null && sleep 2 || true
+  if _gateway_running; then
+    success "OpenClaw gateway started (systemd)"
+  fi
 fi
 
-# tmux fallback (reliable on HORDE / containers / SSH-only boxes)
-if ! openclaw gateway status --quiet 2>/dev/null; then
+# ── 9b. tmux fallback (containers / no-systemd) ───────────────────────────
+if ! _gateway_running; then
+  if ! command -v tmux &>/dev/null; then
+    info "Installing tmux..."
+    sudo apt-get install -y -q tmux 2>/dev/null || sudo yum install -y -q tmux 2>/dev/null || true
+  fi
   if command -v tmux &>/dev/null; then
     tmux kill-session -t openclaw 2>/dev/null || true
-    tmux new-session -d -s openclaw "openclaw gateway start"
-    sleep 2
-    if openclaw gateway status --quiet 2>/dev/null; then
+    tmux new-session -d -s openclaw "openclaw gateway start --foreground"
+    sleep 3
+    if _gateway_running; then
       success "OpenClaw gateway started (tmux session 'openclaw')"
     else
-      warn "Gateway may not be running — check: tmux attach -t openclaw"
-    fi
-  else
-    # Install tmux if missing
-    info "Installing tmux..."
-    sudo apt-get install -y tmux 2>/dev/null || sudo yum install -y tmux 2>/dev/null || true
-    if command -v tmux &>/dev/null; then
-      tmux new-session -d -s openclaw "openclaw gateway start"
-      sleep 2
-      success "OpenClaw gateway started (tmux)"
-    else
-      warn "tmux unavailable. Start gateway manually: openclaw gateway start"
+      warn "tmux session started but gateway not responding — check: tmux attach -t openclaw"
     fi
   fi
+fi
+
+# ── 9c. nohup last resort ─────────────────────────────────────────────────
+if ! _gateway_running; then
+  mkdir -p /tmp/openclaw
+  nohup openclaw gateway start --foreground > /tmp/openclaw/gateway.log 2>&1 &
+  sleep 3
+  if _gateway_running; then
+    success "OpenClaw gateway started (nohup)"
+  else
+    warn "Gateway failed to start — check /tmp/openclaw/gateway.log"
+  fi
+fi
+
+# ── 9d. Persist autostart in .bashrc (survives container restarts) ────────
+# For containers with persistent home dirs, wire gateway autostart into .bashrc
+# so it comes back on the next interactive session / container restart.
+PROFILE="$HOME/.bashrc"
+AUTOSTART_MARKER="# openclaw-gateway-autostart"
+if ! grep -q "$AUTOSTART_MARKER" "$PROFILE" 2>/dev/null; then
+  cat >> "$PROFILE" <<'AUTOSTART'
+# openclaw-gateway-autostart
+# Started by bootstrap.sh — restarts gateway if not already running
+if command -v openclaw &>/dev/null; then
+  if ! curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
+    if command -v tmux &>/dev/null && ! tmux has-session -t openclaw 2>/dev/null; then
+      tmux new-session -d -s openclaw "openclaw gateway start --foreground" 2>/dev/null || true
+    elif ! pgrep -f "openclaw.*gateway" >/dev/null 2>&1; then
+      nohup openclaw gateway start --foreground > /tmp/openclaw/gateway.log 2>&1 &
+    fi
+  fi
+fi
+AUTOSTART
+  success "Gateway autostart wired into .bashrc (survives container restarts)"
 fi
 
 # ── 10. Post heartbeat ────────────────────────────────────────────────────
@@ -401,7 +442,7 @@ echo "  RCC env:             ${HOME}/.rcc/.env"
 echo ""
 if [[ -z "$TELEGRAM_TOKEN" && -z "$MATTERMOST_TOKEN" ]]; then
   echo -e "${YELLOW}  ⚠ No messaging channels configured.${NC}"
-  echo "    Re-run with --telegram-token=<tok> or --mattermost-token=<tok>"
+  echo "    Add TELEGRAM_BOT_TOKEN or MATTERMOST_TOKEN to RCC secrets and re-bootstrap,"
   echo "    OR edit openclaw.json and run: openclaw gateway restart"
   echo ""
 fi
