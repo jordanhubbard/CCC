@@ -238,8 +238,8 @@ cat > "$OC_CONFIG" <<OCEOF
     "lastTouchedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   },
   "agents": {
-    "workspace": "${OC_WORKSPACE}",
     "defaults": {
+      "workspace": "${OC_WORKSPACE}",
       "model": "${DEFAULT_MODEL}"
     }
   },
