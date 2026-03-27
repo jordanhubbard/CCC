@@ -273,6 +273,14 @@ cat > "$OC_CONFIG" <<OCEOF
     "lastTouchedVersion": "2026.3.8",
     "lastTouchedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   },
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18789,
+    "auth": {
+      "mode": "none"
+    }
+  },
   "agents": {
     "defaults": {
       "workspace": "${OC_WORKSPACE}",
@@ -378,7 +386,7 @@ if ! _gateway_running; then
   fi
   if command -v tmux &>/dev/null; then
     tmux kill-session -t openclaw 2>/dev/null || true
-    tmux new-session -d -s openclaw "openclaw gateway run"
+    tmux new-session -d -s openclaw "openclaw gateway run --allow-unconfigured"
     sleep 3
     if _gateway_running; then
       success "OpenClaw gateway started (tmux session 'openclaw')"
@@ -391,7 +399,7 @@ fi
 # ── 9c. nohup last resort ─────────────────────────────────────────────────
 if ! _gateway_running; then
   mkdir -p /tmp/openclaw
-  nohup openclaw gateway run > /tmp/openclaw/gateway.log 2>&1 &
+  nohup openclaw gateway run --allow-unconfigured > /tmp/openclaw/gateway.log 2>&1 &
   sleep 3
   if _gateway_running; then
     success "OpenClaw gateway started (nohup)"
@@ -412,9 +420,9 @@ if ! grep -q "$AUTOSTART_MARKER" "$PROFILE" 2>/dev/null; then
 if command -v openclaw &>/dev/null; then
   if ! curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
     if command -v tmux &>/dev/null && ! tmux has-session -t openclaw 2>/dev/null; then
-      tmux new-session -d -s openclaw "openclaw gateway run" 2>/dev/null || true
+      tmux new-session -d -s openclaw "openclaw gateway run --allow-unconfigured" 2>/dev/null || true
     elif ! pgrep -f "openclaw.*gateway" >/dev/null 2>&1; then
-      nohup openclaw gateway run > /tmp/openclaw/gateway.log 2>&1 &
+      nohup openclaw gateway run --allow-unconfigured > /tmp/openclaw/gateway.log 2>&1 &
     fi
   fi
 fi
