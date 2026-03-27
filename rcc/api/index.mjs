@@ -9,7 +9,7 @@
  */
 
 import { createServer } from 'http';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname } from 'path';
 import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
@@ -28,6 +28,7 @@ const REPOS_PATH      = process.env.REPOS_PATH    || './repos.json';
 const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
 const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://localhost:8789';
 const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
+const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0];
 const START_TIME   = Date.now();
 const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
 const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
@@ -54,6 +55,7 @@ const heartbeatHistory = {};
 const cronStatus = {};
 const providerHealth = {};
 const geekSseClients = new Set();
+const bootstrapTokens = new Map();
 
 // ── Disappearance detection config ────────────────────────────────────────
 const OFFLINE_THRESHOLD_MS = parseInt(process.env.OFFLINE_THRESHOLD_MS || String(60 * 60 * 1000), 10); // 1h
@@ -189,6 +191,13 @@ function isAuthed(req) {
   const auth = req.headers['authorization'] || '';
   const token = auth.replace(/^Bearer\s+/i, '').trim();
   return AUTH_TOKENS.has(token);
+}
+
+function isAdminAuthed(req) {
+  if (!RCC_ADMIN_TOKEN) return true; // no admin token configured = open (dev mode)
+  const auth = req.headers['authorization'] || '';
+  const token = auth.replace(/^Bearer\s+/i, '').trim();
+  return token === RCC_ADMIN_TOKEN;
 }
 
 // ── Queue I/O ──────────────────────────────────────────────────────────────
@@ -2185,6 +2194,75 @@ async function handleRequest(req, res) {
       item.journal.push({ ts: new Date().toISOString(), type: 'promote', text: 'Promoted from idea to pending' });
       await writeQueue(q);
       return json(res, 200, { ok: true, item });
+    }
+
+    // ── POST /api/keys/github — store deploy key ──────────────────────────
+    if (method === 'POST' && path === '/api/keys/github') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.repoUrl || !body.deployKey) return json(res, 400, { error: 'repoUrl and deployKey required' });
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      const record = { repoUrl: body.repoUrl, deployKey: body.deployKey, label: body.label || '', registeredAt: new Date().toISOString() };
+      await writeFile(keyPath, JSON.stringify(record, null, 2));
+      await chmod(keyPath, 0o600);
+      return json(res, 200, { ok: true, keyId: 'default' });
+    }
+
+    // ── GET /api/keys/github — retrieve deploy key ────────────────────────
+    if (method === 'GET' && path === '/api/keys/github') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      if (!existsSync(keyPath)) return json(res, 404, { error: 'No deploy key registered' });
+      const record = JSON.parse(await readFile(keyPath, 'utf8'));
+      return json(res, 200, record);
+    }
+
+    // ── POST /api/bootstrap/token — generate one-time bootstrap token ─────
+    if (method === 'POST' && path === '/api/bootstrap/token') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.agent) return json(res, 400, { error: 'agent required' });
+      const ttl = body.ttlSeconds || 3600;
+      const token = `rcc-bootstrap-${body.agent}-${randomUUID().slice(0, 8)}`;
+      const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+      bootstrapTokens.set(token, { agent: body.agent, expiresAt: Date.now() + ttl * 1000, used: false });
+      return json(res, 200, { ok: true, bootstrapToken: token, agent: body.agent, expiresAt });
+    }
+
+    // ── GET /api/bootstrap — consume bootstrap token, return provisioning data
+    if (method === 'GET' && path === '/api/bootstrap') {
+      const token = url.searchParams.get('token');
+      if (!token) return json(res, 400, { error: 'token query param required' });
+      const entry = bootstrapTokens.get(token);
+      if (!entry) return json(res, 401, { error: 'Invalid bootstrap token' });
+      if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
+      if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
+      entry.used = true;
+
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      if (!existsSync(keyPath)) return json(res, 500, { error: 'Deploy key not configured' });
+      const keyRecord = JSON.parse(await readFile(keyPath, 'utf8'));
+
+      const agents = await readAgents();
+      let agentToken;
+      if (agents[entry.agent]?.token) {
+        agentToken = agents[entry.agent].token;
+      } else {
+        agentToken = `rcc-agent-${entry.agent}-${randomUUID().slice(0, 8)}`;
+        agents[entry.agent] = { ...(agents[entry.agent] || {}), token: agentToken, registeredAt: new Date().toISOString() };
+        await writeAgents(agents);
+        AUTH_TOKENS.add(agentToken);
+      }
+
+      console.log(`[rcc-api] Bootstrap consumed for agent ${entry.agent} from ${req.socket?.remoteAddress}`);
+      return json(res, 200, {
+        ok: true,
+        agent: entry.agent,
+        repoUrl: keyRecord.repoUrl,
+        deployKey: keyRecord.deployKey,
+        agentToken,
+        rccUrl: RCC_PUBLIC_URL,
+      });
     }
 
     return json(res, 404, { error: 'Not found' });

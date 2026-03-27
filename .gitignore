@@ -12,6 +12,7 @@ openclaw.json
 .env
 !deploy/.env.template
 rcc/api/agents.json
+rcc/data/github-key.json
 # Queue state (runtime data, not source)
 workqueue/queue.json
 brain-state.json
