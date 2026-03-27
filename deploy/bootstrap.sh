@@ -43,6 +43,12 @@ echo "🐻 RCC Agent Bootstrap: ${AGENT}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# ── 0. Clean slate ───────────────────────────────────────────────────────
+info "Cleaning up previous install..."
+pkill -f "openclaw.*gateway" 2>/dev/null || true
+rm -rf "$HOME/.openclaw" "$HOME/.rcc" 2>/dev/null || true
+success "Clean slate ready"
+
 # ── 1. Dependency check ───────────────────────────────────────────────────
 info "Checking dependencies..."
 for dep in git curl; do
@@ -280,17 +286,62 @@ ENVEOF
 chmod 600 "$ENV_FILE"
 success "~/.rcc/.env written"
 
-# ── 9. Install OpenClaw daemon ────────────────────────────────────────────
-info "Installing OpenClaw daemon..."
-if openclaw gateway status &>/dev/null; then
-  warn "Gateway already running — restarting to apply config..."
-  openclaw gateway restart || true
-else
-  openclaw gateway start --daemon 2>/dev/null || \
-  openclaw onboard --install-daemon --non-interactive 2>/dev/null || \
-  warn "Could not auto-start daemon. Run manually: openclaw gateway start"
+# ── 9. Start OpenClaw gateway ────────────────────────────────────────────
+info "Starting OpenClaw gateway..."
+
+# Fix systemd user session for headless/container environments
+# This is required on HORDE and similar setups where systemd user bus isn't available
+if command -v loginctl &>/dev/null; then
+  sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
 fi
-success "OpenClaw gateway started"
+
+# Ensure XDG_RUNTIME_DIR is set (required for systemd user services)
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
+fi
+
+# Persist XDG_RUNTIME_DIR in shell profile
+PROFILE="$HOME/.bashrc"
+if ! grep -q "XDG_RUNTIME_DIR" "$PROFILE" 2>/dev/null; then
+  echo 'export XDG_RUNTIME_DIR=/run/user/$(id -u)' >> "$PROFILE"
+fi
+
+# Kill any existing gateway process
+pkill -f "openclaw.*gateway" 2>/dev/null || true
+sleep 1
+
+# Try systemd user service first; fall back to tmux background session
+if systemctl --user status &>/dev/null 2>&1; then
+  openclaw gateway start --daemon 2>/dev/null && \
+    success "OpenClaw gateway started (systemd)" || \
+    warn "systemd start failed — falling back to tmux"
+fi
+
+# tmux fallback (reliable on HORDE / containers / SSH-only boxes)
+if ! openclaw gateway status --quiet 2>/dev/null; then
+  if command -v tmux &>/dev/null; then
+    tmux kill-session -t openclaw 2>/dev/null || true
+    tmux new-session -d -s openclaw "openclaw gateway start"
+    sleep 2
+    if openclaw gateway status --quiet 2>/dev/null; then
+      success "OpenClaw gateway started (tmux session 'openclaw')"
+    else
+      warn "Gateway may not be running — check: tmux attach -t openclaw"
+    fi
+  else
+    # Install tmux if missing
+    info "Installing tmux..."
+    sudo apt-get install -y tmux 2>/dev/null || sudo yum install -y tmux 2>/dev/null || true
+    if command -v tmux &>/dev/null; then
+      tmux new-session -d -s openclaw "openclaw gateway start"
+      sleep 2
+      success "OpenClaw gateway started (tmux)"
+    else
+      warn "tmux unavailable. Start gateway manually: openclaw gateway start"
+    fi
+  fi
+fi
 
 # ── 10. Post heartbeat ────────────────────────────────────────────────────
 info "Posting heartbeat to RCC..."
