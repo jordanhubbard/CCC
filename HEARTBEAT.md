@@ -6,19 +6,35 @@
 # jkh DIRECTIVE 2026-03-21: 24/7 mode — NO quiet hours, NO sleep mode, NO weekend reduction.
 # All agents always-on.
 
-## Status (2026-03-26 evening)
+# jkh DIRECTIVE 2026-03-26: Keep working on tasks across heartbeats. Do NOT go passive.
+# If a task is in-progress below, resume it IMMEDIATELY. Don't wait for a new prompt.
 
-All agents online: Rocky ✅ Bullwinkle ✅ Natasha ✅ Boris ✅
-RCC API healthy. SquirrelChat healthy on :8790.
+---
 
-### Each heartbeat: check these in order
+## 🔴 ACTIVE TASK — RESUME THIS EVERY HEARTBEAT UNTIL DONE
 
-1. **Queue check**: `curl -s http://localhost:8789/api/queue -H "Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb"` — anything in-progress or stalled? Claim and work actionable items.
+**Task:** `wq-RCC-token-persistence` — Fix agent token persistence across RCC restarts  
+**Status:** pending (not yet claimed — claim and start this next heartbeat)  
+**Approved by:** jkh (filed 2026-03-26 per jkh directive to always file tasks for found issues)  
+**Priority:** high
 
-2. **RCC health**: `curl -s http://localhost:8789/health` — confirm up.
+### What to fix (rcc/api/index.mjs):
+1. On startup: read agents.json and load all stored agent tokens into `AUTH_TOKENS` set
+2. Verify agents.json write path is correct after .rcc/workspace symlink fix
+3. Issue static tokens for Boris and RTX — add them to `/home/jkh/.rcc/.env` as `RCC_AUTH_TOKENS` additions
+4. Update ONBOARDING.md with the static token pattern for containerized agents
 
-3. **Git sync**: After completing any task, commit + push to `jordanhubbard/rockyandfriends`.
+### Resume instructions:
+- PATCH wq-RCC-token-persistence to in-progress, claimedBy rocky
+- Edit /home/jkh/.openclaw/workspace/rcc/api/index.mjs: after AUTH_TOKENS is initialized from env (line ~29), add startup code to read agents.json and add all agent tokens to AUTH_TOKENS
+- Test: restart rcc-api.service, verify existing agent registrations still auth
+- Commit, push, mark complete, remove this block
 
-### Fixed tonight (2026-03-26)
-- `wq-SC-001` ✅ — SquirrelChat symlink loop resolved, DB recovered, crontab fixed, service running
-- `rcc-api.service` ✅ — ExecStart path was symlink (.rcc/workspace → .openclaw/workspace); Node's import.meta.url resolved to real path so startServer() guard never matched. Fixed to use canonical path directly.
+---
+
+## Each heartbeat: check these in order
+
+1. **Resume active task above** (if present) — check status, continue work
+2. **Queue check**: `curl -s http://localhost:8789/api/queue -H "Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb"` — anything in-progress or stalled?
+3. **RCC health**: `curl -s http://localhost:8789/health` — confirm up
+4. **Git sync**: After completing any task, commit + push to `jordanhubbard/rockyandfriends`
