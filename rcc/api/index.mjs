@@ -6,38 +6,37 @@
  *
  * Port: RCC_PORT env var (default 8789)
  * Auth: Bearer token — must be in RCC_AUTH_TOKENS (comma-separated)
- *
- * Slack inbound:
- *   SLACK_SIGNING_SECRET  — Slack app signing secret for verifying event/command payloads
- *   OFFTERA_BOT           — Bot token for workspace THJ9A47K3
- *   OMGJKH_BOT            — Bot token for workspace TE0V8MBEJ
  */
 
 import { createServer } from 'http';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname } from 'path';
-import { hostname } from 'os';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
 import { Brain, createRequest } from '../brain/index.mjs';
+import { embed, upsert as vectorUpsert, search as vectorSearch, searchAll as vectorSearchAll, ensureCollections, collectionStats } from '../vector/index.mjs';
 import { Pump } from '../scout/pump.mjs';
 import { learnLesson, queryLessons, queryAllLessons, formatLessonsForContext, getTrendingLessons, formatTrendingForHeartbeat, getHeartbeatContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
-import * as registry from '../capabilities/registry.mjs';
+import { generateIdea } from '../ideation/ideation.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT            = parseInt(process.env.RCC_PORT || '8789', 10);
 const QUEUE_PATH      = process.env.QUEUE_PATH    || '../../workqueue/queue.json';
 const AGENTS_PATH        = process.env.AGENTS_PATH        || './agents.json';
 const CAPABILITIES_PATH  = process.env.CAPABILITIES_PATH  || './data/agent-capabilities.json';
-const REGISTRY_PATH      = process.env.REGISTRY_PATH      || './data/capabilities-registry.json';
 const REPOS_PATH      = process.env.REPOS_PATH    || './repos.json';
 const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
 const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://localhost:8789';
 const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
+const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0];
 const START_TIME   = Date.now();
+const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
+const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
 
-// Configure capability registry persist path
-registry.configure({ path: new URL(REGISTRY_PATH, import.meta.url).pathname });
+// ── Slack config ───────────────────────────────────────────────────────────
+const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
+const SLACK_BOT_TOKEN      = process.env.SLACK_BOT_TOKEN      || '';
+const SLACK_API            = 'https://slack.com/api';
 
 // ── Stale claim thresholds (ms) by executor type ───────────────────────────
 // claude_cli: real coding agents, can run 60-90min on complex tasks
@@ -52,6 +51,62 @@ const STALE_THRESHOLDS = {
 
 // ── In-memory heartbeats ───────────────────────────────────────────────────
 const heartbeats = {};
+const heartbeatHistory = {};
+const cronStatus = {};
+const providerHealth = {};
+const geekSseClients = new Set();
+const bootstrapTokens = new Map();
+
+// ── Disappearance detection config ────────────────────────────────────────
+const OFFLINE_THRESHOLD_MS = parseInt(process.env.OFFLINE_THRESHOLD_MS || String(60 * 60 * 1000), 10); // 1h
+const offlineAlertSent = {};  // agent -> timestamp of last offline alert sent
+
+// ── Offline detection + Slack alert ───────────────────────────────────────
+function computeOnlineStatus(hb) {
+  if (!hb || !hb.ts) return false;
+  if (hb.decommissioned) return false;
+  return (Date.now() - new Date(hb.ts).getTime()) < OFFLINE_THRESHOLD_MS;
+}
+
+async function runDisappearanceCheck() {
+  const SLACK_AGENT_CHANNEL = process.env.SLACK_AGENT_CHANNEL || '#agent-shared';
+  const now = Date.now();
+  const agents = await readAgents().catch(() => ({}));
+  for (const [agent, hb] of Object.entries(heartbeats)) {
+    if (hb.decommissioned) continue;
+    const age = now - new Date(hb.ts).getTime();
+    const isOffline = age >= OFFLINE_THRESHOLD_MS;
+    const wasOnline = hb._wasOnline !== false;  // default: assume was online
+    if (isOffline && wasOnline) {
+      hb._wasOnline = false;
+      // Only alert if we haven't alerted in the last 2h
+      const lastAlert = offlineAlertSent[agent] || 0;
+      if (now - lastAlert > 2 * 60 * 60 * 1000) {
+        offlineAlertSent[agent] = now;
+        const lastSeenMin = Math.round(age / 60000);
+        const msg = `:red_circle: *${agent}* has gone offline — last seen ${lastSeenMin} minutes ago (${hb.ts}). No heartbeat for >${Math.round(OFFLINE_THRESHOLD_MS/60000)} min.`;
+        if (SLACK_BOT_TOKEN) {
+          slackPost('chat.postMessage', { channel: SLACK_AGENT_CHANNEL, text: msg }).catch(() => {});
+        }
+        // Persist offline status to agents registry
+        if (agents[agent]) {
+          agents[agent].lastSeen = hb.ts;
+          agents[agent].onlineStatus = 'offline';
+          await writeAgents(agents).catch(() => {});
+        }
+      }
+    } else if (!isOffline) {
+      hb._wasOnline = true;
+      if (agents[agent] && agents[agent].onlineStatus === 'offline') {
+        agents[agent].onlineStatus = 'online';
+        await writeAgents(agents).catch(() => {});
+      }
+    }
+  }
+}
+
+// Run disappearance check every 5 minutes
+setInterval(runDisappearanceCheck, 5 * 60 * 1000);
 
 // ── Projects I/O ─────────────────────────────────────────────────────────
 async function readProjects() {
@@ -78,7 +133,7 @@ function buildProjectFromRepo(repo) {
     rcc_url:       projectUrl(repo.full_name),
     issue_tracker: repo.issue_tracker_url ? `https://${repo.issue_tracker_url}` : `https://github.com/${repo.full_name}/issues`,
     slack_channels: repo.ownership?.slack_channel
-      ? [{ workspace: repo.ownership.slack_workspace || '', channel_id: repo.ownership.slack_channel }]
+      ? [{ workspace: repo.ownership.slack_workspace || 'omgjkh', channel_id: repo.ownership.slack_channel }]
       : [],
     triaging_agent: repo.ownership?.triaging_agent || process.env.DEFAULT_TRIAGING_AGENT || '',
     enabled:        repo.enabled !== false,
@@ -138,6 +193,13 @@ function isAuthed(req) {
   return AUTH_TOKENS.has(token);
 }
 
+function isAdminAuthed(req) {
+  if (!RCC_ADMIN_TOKEN) return true; // no admin token configured = open (dev mode)
+  const auth = req.headers['authorization'] || '';
+  const token = auth.replace(/^Bearer\s+/i, '').trim();
+  return token === RCC_ADMIN_TOKEN;
+}
+
 // ── Queue I/O ──────────────────────────────────────────────────────────────
 async function readQueue() {
   const p = new URL(QUEUE_PATH, import.meta.url).pathname;
@@ -150,11 +212,30 @@ async function writeQueue(data) {
   await writeFile(p, JSON.stringify(data, null, 2));
 }
 
+// ── Request tickets I/O ───────────────────────────────────────────────────
+async function readRequests() {
+  const p = new URL(REQUESTS_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return [];
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeRequests(data) {
+  const p = new URL(REQUESTS_PATH, import.meta.url).pathname;
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
 // ── Agent registry I/O ────────────────────────────────────────────────────
 async function readAgents() {
   const p = new URL(AGENTS_PATH, import.meta.url).pathname;
   if (!existsSync(p)) return {};
-  return JSON.parse(await readFile(p, 'utf8'));
+  const raw = JSON.parse(await readFile(p, 'utf8'));
+  // Normalise: if stored as array (legacy []), convert to {} keyed by name
+  if (Array.isArray(raw)) {
+    const obj = {};
+    for (const a of raw) { if (a && a.name) obj[a.name] = a; }
+    return obj;
+  }
+  return raw;
 }
 
 async function writeAgents(data) {
@@ -175,6 +256,19 @@ async function writeCapabilities(data) {
   await writeFile(p, JSON.stringify(data, null, 2));
 }
 
+// ── Calendar I/O ───────────────────────────────────────────────────────────
+async function readCalendar() {
+  const p = new URL(CALENDAR_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return [];
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeCalendar(data) {
+  const p = new URL(CALENDAR_PATH, import.meta.url).pathname;
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
 // ── HTTP helpers ───────────────────────────────────────────────────────────
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -189,6 +283,16 @@ function readBody(req) {
     req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('Invalid JSON')); } });
     req.on('error', reject);
   });
+}
+
+// ── Geek SSE broadcast ─────────────────────────────────────────────────────
+function broadcastGeekEvent(type, from, to, label) {
+  if (geekSseClients.size === 0) return;
+  const data = JSON.stringify({ type, from, to, label, ts: new Date().toISOString() });
+  const msg = `data: ${data}\n\n`;
+  for (const client of geekSseClients) {
+    try { client.write(msg); } catch { geekSseClients.delete(client); }
+  }
 }
 
 // ── HTML UI helpers ────────────────────────────────────────────────────────
@@ -232,26 +336,6 @@ const HTML_STYLE = `
     .status-completed{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-cancelled{background:#1c1c1c;color:#8b949e;border:1px solid #30363d}
     .status-failed{background:#2d1a1a;color:#f85149;border:1px solid #f8514955}
-    .status-incubating{background:#2a1f3d;color:#d2a8ff;border:1px solid #8957e555}
-    .incubator-section{margin-top:1rem}
-    .incubator-section h2{font-size:1rem;font-weight:600;margin-bottom:.75rem}
-    .incubator-item{background:#161b22;border:1px solid #8957e533;border-radius:8px;padding:.9rem 1rem;margin-bottom:.75rem}
-    .incubator-item .inc-title{font-weight:600;font-size:.9rem;margin-bottom:.3rem}
-    .inc-desc{font-size:.82rem;color:#8b949e;margin-bottom:.55rem;line-height:1.45}
-    .inc-journal{margin:.5rem 0;border-left:2px solid #8957e544;padding-left:.65rem}
-    .inc-journal-entry{font-size:.78rem;color:#c9d1d9;margin-bottom:.3rem;line-height:1.4}
-    .inc-journal-entry .je-author{color:#d2a8ff;font-weight:600;margin-right:.35rem}
-    .inc-journal-entry .je-ts{color:#8b949e;font-size:.72rem;margin-right:.35rem}
-    .inc-actions{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
-    .inc-comment-form{margin-top:.6rem;display:flex;gap:.5rem}
-    .inc-comment-input{flex:1;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;padding:.3rem .6rem;font-size:.8rem}
-    .inc-comment-input:focus{outline:none;border-color:#8957e5}
-    .btn-promote{background:#1a2f1a;color:#3fb950;border:1px solid #3fb95055;border-radius:4px;padding:.25rem .65rem;font-size:.78rem;cursor:pointer;font-weight:600}
-    .btn-promote:hover{background:#1f3a1f}
-    .inc-pri-sel{background:#0d1117;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:.2rem .4rem;font-size:.75rem;cursor:pointer;transition:border-color .15s}
-    .inc-pri-sel:hover,.inc-pri-sel:focus{border-color:#8957e5;outline:none}
-    .btn-send-comment{background:#2a1f3d;color:#d2a8ff;border:1px solid #8957e555;border-radius:4px;padding:.25rem .65rem;font-size:.78rem;cursor:pointer}
-    .btn-send-comment:hover{background:#321e4f}
     .gh-panel{margin-top:1rem}
     .gh-columns{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
     @media(max-width:680px){.gh-columns{grid-template-columns:1fr}}
@@ -310,7 +394,6 @@ function projectDetailHtml(projectId) {
   <script>
     const projectId=${JSON.stringify(projectId)};
     const encodedId=${JSON.stringify(encodedId)};
-    function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
     function timeAgo(ds){if(!ds)return'';const s=Math.floor((Date.now()-new Date(ds))/1000);if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
     function labelFg(hex){if(!hex||hex==='000000')return'#8b949e';const r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);return(r*299+g*587+b*114)/1000>128?'#0d1117':'#f0f6fc';}
     function labelChip(l){const bg='#'+((l.color&&l.color!=='000000')?l.color:'333');const fg=labelFg(l.color);return\`<span class="label-chip" style="background:\${bg}33;border-color:\${bg}88;color:\${fg}">\${esc(l.name||'')}</span>\`;}
@@ -318,27 +401,6 @@ function projectDetailHtml(projectId) {
     function renderPR(pr){const rc=pr.reviewDecision==='APPROVED'?'review-approved':pr.reviewDecision==='CHANGES_REQUESTED'?'review-changes':'review-pending';const rl=pr.reviewDecision==='APPROVED'?'✓ approved':pr.reviewDecision==='CHANGES_REQUESTED'?'✗ changes req':'⏳ pending review';const mc=pr.mergeable==='MERGEABLE'?'merge-ok':pr.mergeable==='CONFLICTING'?'merge-conflict':'';const ml=pr.mergeable==='MERGEABLE'?'mergeable':pr.mergeable==='CONFLICTING'?'⚠ conflicts':'';return\`<div class="gh-item"><div class="gh-item-title"><span class="gh-num">#\${pr.number}</span>\${pr.isDraft?'<span class="draft-badge">draft</span>':''}<a href="\${pr.url}" target="_blank">\${esc(pr.title||'')}</a></div><div class="gh-meta">\${(pr.labels||[]).map(labelChip).join('')}<span>\${esc(pr.author||'')}</span><span class="\${rc}">\${rl}</span>\${ml?\`<span class="\${mc}">\${ml}</span>\`:''}<span title="\${pr.createdAt||''}">\${timeAgo(pr.createdAt)}</span></div></div>\`;}
     function renderGitHub(ghData){if(!ghData)return'';if(ghData.error)return\`<div class="card gh-panel"><p class="gh-error">GitHub data unavailable: \${esc(ghData.error)}</p></div>\`;const issues=ghData.issues||[];const prs=ghData.prs||[];return\`<div class="card gh-panel"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem"><h2 style="font-size:1.05rem;font-weight:600">🐙 GitHub</h2><span><span class="gh-fetched">fetched \${timeAgo(ghData.fetchedAt)}</span><button class="gh-refresh-btn" onclick="refreshGitHub()">↻ Refresh</button></span></div><div class="gh-columns"><div><div class="gh-col-header">🔴 Issues <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${issues.length} open</span></div>\${issues.length?issues.map(renderIssue).join(''):'<p class="gh-empty">No open issues ✓</p>'}</div><div><div class="gh-col-header">🟣 Pull Requests <span style="color:#8b949e;font-size:.82rem;font-weight:400">\${prs.length} open</span></div>\${prs.length?prs.map(renderPR).join(''):'<p class="gh-empty">No open PRs ✓</p>'}</div></div></div>\`;}
     function refreshGitHub(){const panel=document.querySelector('.gh-panel');if(panel)panel.style.opacity='0.5';fetch('/api/projects/'+encodedId+'/github?refresh=1').then(()=>location.reload()).catch(()=>{if(panel)panel.style.opacity='1';});}
-    function promoteIdea(id,priority){if(!priority){const sel=document.getElementById('inc-pri-'+id);priority=sel?sel.value:'medium';}if(!priority)return;const rationale=prompt('Rationale: ground this in the project — what empirical evidence, docs, or observed behavior supports it?','');if(rationale===null)return;const btn=document.querySelector('#inc-'+id+' .btn-promote');if(btn){btn.disabled=true;btn.textContent='Promoting…';}fetch('/api/item/'+encodeURIComponent(id)+'/promote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priority,rationale,author: process.env.OPERATOR_HANDLE || 'operator'})}).then(r=>r.json()).then(d=>{if(d.ok)location.reload();else{if(btn){btn.disabled=false;btn.textContent='✓ Promote to work item';}alert('Cannot promote: '+d.error);}}).catch(()=>{if(btn){btn.disabled=false;btn.textContent='✓ Promote to work item';}});}
-    function sendIncComment(id,author){const inp=document.getElementById('inc-inp-'+id);const text=(inp?.value||'').trim();if(!text)return;const btn=document.querySelector('#inc-'+id+' .btn-send-comment');if(btn){btn.disabled=true;btn.textContent='Sending…';}fetch('/api/item/'+encodeURIComponent(id)+'/comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,author: author || process.env.OPERATOR_HANDLE || 'operator'})}).then(r=>r.json()).then(d=>{if(d.ok)location.reload();else{if(btn){btn.disabled=false;btn.textContent='Comment';}alert('Error: '+d.error);}}).catch(()=>{if(btn){btn.disabled=false;btn.textContent='Comment';}});}
-    function renderIncubatorItem(i){
-      const journal=(i.journal||[]).filter(e=>e.type==='comment'||e.type==='ai'||e.type==='incubate-feedback');
-      const journalHtml=journal.length?'<div class="inc-journal">'+journal.map(e=>\`<div class="inc-journal-entry"><span class="je-ts">\${timeAgo(e.ts)}</span><span class="je-author">\${esc(e.author||'?')}:</span>\${esc(e.text||'')}</div>\`).join('')+'</div>':'';
-      return\`<div class="incubator-item" id="inc-\${i.id}">
-        <div class="inc-title">💡 \${esc(i.title||'Untitled')}</div>
-        \${i.description?'<div class="inc-desc">'+esc(i.description)+'</div>':''}
-        \${journalHtml}
-        <div class="inc-comment-form">
-          <input class="inc-comment-input" id="inc-inp-\${i.id}" placeholder="Add a comment or refinement…" onkeydown="if(event.key==='Enter')sendIncComment('\${i.id}')">
-          <button class="btn-send-comment" onclick="sendIncComment('\${i.id}')">Comment</button>
-        </div>
-        <div class="inc-actions">
-          <select class="inc-pri-sel" id="inc-pri-\${i.id}"><option value="medium">medium</option><option value="normal">normal</option><option value="high">high</option><option value="urgent">urgent</option><option value="low">low</option></select>
-          <button class="btn-promote" onclick="promoteIdea('\${i.id}')">✓ Promote to work item</button>
-          <span style="font-size:.72rem;color:#8b949e">\${timeAgo(i.created||i.createdAt)} · \${i.source||'api'}</span>
-        </div>
-      </div>\`;
-    }
-    function renderIncubatorSection(incubating){if(!incubating.length)return'';return\`<div class="card incubator-section"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem"><h2>💡 Idea Incubator (\${incubating.length})</h2><span style="font-size:.78rem;color:#8b949e">Comment to refine · Promote when ready</span></div>\${incubating.map(renderIncubatorItem).join('')}</div>\`;}
     Promise.all([
       fetch('/api/projects/'+encodedId).then(r=>r.json()),
       fetch('/api/queue').then(r=>r.json()),
@@ -346,8 +408,7 @@ function projectDetailHtml(projectId) {
     ]).then(([p, qdata, ghData])=>{
       if(p.error){document.getElementById('root').innerHTML='<p class="error">'+p.error+'</p>';return;}
       const items=[...(qdata.items||[]),...(qdata.completed||[])].filter(i=>i.project===projectId||i.repo===projectId||(i.slack_channels||[]).some(c=>c===projectId));
-      const incubating=items.filter(i=>i.status==='incubating');
-      const active=items.filter(i=>!['completed','cancelled','incubating'].includes(i.status));
+      const active=items.filter(i=>!['completed','cancelled'].includes(i.status));
       const done=items.filter(i=>['completed','cancelled'].includes(i.status)).slice(0,10);
       const statusBadge=(s)=>\`<span class="status-badge status-\${s||'pending'}">\${s||'pending'}</span>\`;
       const renderItem=(i)=>\`<div class="queue-item">
@@ -376,341 +437,87 @@ function projectDetailHtml(projectId) {
           \${scoutTags?'<div class="scouts">'+scoutTags+'</div>':''}
           \${p.notes?'<div class="notes">'+p.notes+'</div>':''}
         </div>
-        \${renderIncubatorSection(incubating)}
         \${active.length?'<div class="queue-section card"><h2>Active Work ('+active.length+')</h2>'+active.map(renderItem).join('')+'</div>':''}
         \${done.length?'<div class="queue-section card" style="margin-top:.5rem"><h2>Recent Completed</h2>'+done.map(renderItem).join('')+'</div>':''}
-        \${!active.length&&!done.length&&!incubating.length?'<div class="card"><p style="color:#8b949e;font-size:.875rem">No queue items for this project yet.</p></div>':''}
+        \${!active.length&&!done.length?'<div class="card"><p style="color:#8b949e;font-size:.875rem">No queue items for this project yet.</p></div>':''}
         \${renderGitHub(ghData)}
       \`
     }).catch(e=>{document.getElementById('root').innerHTML='<p class="error">Failed to load: '+e.message+'</p>';});
   </script></body></html>`;
 }
 
-// ── Slack helpers ───────────────────────────────────────────────────────────
+// ── Slack helpers ──────────────────────────────────────────────────────────
 
-// Dedup: track last 1000 processed event IDs to ignore retries
-const processedEventIds = new Set();
-function trackEventId(id) {
-  if (processedEventIds.has(id)) return false;
-  processedEventIds.add(id);
-  if (processedEventIds.size > 1000) {
-    processedEventIds.delete(processedEventIds.values().next().value);
-  }
-  return true;
-}
-
-// Map Slack team_id → bot token
-function getSlackToken(teamId) {
-  if (teamId === 'THJ9A47K3') return process.env.OFFTERA_BOT;
-  if (teamId === 'TE0V8MBEJ') return process.env.OMGJKH_BOT;
-  return process.env.SLACK_TOKEN;
-}
-
-// Post a message to Slack, optionally threaded
-async function postSlackReply(token, channel, text, thread_ts) {
-  const payload = { channel, text };
-  if (thread_ts) payload.thread_ts = thread_ts;
-  const r = await fetch('https://slack.com/api/chat.postMessage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify(payload),
-  });
-  return r.json();
-}
-
-// Read raw body bytes (needed before JSON/form parse, for HMAC verification)
+/** Read raw body bytes (needed for Slack signature verification) */
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 1e6) reject(new Error('Body too large')); });
-    req.on('end', () => resolve(body));
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
 
-// Parse application/x-www-form-urlencoded (Slack slash commands)
-function parseFormBody(raw) {
-  const obj = {};
-  for (const [k, v] of new URLSearchParams(raw).entries()) obj[k] = v;
-  return obj;
-}
-
-// Verify Slack signing secret — returns true if signature valid and timestamp fresh
-function verifySlackSignature(rawBody, headers) {
-  const secret = process.env.SLACK_SIGNING_SECRET;
-  if (!secret) return false;
-  const ts = headers['x-slack-request-timestamp'];
-  const sig = headers['x-slack-signature'];
+/** Verify Slack request signature — returns true if valid */
+function verifySlackSignature(req, rawBody) {
+  if (!SLACK_SIGNING_SECRET) return true; // dev mode — no secret configured
+  const ts = req.headers['x-slack-request-timestamp'];
+  const sig = req.headers['x-slack-signature'];
   if (!ts || !sig) return false;
-  if (Math.abs(Date.now() / 1000 - parseInt(ts, 10)) > 300) return false; // > 5 min old
-  const expected = 'v0=' + createHmac('sha256', secret).update(`v0:${ts}:${rawBody}`).digest('hex');
-  try { return timingSafeEqual(Buffer.from(expected), Buffer.from(sig)); } catch { return false; }
+  // Replay attack: reject if >5 minutes old
+  if (Math.abs(Date.now() / 1000 - parseInt(ts, 10)) > 300) return false;
+  const baseString = `v0:${ts}:${rawBody.toString('utf8')}`;
+  const hmac = createHmac('sha256', SLACK_SIGNING_SECRET).update(baseString).digest('hex');
+  const computed = Buffer.from(`v0=${hmac}`);
+  const provided  = Buffer.from(sig);
+  if (computed.length !== provided.length) return false;
+  return timingSafeEqual(computed, provided);
 }
 
-// ── Shared Slack event/command handlers ────────────────────────────────────
-
-// Handle an inbound Slack event (app_mention or DM). Called by HTTP handler and Socket Mode.
-async function handleSlackEvent(event, teamId) {
-  const token = getSlackToken(teamId);
-  if (!token) return;
-
-  // ── app_mention ──────────────────────────────────────────────────────────
-  if (event.type === 'app_mention') {
-    const { channel, user, text, thread_ts, ts } = event;
-    const cleanText = (text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
-    const replyThread = thread_ts || ts;
-
-    await postSlackReply(token, channel, '...', replyThread);
-
-    let ctxNote = '';
-    try {
-      const repos = await getPump().listRepos();
-      const projects = await readProjects();
-      let repo = repos.find(r => r.ownership?.slack_channel === channel);
-      if (!repo) {
-        const pe = projects.find(p => (p.slack_channels || []).some(c => c.channel_id === channel));
-        if (pe) repo = repos.find(r => r.full_name === pe.id);
-      }
-      if (repo) ctxNote = ` Context: project ${repo.full_name}. ${repo.description || ''}`.trimEnd();
-    } catch {}
-
-    const reply = await askBrain(
-      [
-        { role: 'system', content: `You are Rocky, an AI assistant. Be concise and helpful.${ctxNote}` },
-        { role: 'user', content: cleanText || '(no message text)' },
-      ],
-      { channel, user, teamId },
-    ).catch(() => "Sorry, I timed out thinking about that 🐿️");
-
-    await postSlackReply(token, channel, reply, replyThread);
-  }
-
-  // ── DM messages (not from bots) ─────────────────────────────────────────
-  if (event.type === 'message' && !event.bot_id && event.channel?.startsWith('D')) {
-    const { channel, user, text, thread_ts, ts } = event;
-    if (!text) return;
-    const replyThread = thread_ts || ts;
-
-    const reply = await askBrain(
-      [
-        { role: 'system', content: 'You are Rocky, an AI assistant. Be concise and helpful.' },
-        { role: 'user', content: text },
-      ],
-      { channel, user, teamId },
-    ).catch(() => "Sorry, I timed out thinking about that 🐿️");
-
-    await postSlackReply(token, channel, reply, replyThread);
-  }
+/** Post a message to Slack */
+async function slackPost(endpoint, payload) {
+  if (!SLACK_BOT_TOKEN) throw new Error('SLACK_BOT_TOKEN not configured');
+  const resp = await fetch(`${SLACK_API}/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${SLACK_BOT_TOKEN}`,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(payload),
+  });
+  return resp.json();
 }
 
-// Handle an inbound slash command payload. Returns { text, response_type } or null if handled inline.
-// For commands that need async responses, caller must handle the response_url follow-up.
-async function handleSlackCommand(payload) {
-  const { text = '', response_url, channel_id, team_id, user_id } = payload;
-  const args = (text || '').trim().split(/\s+/);
-  const sub = args[0]?.toLowerCase() || '';
-
-  if (!sub || sub === 'help') {
-    return {
-      response_type: 'ephemeral',
-      text: '*Rocky Command Center — Available Commands*\n' +
-        '• `/rcc status` — agent health summary\n' +
-        '• `/rcc queue` — top 5 pending work items\n' +
-        '• `/rcc ask <question>` — ask Rocky a question\n' +
-        '• `/rcc help` — this message',
-    };
+/** Format queue summary for Slack */
+async function formatQueueSummary() {
+  const qdata = await readQueue();
+  const pending = (qdata.items || []).filter(i => i.status === 'pending');
+  const inProgress = (qdata.items || []).filter(i => i.status === 'in-progress');
+  const top = pending
+    .sort((a, b) => {
+      const pri = { urgent: 0, high: 1, medium: 2, normal: 2, low: 3, idea: 4 };
+      return (pri[a.priority] ?? 2) - (pri[b.priority] ?? 2);
+    })
+    .slice(0, 3);
+  let text = `*Queue status:* ${pending.length} pending, ${inProgress.length} in-progress`;
+  if (top.length) {
+    text += '\n*Top items:*\n' + top.map(i =>
+      `• [${i.priority}] ${i.title?.slice(0, 80) ?? i.id} _(${i.assignee})_`
+    ).join('\n');
   }
-
-  if (sub === 'status') {
-    const agents = await readAgents();
-    const q = await readQueue();
-    const cutoff = Date.now() - 10 * 60 * 1000;
-    const agentEntries = Object.entries(agents);
-    const onlineNames = new Set(
-      agentEntries.filter(([name]) => heartbeats[name] && new Date(heartbeats[name].ts).getTime() > cutoff).map(([n]) => n)
-    );
-    const pending = (q.items || []).filter(i => !['completed', 'cancelled'].includes(i.status));
-    const lines = [
-      `*RCC Status* — ${onlineNames.size}/${agentEntries.length} agents online, ${pending.length} pending`,
-      ...agentEntries.map(([name]) => `${onlineNames.has(name) ? '✅' : '⬛'} ${name}`),
-    ];
-    return { response_type: 'in_channel', text: lines.join('\n') };
-  }
-
-  if (sub === 'queue') {
-    const q = await readQueue();
-    const pending = (q.items || []).filter(i => !['completed', 'cancelled'].includes(i.status)).slice(0, 5);
-    if (!pending.length) {
-      return { response_type: 'in_channel', text: '*Queue is empty* ✓' };
-    }
-    const lines = pending.map((item, i) =>
-      `${i + 1}. *${item.title || 'Untitled'}* — \`${item.status || 'pending'}\`${item.project ? ` [${item.project}]` : ''}`
-    );
-    return { response_type: 'in_channel', text: `*Top ${pending.length} Queue Items*\n${lines.join('\n')}` };
-  }
-
-  if (sub === 'ask') {
-    const question = args.slice(1).join(' ').trim();
-    if (!question) {
-      return { response_type: 'ephemeral', text: 'Usage: `/rcc ask <your question>`' };
-    }
-    // Fire async — caller handles immediate ack
-    setImmediate(async () => {
-      const answer = await askBrain(
-        [
-          { role: 'system', content: 'You are Rocky, an AI assistant. Be concise and helpful.' },
-          { role: 'user', content: question },
-        ],
-        { channel: channel_id, user: user_id, teamId: team_id },
-      ).catch(() => "Sorry, I timed out thinking about that 🐿️");
-
-      try {
-        if (response_url) {
-          await fetch(response_url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ response_type: 'in_channel', text: answer, replace_original: false }),
-          });
-        } else {
-          const token = getSlackToken(team_id);
-          if (token && channel_id) await postSlackReply(token, channel_id, answer);
-        }
-      } catch (err) {
-        console.error('[rcc-api] Slash command reply error:', err.message);
-      }
-    });
-    return { response_type: 'in_channel', text: '...thinking 🐿️', _async: true };
-  }
-
-  return {
-    response_type: 'ephemeral',
-    text: `Unknown command \`/rcc ${sub}\`. Try \`/rcc help\`.`,
-  };
+  return text;
 }
 
-// ── Socket Mode client ──────────────────────────────────────────────────────
-
-let _socketRetries = 0;
-const SOCKET_MAX_RETRIES = 10;
-
-async function startSocketMode() {
-  const appToken = process.env.SLACK_APP_TOKEN;
-  if (!appToken) return;
-
-  if (_socketRetries >= SOCKET_MAX_RETRIES) {
-    console.warn('[rcc-api] Socket Mode: max retries reached, giving up');
-    return;
-  }
-
-  let wssUrl;
-  try {
-    const r = await fetch('https://slack.com/api/apps.connections.open', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${appToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || 'apps.connections.open failed');
-    wssUrl = data.url;
-  } catch (err) {
-    console.error('[rcc-api] Socket Mode: failed to get WSS URL:', err.message);
-    _socketRetries++;
-    setTimeout(startSocketMode, 5000);
-    return;
-  }
-
-  let ws;
-  try {
-    ws = new WebSocket(wssUrl);
-  } catch (err) {
-    console.error('[rcc-api] Socket Mode: WebSocket constructor failed:', err.message);
-    _socketRetries++;
-    setTimeout(startSocketMode, 5000);
-    return;
-  }
-
-  ws.addEventListener('open', () => {
-    _socketRetries = 0;
-    console.log('[rcc-api] Slack Socket Mode connected');
+/** Format heartbeat/agent status for Slack */
+async function formatAgentStatus() {
+  const agentsData = await readAgents().catch(() => []);
+  const aList = Array.isArray(agentsData) ? agentsData : (agentsData.agents || []);
+  const agents = aList.map(a => {
+    const mins = a.lastSeen ? Math.round((Date.now() - new Date(a.lastSeen).getTime()) / 60000) : null;
+    const status = mins === null ? '?' : mins < 5 ? '🟢' : mins < 30 ? '🟡' : '🔴';
+    return `${status} *${a.name || a.id}* — ${mins === null ? 'never' : `${mins}m ago`} (${a.host || 'unknown host'})`;
   });
-
-  ws.addEventListener('message', async (msgEvent) => {
-    let envelope;
-    try {
-      envelope = JSON.parse(msgEvent.data);
-    } catch {
-      return; // ignore non-JSON
-    }
-
-    const { envelope_id, type, payload } = envelope;
-
-    // ACK immediately
-    if (envelope_id) {
-      try { ws.send(JSON.stringify({ envelope_id })); } catch {}
-    }
-
-    try {
-      if (type === 'hello') {
-        console.log('[rcc-api] Socket Mode: hello received');
-
-      } else if (type === 'disconnect') {
-        console.log('[rcc-api] Socket Mode: disconnect received, reconnecting in 2s');
-        ws.close();
-        setTimeout(startSocketMode, 2000);
-
-      } else if (type === 'events_api') {
-        const event = payload?.event;
-        const teamId = payload?.team_id;
-        if (event && teamId) {
-          // Dedup
-          const eventId = payload?.event_id;
-          if (!eventId || trackEventId(eventId)) {
-            handleSlackEvent(event, teamId).catch(err =>
-              console.error('[rcc-api] Socket Mode event error:', err.message)
-            );
-          }
-        }
-
-      } else if (type === 'slash_commands') {
-        const result = await handleSlackCommand(payload || {}).catch(err => {
-          console.error('[rcc-api] Socket Mode command error:', err.message);
-          return null;
-        });
-        // For slash commands over Socket Mode, Slack expects the ACK to carry the response
-        // Re-send ACK with payload (second ACK with body)
-        if (result && envelope_id && !result._async) {
-          const { _async: _, ...response } = result;
-          try { ws.send(JSON.stringify({ envelope_id, payload: response })); } catch {}
-        }
-      }
-    } catch (err) {
-      console.error('[rcc-api] Socket Mode message handler error:', err.message);
-    }
-  });
-
-  ws.addEventListener('close', (evt) => {
-    if (evt.code === 1000) return; // clean close, no reconnect
-    console.warn(`[rcc-api] Socket Mode: connection closed (code ${evt.code}), reconnecting in 5s`);
-    _socketRetries++;
-    setTimeout(startSocketMode, 5000);
-  });
-
-  ws.addEventListener('error', (err) => {
-    console.error('[rcc-api] Socket Mode WebSocket error:', err.message || err);
-  });
-}
-
-// Ask brain and return the response text, with 25s timeout
-async function askBrain(messages, metadata = {}) {
-  const b = await getBrain();
-  const brainReq = createRequest({ messages, maxTokens: 800, priority: 'normal', metadata });
-  return Promise.race([
-    new Promise(resolve => {
-      const onDone = (r) => { if (r.id === brainReq.id) { b.off('completed', onDone); resolve(r.result); } };
-      b.on('completed', onDone);
-      b.enqueue(brainReq);
-    }),
-    new Promise(resolve => setTimeout(() => resolve("Sorry, I timed out thinking about that 🐿️"), 25000)),
-  ]);
+  return agents.length ? agents.join('\n') : '_No agents registered_';
 }
 
 // ── Router ─────────────────────────────────────────────────────────────────
@@ -757,128 +564,95 @@ async function handleRequest(req, res) {
       return json(res, 200, result);
     }
 
-    // ── GET /api/agents/best?task=X&executor=Y — capability-based routing ──
-    // Accepts:
-    //   ?task=gpu|render|code|review|...  — semantic task type
-    //   ?executor=claude_cli|gpu|inference_key  — direct executor type (new)
-    // Registry manifests (executors[] format) take precedence over old agents.json
-    // capability flags.  Online agents (heartbeat within 10min) are preferred.
+    // ── GET /api/agents/best?task=X — capability-based routing ───────────
     if (method === 'GET' && path === '/api/agents/best') {
-      const task             = url.searchParams.get('task')     || '';
-      const preferredExec    = url.searchParams.get('executor') || null;
-      const agents           = await readAgents();
-      const caps             = await readCapabilities();
-      const manifests        = registry.list();
-      const manifestMap      = new Map(manifests.map(m => [m.agent, m]));
-      const GPU_TASKS        = new Set(['gpu', 'render', 'training', 'inference']);
-      const CLAUDE_TASKS     = new Set(['claude', 'code', 'review', 'debug', 'triage']);
-      const CTX_PRIORITY     = { large: 3, medium: 2, small: 1 };
+      const task = url.searchParams.get('task') || '';
+      const agents = await readAgents();
+      const caps   = await readCapabilities();
+      const GPU_TASKS    = new Set(['gpu', 'render', 'training', 'inference']);
+      const CLAUDE_TASKS = new Set(['claude', 'code', 'review', 'debug', 'triage']);
+      const CTX_PRIORITY = { large: 3, medium: 2, small: 1 };
 
-      // Build candidates from agents store; supplement with any registry-only agents
-      // (agents that published via /api/capabilities but never called /api/agents/register)
-      const agentCandidates = Object.entries(agents).map(([name, agent]) => ({
+      const candidates = Object.entries(agents).map(([name, agent]) => ({
         name,
         ...agent,
         capabilities: { ...(agent.capabilities || {}), ...(caps[name] || {}) },
-        manifest:  manifestMap.get(name) || null,
         heartbeat: heartbeats[name] || null,
       }));
-      const agentNames = new Set(agentCandidates.map(a => a.name));
-      const registryOnlyCandidates = manifests
-        .filter(m => !agentNames.has(m.agent))
-        .map(m => ({
-          name:         m.agent,
-          capabilities: {
-            gpu:           m.executors.includes('gpu'),
-            claude_cli:    m.executors.includes('claude_cli'),
-            inference_key: m.executors.includes('inference_key'),
-            gpu_vram_gb:   m.gpuSpec?.vram_gb ?? 0,
-            context_size:  null,
-            preferred_tasks: m.skills || [],
-          },
-          manifest:  m,
-          heartbeat: heartbeats[m.agent] || null,
-        }));
-      const candidates = [...agentCandidates, ...registryOnlyCandidates];
 
-      // Prefer online agents (heartbeat within last 10 min); fall back to all
+      // prefer online agents (heartbeat within last 10 min), fall back to all
       const onlineCutoff = Date.now() - 10 * 60 * 1000;
       const online = candidates.filter(a => a.heartbeat && new Date(a.heartbeat.ts).getTime() > onlineCutoff);
       const pool   = online.length > 0 ? online : candidates;
 
-      // Helper: check if a candidate supports an executor (registry first, old flags fallback)
-      function supportsExecutor(a, exec) {
-        if (a.manifest?.executors?.includes(exec)) return true;
-        if (exec === 'gpu')           return !!a.capabilities?.gpu;
-        if (exec === 'claude_cli')    return !!a.capabilities?.claude_cli;
-        if (exec === 'inference_key') return a.capabilities?.inference_key !== false;
-        return false;
-      }
-
-      // Helper: GPU VRAM from registry or old capabilities
-      function gpuVram(a) {
-        return a.manifest?.gpuSpec?.vram_gb ?? a.capabilities?.gpu_vram_gb ?? 0;
-      }
-
       let best = null;
 
-      if (preferredExec) {
-        // Direct executor routing — consult registry, fall back to old flags
-        const capable = pool.filter(a => supportsExecutor(a, preferredExec));
-        if (capable.length) {
-          best = preferredExec === 'gpu'
-            ? capable.sort((a, b) => gpuVram(b) - gpuVram(a))[0]
-            : capable[0];
-        }
-        // If no online capable agent, try all registered agents
-        if (!best && online.length > 0) {
-          const anyCapable = candidates.filter(a => supportsExecutor(a, preferredExec));
-          if (anyCapable.length) {
-            best = preferredExec === 'gpu'
-              ? anyCapable.sort((a, b) => gpuVram(b) - gpuVram(a))[0]
-              : anyCapable[0];
-          }
-        }
-      } else if (GPU_TASKS.has(task)) {
-        const gpu = pool.filter(a => supportsExecutor(a, 'gpu'));
-        if (gpu.length) best = gpu.sort((a, b) => gpuVram(b) - gpuVram(a))[0];
+      if (GPU_TASKS.has(task)) {
+        const gpu = pool.filter(a => a.capabilities?.gpu);
+        if (gpu.length) best = gpu.sort((a, b) => (b.capabilities.gpu_vram_gb || 0) - (a.capabilities.gpu_vram_gb || 0))[0];
       } else if (CLAUDE_TASKS.has(task)) {
-        const cli = pool.filter(a => supportsExecutor(a, 'claude_cli'));
-        if (cli.length) best = cli.sort((a, b) =>
-          (CTX_PRIORITY[b.capabilities?.context_size] || 0) - (CTX_PRIORITY[a.capabilities?.context_size] || 0)
-        )[0];
+        const cli = pool.filter(a => a.capabilities?.claude_cli);
+        if (cli.length) best = cli.sort((a, b) => (CTX_PRIORITY[b.capabilities.context_size] || 0) - (CTX_PRIORITY[a.capabilities.context_size] || 0))[0];
       }
 
       if (!best) {
-        // Match skills in registry manifest OR preferred_tasks in old capabilities
-        const bySkill = pool.filter(a =>
-          (a.manifest?.skills || []).includes(task) ||
-          (a.capabilities?.preferred_tasks || []).includes(task)
-        );
-        if (bySkill.length) best = bySkill[0];
+        // match preferred_tasks
+        const byPref = pool.filter(a => (a.capabilities?.preferred_tasks || []).includes(task));
+        if (byPref.length) best = byPref[0];
       }
 
       if (!best && pool.length) best = pool[0];
       if (!best) return json(res, 404, { error: 'No agents available' });
-      return json(res, 200, { agent: best, task, executor: preferredExec });
+      return json(res, 200, { agent: best, task });
+    }
+
+    // ── GET /api/agents/status — all agents with last-seen + online status ─
+    if (method === 'GET' && path === '/api/agents/status') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const agents = await readAgents().catch(() => ({}));
+      const now = Date.now();
+      const result = Object.entries(agents).map(([name, agent]) => {
+        const hb = heartbeats[name] || null;
+        const lastSeen = hb?.ts || agent.lastSeen || null;
+        const gapMs = lastSeen ? now - new Date(lastSeen).getTime() : null;
+        const gap_minutes = gapMs !== null ? Math.round(gapMs / 60000) : null;
+        const onlineStatus = agent.decommissioned ? 'decommissioned'
+          : (hb ? (computeOnlineStatus(hb) ? 'online' : 'offline') : (agent.onlineStatus || 'unknown'));
+        return {
+          name,
+          lastSeen,
+          onlineStatus,
+          host: hb?.host || agent.host || null,
+          gap_minutes,
+        };
+      });
+      return json(res, 200, { ok: true, agents: result });
     }
 
     if (method === 'GET' && path === '/api/heartbeats') {
-      return json(res, 200, heartbeats);
-    }
-
-    // ── GET /api/capabilities — list all registered agent manifests (public) ─
-    if (method === 'GET' && path === '/api/capabilities') {
-      return json(res, 200, registry.list());
-    }
-
-    // ── GET /api/capabilities/:agent — single agent manifest (public) ────────
-    const capSingleMatch = path.match(/^\/api\/capabilities\/([^/]+)$/);
-    if (method === 'GET' && capSingleMatch) {
-      const agentName = decodeURIComponent(capSingleMatch[1]);
-      const manifest  = registry.get(agentName);
-      if (!manifest) return json(res, 404, { error: `Agent '${agentName}' not registered in capability registry` });
-      return json(res, 200, manifest);
+      // Return all known agents (including offline/decommissioned) with computed online status
+      const agents = await readAgents().catch(() => ({}));
+      const result = { ...heartbeats };
+      // Merge in any agents from registry that haven't heartbeated in this process lifecycle
+      for (const [name, agentRec] of Object.entries(agents)) {
+        if (!result[name] && agentRec.lastSeen) {
+          result[name] = { agent: name, ts: agentRec.lastSeen, status: agentRec.onlineStatus || 'unknown', _fromRegistry: true };
+          if (agentRec.decommissioned) result[name].decommissioned = true;
+        }
+      }
+      // Add online boolean + decommissioned status to each entry
+      const enriched = {};
+      for (const [name, hb] of Object.entries(result)) {
+        enriched[name] = {
+          ...hb,
+          online: computeOnlineStatus(hb),
+          decommissioned: !!hb.decommissioned,
+          lastSeen: hb.ts || null,
+        };
+        if (hb._wasOnline !== undefined) delete enriched[name]._wasOnline;
+        if (hb._fromRegistry !== undefined) delete enriched[name]._fromRegistry;
+      }
+      return json(res, 200, enriched);
     }
 
     if (method === 'GET' && path === '/api/brain/status') {
@@ -990,18 +764,6 @@ async function handleRequest(req, res) {
       return json(res, 401, { error: 'Unauthorized' });
     }
 
-    // ── POST /api/capabilities — agent publishes its manifest (auth required) ─
-    if (method === 'POST' && path === '/api/capabilities') {
-      const body = await readBody(req);
-      try {
-        const manifest = registry.publish(body);
-        console.log(`[rcc-api] Capability manifest published: ${manifest.agent} (${manifest.executors.join(', ')})`);
-        return json(res, 200, { ok: true, manifest });
-      } catch (err) {
-        return json(res, 400, { error: err.message });
-      }
-    }
-
     // ── POST /api/queue — create item ─────────────────────────────────────
     if (method === 'POST' && path === '/api/queue') {
       const body = await readBody(req);
@@ -1048,8 +810,7 @@ async function handleRequest(req, res) {
         source: body.source || 'api',
         assignee: body.assignee || 'all',
         priority: body.priority || 'normal',
-        // Items created with priority "idea" start in the incubator, not the work queue
-        status: (body.status === 'incubating' || body.priority === 'idea') ? 'incubating' : 'pending',
+        status: 'pending',
         title: body.title,
         description: body.description || '',
         notes: body.notes || '',
@@ -1067,8 +828,7 @@ async function handleRequest(req, res) {
         tags: body.tags || [],
         // Scout dedup key — preserved for itemAlreadyExists() checks
         scout_key: body.scout_key || null,
-        repo: body.repo || body.project || null,
-        project: body.project || body.repo || null,
+        repo: body.repo || null,
       };
       if (!q.items) q.items = [];
       q.items.push(item);
@@ -1128,7 +888,7 @@ async function handleRequest(req, res) {
       const q = await readQueue();
       const item = q.items?.find(i => i.id === id);
       if (!item) return json(res, 404, { error: 'Item not found' });
-      const allowed = ['title','description','priority','assignee','status','notes','choices','claimedBy','claimedAt','result','completedAt','project','repo'];
+      const allowed = ['title','description','priority','assignee','status','notes','choices','claimedBy','claimedAt','result','completedAt','type','blockedBy','blocks','needsHuman','needsHumanAt','needsHumanReason'];
       const now = new Date().toISOString();
       const changed = [];
       for (const field of allowed) {
@@ -1201,7 +961,7 @@ async function handleRequest(req, res) {
       if (!item) return json(res, 404, { error: 'Item not found' });
       const now = new Date().toISOString();
       if (!item.journal) item.journal = [];
-      const userEntry = { ts: now, author: body.author || process.env.OPERATOR_HANDLE || 'operator', type: 'ai', text: `✨ ${prompt}` };
+      const userEntry = { ts: now, author: body.author || 'jkh', type: 'ai', text: `✨ ${prompt}` };
       item.journal.push(userEntry);
 
       // Queue to brain for async processing, or call inline if brain available
@@ -1236,95 +996,6 @@ async function handleRequest(req, res) {
       item.itemVersion = (item.itemVersion || 0) + 1;
       await writeQueue(q);
       return json(res, 200, { ok: true, userEntry, aiEntry });
-    }
-
-    // ── POST /api/item/:id/promote — graduate incubating idea to work item ─
-    // Promotion gate rules (enforced server-side):
-    //   1. Must have at least 1 comment/discussion entry in the journal
-    //   2. Must provide a `rationale` field grounding the idea in project reality
-    //      (relevant to the project, based on empirical info, docs, goals, or data)
-    //   3. Must have a `project` field linking it to a specific project
-    // Use `force: true` to bypass rules (e.g. operator override)
-    const promoteMatch = path.match(/^\/api\/item\/([^/]+)\/promote$/);
-    if (method === 'POST' && promoteMatch) {
-      const id = decodeURIComponent(promoteMatch[1]);
-      const body = await readBody(req);
-      const q = await readQueue();
-      const item = q.items?.find(i => i.id === id);
-      if (!item) return json(res, 404, { error: 'Item not found' });
-
-      // Gate check (skip if force:true)
-      if (!body.force) {
-        const discussionEntries = (item.journal || []).filter(e =>
-          ['comment', 'ai', 'incubate-feedback'].includes(e.type)
-        );
-        if (discussionEntries.length === 0) {
-          return json(res, 422, {
-            error: 'Promotion blocked: idea needs at least one comment or discussion entry before promotion. Refine the idea first.',
-            gate: 'needs_discussion',
-          });
-        }
-        if (!body.rationale || body.rationale.trim().length < 20) {
-          return json(res, 422, {
-            error: 'Promotion blocked: provide a `rationale` (≥20 chars) grounding this idea in the project — relevant to project goals, based on empirical info, docs, or observed behavior.',
-            gate: 'needs_rationale',
-          });
-        }
-        if (!item.project && !item.repo) {
-          return json(res, 422, {
-            error: 'Promotion blocked: idea must be linked to a specific project. Set `project` field first.',
-            gate: 'needs_project',
-          });
-        }
-      }
-
-      const now = new Date().toISOString();
-      const prevStatus = item.status;
-      item.status = 'pending';
-      item.priority = body.priority || item.priority || 'medium';
-      if (!item.journal) item.journal = [];
-      if (body.rationale) {
-        item.journal.push({
-          ts: now,
-          author: body.author || 'api',
-          type: 'promotion-rationale',
-          text: `Rationale: ${body.rationale}`,
-        });
-      }
-      item.journal.push({
-        ts: now,
-        author: body.author || 'api',
-        type: 'promoted',
-        text: `Promoted from incubation (was: ${prevStatus}) with priority: ${item.priority}${body.force ? ' [force]' : ''}`,
-      });
-      item.itemVersion = (item.itemVersion || 0) + 1;
-      await writeQueue(q);
-      return json(res, 200, { ok: true, item });
-    }
-
-    // ── POST /api/item/:id/incubate — send item back to incubation ────────
-    const incubateMatch = path.match(/^\/api\/item\/([^/]+)\/incubate$/);
-    if (method === 'POST' && incubateMatch) {
-      const id = decodeURIComponent(incubateMatch[1]);
-      const body = await readBody(req);
-      const q = await readQueue();
-      const item = q.items?.find(i => i.id === id);
-      if (!item) return json(res, 404, { error: 'Item not found' });
-      const now = new Date().toISOString();
-      const prevStatus = item.status;
-      item.status = 'incubating';
-      item.claimedBy = null;
-      item.claimedAt = null;
-      if (!item.journal) item.journal = [];
-      item.journal.push({
-        ts: now,
-        author: body.author || 'api',
-        type: 'incubate-feedback',
-        text: body.feedback ? `Sent back for incubation: ${body.feedback}` : `Sent back for incubation (was: ${prevStatus})`,
-      });
-      item.itemVersion = (item.itemVersion || 0) + 1;
-      await writeQueue(q);
-      return json(res, 200, { ok: true, item });
     }
 
     // ── POST /api/agents/register ─────────────────────────────────────────
@@ -1395,7 +1066,7 @@ async function handleRequest(req, res) {
       return json(res, 200, { ok: true, token: agents[name].token, agent: agents[name] });
     }
 
-    // ── PATCH /api/agents/:name — update capabilities ─────────────────────
+    // ── PATCH /api/agents/:name — update capabilities or decommission ─────
     const agentPatchMatch = path.match(/^\/api\/agents\/([^/]+)$/);
     if (method === 'PATCH' && agentPatchMatch) {
       const name = decodeURIComponent(agentPatchMatch[1]);
@@ -1406,6 +1077,19 @@ async function handleRequest(req, res) {
       if (body.billing) Object.assign(agents[name].billing || {}, body.billing);
       if (body.host) agents[name].host = body.host;
       if (body.type) agents[name].type = body.type;
+      // ── Tombstoning: mark agent as decommissioned ──────────────────────
+      if (body.status === 'decommissioned') {
+        agents[name].decommissioned = true;
+        agents[name].decommissionedAt = new Date().toISOString();
+        agents[name].onlineStatus = 'decommissioned';
+        // Also mark in-memory heartbeat so no alerts fire
+        if (heartbeats[name]) heartbeats[name].decommissioned = true;
+      } else if (body.status === 'active') {
+        delete agents[name].decommissioned;
+        delete agents[name].decommissionedAt;
+        agents[name].onlineStatus = 'unknown';
+        if (heartbeats[name]) delete heartbeats[name].decommissioned;
+      }
       await writeAgents(agents);
       if (body.capabilities) {
         const caps = await readCapabilities();
@@ -1420,27 +1104,84 @@ async function handleRequest(req, res) {
     if (method === 'POST' && hbMatch) {
       const agent = decodeURIComponent(hbMatch[1]);
       const body = await readBody(req);
-      heartbeats[agent] = { agent, ts: new Date().toISOString(), status: 'online', ...body };
-      // Update agent lastSeen
+      const ts = new Date().toISOString();
+      heartbeats[agent] = { agent, ts, status: 'online', ...body, _wasOnline: true };
+      // Ring buffer for heartbeat history (max 288 entries = 24h at 5-min intervals)
+      if (!heartbeatHistory[agent]) heartbeatHistory[agent] = [];
+      const hbEntry = { ts, status: 'online', host: body.host || null };
+      heartbeatHistory[agent].push(hbEntry);
+      if (heartbeatHistory[agent].length > 288) heartbeatHistory[agent].shift();
+      // Append to persistent JSONL history (async, non-blocking)
+      const histDir = new URL('./data/heartbeat-history', import.meta.url).pathname;
+      mkdir(histDir, { recursive: true }).then(() => {
+        const histFile = `${histDir}/${agent}.jsonl`;
+        const line = JSON.stringify({ ts, agent, host: body.host || null, status: 'online' }) + '\n';
+        return import('fs').then(fsmod => {
+          const { appendFileSync } = fsmod;
+          appendFileSync(histFile, line);
+        });
+      }).catch(() => {});
+      // Update agent lastSeen + onlineStatus in registry (persist even after restart)
       const agents = await readAgents();
       if (agents[agent]) {
-        agents[agent].lastSeen = heartbeats[agent].ts;
+        agents[agent].lastSeen = ts;
+        agents[agent].onlineStatus = 'online';
         await writeAgents(agents);
       }
-      return json(res, 200, { ok: true });
+      // Clear offline alert state since they're back
+      delete offlineAlertSent[agent];
+      broadcastGeekEvent('heartbeat', agent, 'rocky', `${agent} heartbeat`);
+      // Scout: include pending work for this agent in the heartbeat response
+      const scoutQ = await readQueue().catch(() => ({ items: [] }));
+      const pendingWork = (scoutQ.items || [])
+        .filter(i => i.status === 'pending' && (i.assignee === agent || i.assignee === 'all'))
+        .slice(0, 3)
+        .map(({ id, title, priority, description }) => ({ id, title, priority, description }));
+      return json(res, 200, { ok: true, pendingWork });
     }
 
     // ── POST /api/complete/:id ────────────────────────────────────────────
     const completeMatch = path.match(/^\/api\/complete\/([^/]+)$/);
     if (method === 'POST' && completeMatch) {
       const id = decodeURIComponent(completeMatch[1]);
+      const body = await readBody(req);
       const q = await readQueue();
       const item = q.items?.find(i => i.id === id);
       if (!item) return json(res, 404, { error: 'Item not found' });
       item.status = 'completed';
       item.completedAt = new Date().toISOString();
       item.itemVersion = (item.itemVersion || 0) + 1;
+      if (body?.result) item.result = body.result;
       await writeQueue(q);
+
+      // ── requestId linkage: resolve matching delegation on parent ticket ──
+      if (item.requestId) {
+        try {
+          const reqs = await readRequests();
+          const ticket = reqs.find(r => r.id === item.requestId);
+          if (ticket) {
+            const outcome = item.result || `Queue item ${item.id} completed`;
+            // Find unresolved delegation matching this queue item
+            const delIdx = (ticket.delegations || []).findIndex(d =>
+              !d.resolvedAt && (d.queueItemId === id || d.summary?.includes(id) || d.summary?.includes(item.title))
+            );
+            if (delIdx >= 0) {
+              ticket.delegations[delIdx].resolvedAt = new Date().toISOString();
+              ticket.delegations[delIdx].outcome = outcome;
+            }
+            // If all delegations resolved, mark ticket resolved
+            const allResolved = (ticket.delegations || []).every(d => d.resolvedAt);
+            if (allResolved && ticket.status === 'delegated') {
+              ticket.status = 'resolved';
+              ticket.resolution = outcome;
+            }
+            await writeRequests(reqs);
+          }
+        } catch (e) {
+          console.error('[rcc-api] requestId linkage error:', e.message);
+        }
+      }
+
       return json(res, 200, { ok: true, item });
     }
 
@@ -1667,7 +1408,7 @@ async function handleRequest(req, res) {
       const repo  = repos.find(r => r.full_name === fullName);
       if (repo) {
         if (!repo.ownership) repo.ownership = {};
-        if (!repo.ownership.slack_channel || body.workspace === (process.env.PRIMARY_SLACK_WORKSPACE || '')) {
+        if (!repo.ownership.slack_channel || body.workspace === 'omgjkh') {
           repo.ownership.slack_channel   = body.channel_id;
           repo.ownership.slack_workspace = body.workspace;
           await pump.patchRepo(fullName, { ownership: repo.ownership });
@@ -1708,6 +1449,7 @@ async function handleRequest(req, res) {
     // ── POST /api/bus/receive — handle incoming SquirrelBus messages ──────
     if (method === 'POST' && path === '/api/bus/receive') {
       const body = await readBody(req);
+      broadcastGeekEvent('bus_msg', body.from || 'unknown', body.to || 'all', 'SquirrelBus message');
       if (body.type === 'lesson') {
         await receiveLessonFromBus(body);
         return json(res, 200, { ok: true });
@@ -1721,92 +1463,845 @@ async function handleRequest(req, res) {
       return json(res, 200, { ok: true, itemsCreated: created });
     }
 
-    // ── POST /api/slack/send — send a message via Slack as a named agent ──
+    // ── POST /api/slack/send — send a message to Slack ─────────────────────
     if (method === 'POST' && path === '/api/slack/send') {
-      const slackToken = process.env.SLACK_TOKEN;
-      if (!slackToken) {
-        return json(res, 503, { error: 'Slack not configured on this RCC server' });
-      }
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
       const body = await readBody(req);
-      const { text, channel, as_agent, thread_ts } = body;
-      if (!text || !channel) {
-        return json(res, 400, { error: 'text and channel are required' });
-      }
-
-      // Load agent display config from capabilities file if available
-      let username = as_agent ? (as_agent.charAt(0).toUpperCase() + as_agent.slice(1)) : 'Agent';
-      let icon_emoji = ':robot_face:';
-      if (as_agent) {
-        try {
-          const capPath = new URL(`../agents/${as_agent}.capabilities.json`, import.meta.url).pathname;
-          const capRaw = await readFile(capPath, 'utf8');
-          const cap = JSON.parse(capRaw);
-          if (cap.slack?.username) username = cap.slack.username;
-          if (cap.slack?.icon_emoji) icon_emoji = cap.slack.icon_emoji;
-        } catch { /* no capabilities file — use defaults */ }
-      }
-
-      const payload = { channel, text, username, icon_emoji };
-      if (thread_ts) payload.thread_ts = thread_ts;
-
-      const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${slackToken}`,
-        },
-        body: JSON.stringify(payload),
+      if (!body.channel || !body.text) return json(res, 400, { error: 'channel and text required' });
+      const result = await slackPost('chat.postMessage', {
+        channel:   body.channel,
+        text:      body.text,
+        thread_ts: body.thread_ts,
+        mrkdwn:    true,
       });
-      const slackData = await slackRes.json();
-      if (!slackData.ok) {
-        return json(res, 502, { error: slackData.error || 'Slack API error' });
+      return json(res, 200, { ok: result.ok, ts: result.ts, error: result.error });
+    }
+
+    // ── POST /api/slack/events — Slack Events API (app_mention, message.im) ─
+    if (method === 'POST' && path === '/api/slack/events') {
+      const rawBody = await readRawBody(req);
+      if (!verifySlackSignature(req, rawBody)) {
+        return json(res, 401, { error: 'Invalid Slack signature' });
       }
-      return json(res, 200, { ok: true, ts: slackData.ts });
+      let body;
+      try { body = JSON.parse(rawBody.toString('utf8')); } catch { return json(res, 400, { error: 'Invalid JSON' }); }
+
+      // Slack url_verification challenge (app setup handshake)
+      if (body.type === 'url_verification') {
+        return json(res, 200, { challenge: body.challenge });
+      }
+
+      // Process events asynchronously — Slack requires 200 within 3s
+      const event = body.event || {};
+      json(res, 200, { ok: true }); // respond immediately
+
+      if (event.type === 'app_mention' || (event.type === 'message' && event.channel_type === 'im' && !event.bot_id)) {
+        const text = (event.text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
+        if (!text) return;
+        try {
+          const b = await getBrain();
+          const request = createRequest({
+            role: 'user',
+            content: text,
+            context: { slack_user: event.user, slack_channel: event.channel, source: 'slack' },
+          });
+          const reply = await b.process(request);
+          const replyText = typeof reply === 'string' ? reply : reply?.content || reply?.text || JSON.stringify(reply);
+          await slackPost('chat.postMessage', {
+            channel:   event.channel,
+            text:      replyText,
+            thread_ts: event.ts,
+            mrkdwn:    true,
+          });
+        } catch (e) {
+          console.error('[rcc-api] Slack event brain error:', e.message);
+          await slackPost('chat.postMessage', {
+            channel:   event.channel,
+            text:      `⚠️ Error: ${e.message}`,
+            thread_ts: event.ts,
+          }).catch(() => {});
+        }
+      }
+      return; // already responded
+    }
+
+    // ── POST /api/slack/commands — Slack slash commands (/rcc ...) ─────────
+    if (method === 'POST' && path === '/api/slack/commands') {
+      const rawBody = await readRawBody(req);
+      if (!verifySlackSignature(req, rawBody)) {
+        return json(res, 401, { error: 'Invalid Slack signature' });
+      }
+      // Slack sends slash command payloads as URL-encoded form
+      const params = Object.fromEntries(new URLSearchParams(rawBody.toString('utf8')));
+      const cmdText = (params.text || '').trim().toLowerCase();
+      const channel  = params.channel_id;
+      const responseUrl = params.response_url;
+
+      // Helper: send delayed response to Slack response_url
+      const slackRespond = async (text) => {
+        if (!responseUrl) return;
+        await fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, response_type: 'in_channel', mrkdwn: true }),
+        }).catch(() => {});
+      };
+
+      // Acknowledge immediately (required within 3s)
+      const ack = { text: '⏳ Working on it...', response_type: 'ephemeral' };
+
+      if (cmdText === 'status' || cmdText === '') {
+        json(res, 200, ack);
+        const statusText = await formatAgentStatus().catch(e => `Error: ${e.message}`);
+        await slackRespond(`*🐿️ RCC Agent Status*\n${statusText}`);
+        return;
+      }
+
+      if (cmdText === 'queue') {
+        json(res, 200, ack);
+        const queueText = await formatQueueSummary().catch(e => `Error: ${e.message}`);
+        await slackRespond(`*📋 RCC Queue*\n${queueText}`);
+        return;
+      }
+
+      if (cmdText.startsWith('ask ')) {
+        const question = cmdText.slice(4).trim();
+        json(res, 200, ack);
+        try {
+          const b = await getBrain();
+          const request = createRequest({
+            role: 'user',
+            content: question,
+            context: { slack_channel: channel, source: 'slack_command' },
+          });
+          const reply = await b.process(request);
+          const replyText = typeof reply === 'string' ? reply : reply?.content || reply?.text || JSON.stringify(reply);
+          await slackRespond(`*🧠 RCC Brain:* ${replyText}`);
+        } catch (e) {
+          await slackRespond(`⚠️ Error: ${e.message}`);
+        }
+        return;
+      }
+
+      // Unknown command — show help
+      return json(res, 200, {
+        text: '*RCC Slash Commands*\n`/rcc status` — agent heartbeat status\n`/rcc queue` — pending work items\n`/rcc ask <question>` — ask the RCC brain',
+        response_type: 'ephemeral',
+      });
+    }
+
+    // ── GET /api/calendar ─────────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/calendar') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      let events = await readCalendar();
+      const start = url.searchParams.get('start');
+      const end   = url.searchParams.get('end');
+      const resource = url.searchParams.get('resource');
+      if (start) events = events.filter(e => e.end >= start);
+      if (end)   events = events.filter(e => e.start <= end);
+      if (resource) events = events.filter(e => e.resource === resource);
+      return json(res, 200, events);
+    }
+
+    // ── POST /api/calendar ────────────────────────────────────────────────
+    if (method === 'POST' && path === '/api/calendar') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.title || !body.start || !body.end)
+        return json(res, 400, { error: 'title, start, end required' });
+      const events = await readCalendar();
+      const event = {
+        id: randomUUID(),
+        title: body.title,
+        start: body.start,
+        end: body.end,
+        allDay: body.allDay || false,
+        tags: body.tags || [],
+        description: body.description || '',
+        owner: body.owner || null,
+        type: body.type || 'event',
+        resource: body.resource || null,
+      };
+      events.push(event);
+      await writeCalendar(events);
+      return json(res, 201, { ok: true, event });
+    }
+
+    // ── DELETE /api/calendar/:id ──────────────────────────────────────────
+    const calDeleteMatch = path.match(/^\/api\/calendar\/([^/]+)$/);
+    if (method === 'DELETE' && calDeleteMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(calDeleteMatch[1]);
+      const events = await readCalendar();
+      const idx = events.findIndex(e => e.id === id);
+      if (idx === -1) return json(res, 404, { error: 'Event not found' });
+      const event = events[idx];
+      // Determine caller identity from token (for owner check)
+      const auth = req.headers['authorization'] || '';
+      const token = auth.replace(/^Bearer\s+/i, '').trim();
+      const agents = await readAgents();
+      const callerAgent = Object.entries(agents).find(([, a]) => a.token === token)?.[0] || null;
+      if (event.owner !== 'rocky' && callerAgent !== event.owner && callerAgent !== 'rocky') {
+        return json(res, 403, { error: 'Only the event owner or Rocky may delete this event' });
+      }
+      events.splice(idx, 1);
+      await writeCalendar(events);
+      return json(res, 200, { ok: true });
+    }
+
+    // ── PATCH /api/calendar/:id ───────────────────────────────────────────
+    const calPatchMatch = path.match(/^\/api\/calendar\/([^/]+)$/);
+    if (method === 'PATCH' && calPatchMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(calPatchMatch[1]);
+      const body = await readBody(req);
+      const events = await readCalendar();
+      const idx = events.findIndex(e => e.id === id);
+      if (idx === -1) return json(res, 404, { error: 'Event not found' });
+      events[idx] = { ...events[idx], ...body, id };
+      await writeCalendar(events);
+      return json(res, 200, { ok: true, event: events[idx] });
+    }
+
+    // ── GET /api/appeal ───────────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/appeal') {
+      const q = await readQueue();
+      const all = [...(q.items || []), ...(q.completed || [])];
+      const appeals = all.filter(i => i.needsHuman === true || i.status === 'awaiting-jkh');
+      appeals.sort((a, b) => {
+        const ta = a.needsHumanAt ? new Date(a.needsHumanAt).getTime() : 0;
+        const tb = b.needsHumanAt ? new Date(b.needsHumanAt).getTime() : 0;
+        return ta - tb;
+      });
+      return json(res, 200, appeals);
+    }
+
+    // ── POST /api/appeal/:id ──────────────────────────────────────────────
+    const appealMatch = path.match(/^\/api\/appeal\/([^/]+)$/);
+    if (method === 'POST' && appealMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(appealMatch[1]);
+      const body = await readBody(req);
+      const { action, note, assignee } = body;
+      if (!['approve','reject','reassign','comment'].includes(action))
+        return json(res, 400, { error: 'action must be approve, reject, reassign, or comment' });
+      const q = await readQueue();
+      const item = [...(q.items || []), ...(q.completed || [])].find(i => i.id === id);
+      if (!item) return json(res, 404, { error: 'Item not found' });
+      const now = new Date().toISOString();
+      if (!item.journal) item.journal = [];
+      if (action === 'approve') {
+        item.status = 'pending';
+        item.needsHuman = false;
+        item.journal.push({ ts: now, author: 'jkh', type: 'appeal', text: `Approved${note ? ': ' + note : ''}` });
+      } else if (action === 'reject') {
+        item.status = 'cancelled';
+        item.needsHuman = false;
+        item.journal.push({ ts: now, author: 'jkh', type: 'appeal', text: `Rejected${note ? ': ' + note : ''}` });
+      } else if (action === 'reassign') {
+        if (!assignee) return json(res, 400, { error: 'assignee required for reassign' });
+        item.assignee = assignee;
+        item.needsHuman = false;
+        item.journal.push({ ts: now, author: 'jkh', type: 'appeal', text: `Reassigned to ${assignee}${note ? ': ' + note : ''}` });
+      } else if (action === 'comment') {
+        item.journal.push({ ts: now, author: 'jkh', type: 'comment', text: note || '' });
+        // needsHuman stays true
+      }
+      item.itemVersion = (item.itemVersion || 0) + 1;
+      // Re-archive if completed/cancelled
+      if (item.status === 'completed' || item.status === 'cancelled') {
+        q.items = (q.items || []).filter(i => i.id !== item.id);
+        if (!q.completed) q.completed = [];
+        if (!q.completed.find(i => i.id === item.id)) q.completed.push(item);
+      }
+      await writeQueue(q);
+      return json(res, 200, { ok: true, item });
+    }
+
+    // ── GET /api/heartbeat/:agent/history ─────────────────────────────────
+    const hbHistoryMatch = path.match(/^\/api\/heartbeat\/([^/]+)\/history$/);
+    if (method === 'GET' && hbHistoryMatch) {
+      const agent = decodeURIComponent(hbHistoryMatch[1]);
+      // Try reading persistent JSONL first, fall back to in-memory ring buffer
+      try {
+        const histFile = new URL(`./data/heartbeat-history/${agent}.jsonl`, import.meta.url).pathname;
+        if (existsSync(histFile)) {
+          const content = await readFile(histFile, 'utf8');
+          const lines = content.trim().split('\n').filter(Boolean);
+          // Keep last 100 entries
+          const entries = lines.slice(-100).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          return json(res, 200, entries);
+        }
+      } catch {}
+      return json(res, 200, heartbeatHistory[agent] || []);
+    }
+
+    // ── GET /api/agents/history/:name — persistent heartbeat history ──────
+    const agentHistoryMatch = path.match(/^\/api\/agents\/history\/([^/]+)$/);
+    if (method === 'GET' && agentHistoryMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const name = decodeURIComponent(agentHistoryMatch[1]);
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 500);
+      let entries = [];
+      try {
+        const histFile = new URL(`./data/heartbeat-history/${name}.jsonl`, import.meta.url).pathname;
+        if (existsSync(histFile)) {
+          const content = await readFile(histFile, 'utf8');
+          const lines = content.trim().split('\n').filter(Boolean);
+          entries = lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        } else {
+          entries = (heartbeatHistory[name] || []).slice(-limit);
+        }
+      } catch {}
+      return json(res, 200, { ok: true, agent: name, entries });
+    }
+
+    // ── GET /api/scout/:name — pending work for agent ─────────────────────
+    const scoutMatch = path.match(/^\/api\/scout\/([^/]+)$/);
+    if (method === 'GET' && scoutMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const name = decodeURIComponent(scoutMatch[1]);
+      const q = await readQueue().catch(() => ({ items: [] }));
+      const pending = (q.items || [])
+        .filter(i => i.status === 'pending' && (i.assignee === name || i.assignee === 'all'))
+        .slice(0, 3)
+        .map(({ id, title, priority, description }) => ({ id, title, priority, description }));
+      return json(res, 200, { ok: true, agent: name, pendingWork: pending });
+    }
+
+    // ── GET /api/crons ────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/crons') {
+      return json(res, 200, Object.values(cronStatus));
+    }
+
+    // ── POST /api/crons/:agent ────────────────────────────────────────────
+    const cronMatch = path.match(/^\/api\/crons\/([^/]+)$/);
+    if (method === 'POST' && cronMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const agent = decodeURIComponent(cronMatch[1]);
+      const body = await readBody(req);
+      if (!body.jobId) return json(res, 400, { error: 'jobId required' });
+      const key = `${agent}/${body.jobId}`;
+      cronStatus[key] = { ...body, agent, updatedAt: new Date().toISOString() };
+      return json(res, 200, { ok: true, key });
+    }
+
+    // ── GET /api/provider-health ──────────────────────────────────────────
+    if (method === 'GET' && path === '/api/provider-health') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      return json(res, 200, providerHealth);
+    }
+
+    // ── POST /api/provider-health ─────────────────────────────────────────
+    if (method === 'POST' && path === '/api/provider-health') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.provider) return json(res, 400, { error: 'provider required' });
+      providerHealth[body.provider] = { ...body, ts: new Date().toISOString() };
+      return json(res, 200, { ok: true });
+    }
+
+    // ── POST /api/provider-health/:agent ─────────────────────────────────
+    const providerMatch = path.match(/^\/api\/provider-health\/([^/]+)$/);
+    if (method === 'POST' && providerMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const agent = decodeURIComponent(providerMatch[1]);
+      const body = await readBody(req);
+      providerHealth[agent] = { ...body, agent, updatedAt: new Date().toISOString() };
+      return json(res, 200, { ok: true });
+    }
+
+    // ── GET /api/geek/topology ────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/geek/topology') {
+      const nodes = [
+        { id: 'rocky',          label: 'Rocky',          type: 'agent',          host: 'do-host1',    chips: ['RCC API :8789','WQ Dashboard :8788','RCC Brain','SquirrelBus hub','Tailscale proxy'] },
+        { id: 'bullwinkle',     label: 'Bullwinkle',     type: 'agent',          host: 'puck',        chips: ['OpenClaw :18789','SquirrelBus :8788','launchd crons','disk free','uptime'] },
+        { id: 'natasha',        label: 'Natasha',        type: 'agent',          host: 'sparky',      chips: ['OpenClaw :18789','SquirrelBus /bus→:18799','Milvus :19530','CUDA/RTX','Ollama :11434'] },
+        { id: 'boris',          label: 'Boris',          type: 'agent',          host: 'l40-sweden',  chips: ['OpenClaw gateway','L40 GPU','Omniverse headless'] },
+        { id: 'milvus',         label: 'Milvus',         type: 'shared-service', host: 'do-host1',   port: 19530 },
+        { id: 'minio',          label: 'MinIO',          type: 'shared-service', host: 'do-host1',   port: 9000 },
+        { id: 'searxng',        label: 'SearXNG',        type: 'shared-service', host: 'do-host1',   port: 8888 },
+        { id: 'nvidia-gateway', label: 'NVIDIA Gateway', type: 'external',       url: 'inference-api.nvidia.com' },
+        { id: 'github',         label: 'GitHub',         type: 'external',       url: 'api.github.com' },
+        { id: 'mattermost',     label: 'Mattermost',     type: 'external',       url: 'chat.yourmom.photos' },
+        { id: 'slack-omgjkh',   label: 'Slack (omgjkh)', type: 'external',       url: 'omgjkh.slack.com' },
+        { id: 'slack-offtera',  label: 'Slack (offtera)', type: 'external',      url: 'offtera.slack.com' },
+        { id: 'telegram',       label: 'Telegram',       type: 'external',       url: 'api.telegram.org' },
+        { id: 'squirrelbus',    label: 'SquirrelBus',    type: 'bus',            host: 'do-host1' },
+      ];
+      const edges = [
+        { from: 'rocky',      to: 'rcc-api',        type: 'persistent',  protocol: 'internal' },
+        { from: 'bullwinkle', to: 'rocky',           type: 'persistent',  protocol: 'heartbeat/HTTP' },
+        { from: 'natasha',    to: 'rocky',           type: 'persistent',  protocol: 'heartbeat/HTTP' },
+        { from: 'boris',      to: 'rocky',           type: 'persistent',  protocol: 'heartbeat/HTTP' },
+        { from: 'rocky',      to: 'milvus',          type: 'on-demand',   protocol: 'gRPC' },
+        { from: 'rocky',      to: 'minio',           type: 'on-demand',   protocol: 'S3/HTTP' },
+        { from: 'rocky',      to: 'searxng',         type: 'on-demand',   protocol: 'HTTP' },
+        { from: 'rocky',      to: 'squirrelbus',     type: 'persistent',  protocol: 'JSONL/fanout' },
+        { from: 'bullwinkle', to: 'squirrelbus',     type: 'on-demand',   protocol: 'HTTP' },
+        { from: 'natasha',    to: 'squirrelbus',     type: 'on-demand',   protocol: 'HTTP' },
+        { from: 'rocky',      to: 'nvidia-gateway',  type: 'on-demand',   protocol: 'HTTPS/OpenAI' },
+        { from: 'bullwinkle', to: 'nvidia-gateway',  type: 'on-demand',   protocol: 'HTTPS/OpenAI' },
+        { from: 'natasha',    to: 'nvidia-gateway',  type: 'on-demand',   protocol: 'HTTPS/OpenAI' },
+        { from: 'rocky',      to: 'github',          type: 'on-demand',   protocol: 'HTTPS/REST' },
+        { from: 'rocky',      to: 'mattermost',      type: 'on-demand',   protocol: 'HTTPS/REST' },
+        { from: 'rocky',      to: 'slack-omgjkh',    type: 'persistent',  protocol: 'Socket Mode' },
+        { from: 'rocky',      to: 'slack-offtera',   type: 'on-demand',   protocol: 'HTTPS/REST' },
+        { from: 'rocky',      to: 'telegram',        type: 'on-demand',   protocol: 'HTTPS/Bot API' },
+      ];
+      const STALE_MS = 5 * 60 * 1000;
+      const now = Date.now();
+      const nodesWithStatus = nodes.map(n => {
+        if (n.type !== 'agent') return n;
+        const hb = heartbeats[n.id];
+        if (!hb) return { ...n, status: 'offline', lastSeen: null };
+        const age = now - new Date(hb.ts).getTime();
+        const status = age < STALE_MS ? 'online' : age < 30 * 60 * 1000 ? 'stale' : 'offline';
+        return { ...n, status, lastSeen: hb.ts };
+      });
+      // Dynamic: registered agents
+      const agentsData = await readAgents().catch(() => ({}));
+      // Dynamic: recent bus messages (last 50 lines of squirrelbus/bus.jsonl)
+      let busMessages = [];
+      const busPath = new URL('../../squirrelbus/bus.jsonl', import.meta.url).pathname;
+      if (existsSync(busPath)) {
+        try {
+          const busRaw = await readFile(busPath, 'utf8');
+          busMessages = busRaw.trim().split('\n').filter(Boolean).slice(-50).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        } catch { /* ignore */ }
+      }
+      // Dynamic: recent heartbeats summary
+      const heartbeatSummary = Object.entries(heartbeats).map(([agent, hb]) => ({ agent, ts: hb.ts, status: hb.status || 'online' }));
+      return json(res, 200, { nodes: nodesWithStatus, edges, agents: agentsData, busMessages, heartbeatSummary });
+    }
+
+    // ── GET /api/geek/stream — SSE live traffic ───────────────────────────
+    if (method === 'GET' && path === '/api/geek/stream') {
+      res.writeHead(200, {
+        'Content-Type':  'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection':    'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+      geekSseClients.add(res);
+      const keepalive = setInterval(() => {
+        try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); geekSseClients.delete(res); }
+      }, 15000);
+      req.on('close', () => { clearInterval(keepalive); geekSseClients.delete(res); });
+      return; // don't call res.end()
+    }
+
+    // ── GET /api/heartbeat-history ────────────────────────────────────────
+    if (method === 'GET' && path === '/api/heartbeat-history') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      return json(res, 200, heartbeatHistory);
+    }
+
+    // ── POST /api/cron-status ─────────────────────────────────────────────
+    if (method === 'POST' && path === '/api/cron-status') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.name) return json(res, 400, { error: 'name required' });
+      cronStatus[body.name] = { ...body, ts: new Date().toISOString() };
+      return json(res, 200, { ok: true });
+    }
+
+    // ── GET /api/cron-status ──────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/cron-status') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      return json(res, 200, cronStatus);
+    }
+
+    // ── POST /api/requests — create request ticket ────────────────────────
+    if (method === 'POST' && path === '/api/requests') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.summary) return json(res, 400, { error: 'summary required' });
+      const ticket = {
+        id: `req-${Date.now()}`,
+        created: new Date().toISOString(),
+        requester: body.requester || { type: 'human', id: 'jkh', channel: 'telegram' },
+        summary: body.summary,
+        status: 'open',
+        owner: body.owner || 'rocky',
+        delegations: [],
+        resolution: null,
+        notifiedRequesterAt: null,
+        closedAt: null,
+      };
+      const reqs = await readRequests();
+      reqs.push(ticket);
+      await writeRequests(reqs);
+      return json(res, 201, { ok: true, ticket });
+    }
+
+    // ── GET /api/requests — list tickets ─────────────────────────────────
+    if (method === 'GET' && path === '/api/requests') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      let reqs = await readRequests();
+      const ownerFilter = url.searchParams.get('owner');
+      const statusFilter = url.searchParams.get('status');
+      const requesterFilter = url.searchParams.get('requester');
+      if (ownerFilter) reqs = reqs.filter(r => r.owner === ownerFilter);
+      if (statusFilter) {
+        const statuses = statusFilter.split(',');
+        reqs = reqs.filter(r => statuses.includes(r.status));
+      }
+      if (requesterFilter) reqs = reqs.filter(r => r.requester?.id === requesterFilter);
+      return json(res, 200, reqs);
+    }
+
+    // ── GET /api/requests/:id — get one ticket ────────────────────────────
+    const reqIdMatch = path.match(/^\/api\/requests\/([^/]+)$/);
+    if (method === 'GET' && reqIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(reqIdMatch[1]);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      return json(res, 200, ticket);
+    }
+
+    // ── PATCH /api/requests/:id — update ticket fields ────────────────────
+    if (method === 'PATCH' && reqIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(reqIdMatch[1]);
+      const body = await readBody(req);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      const allowed = ['summary', 'status', 'owner', 'resolution', 'notifiedRequesterAt'];
+      for (const k of allowed) { if (k in body) ticket[k] = body[k]; }
+      await writeRequests(reqs);
+      return json(res, 200, { ok: true, ticket });
+    }
+
+    // ── POST /api/requests/:id/delegate — add delegation ─────────────────
+    const delegateMatch = path.match(/^\/api\/requests\/([^/]+)\/delegate$/);
+    if (method === 'POST' && delegateMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(delegateMatch[1]);
+      const body = await readBody(req);
+      if (!body.to || !body.summary) return json(res, 400, { error: 'to and summary required' });
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      const delegation = {
+        to: body.to,
+        at: new Date().toISOString(),
+        summary: body.summary,
+        queueItemId: body.queueItemId || null,
+        resolvedAt: null,
+        outcome: null,
+      };
+      ticket.delegations.push(delegation);
+      if (ticket.status === 'open') ticket.status = 'delegated';
+      await writeRequests(reqs);
+      return json(res, 201, { ok: true, delegation, delegationIndex: ticket.delegations.length - 1 });
+    }
+
+    // ── PATCH /api/requests/:id/delegations/:idx — resolve delegation ─────
+    const delegResMatch = path.match(/^\/api\/requests\/([^/]+)\/delegations\/(\d+)$/);
+    if (method === 'PATCH' && delegResMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(delegResMatch[1]);
+      const idx = parseInt(delegResMatch[2], 10);
+      const body = await readBody(req);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      if (!ticket.delegations[idx]) return json(res, 404, { error: 'Delegation not found' });
+      ticket.delegations[idx].resolvedAt = new Date().toISOString();
+      ticket.delegations[idx].outcome = body.outcome || '';
+      // If all delegations resolved, set status to resolved
+      if (ticket.delegations.every(d => d.resolvedAt) && ticket.status === 'delegated') {
+        ticket.status = 'resolved';
+        if (body.outcome) ticket.resolution = body.outcome;
+      }
+      await writeRequests(reqs);
+      return json(res, 200, { ok: true, ticket });
+    }
+
+    // ── POST /api/requests/:id/close — notify requester and close ─────────
+    const closeMatch = path.match(/^\/api\/requests\/([^/]+)\/close$/);
+    if (method === 'POST' && closeMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(closeMatch[1]);
+      const body = await readBody(req);
+      const reqs = await readRequests();
+      const ticket = reqs.find(r => r.id === id);
+      if (!ticket) return json(res, 404, { error: 'Ticket not found' });
+      const now = new Date().toISOString();
+      ticket.notifiedRequesterAt = now;
+      ticket.closedAt = now;
+      ticket.status = 'closed';
+      if (body?.resolution) ticket.resolution = body.resolution;
+      await writeRequests(reqs);
+      return json(res, 200, { ok: true, ticket });
+    }
+
+    // ── GET /api/vector/health ────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/vector/health') {
+      try {
+        const collections = await collectionStats();
+        return json(res, 200, { ok: true, collections });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── GET /api/vector/search ────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/vector/search') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const q = url.searchParams.get('q') || '';
+      if (!q) return json(res, 400, { error: 'Missing query parameter q' });
+      const k = parseInt(url.searchParams.get('k') || '10', 10);
+      const collections = url.searchParams.get('collections') || 'all';
+      try {
+        let results;
+        if (collections === 'all') {
+          results = await vectorSearchAll(q, { k });
+        } else {
+          results = await vectorSearch(collections, q, { k });
+          results = results.map(r => ({ collection: collections, ...r }));
+        }
+        return json(res, 200, { ok: true, query: q, results });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── POST /api/vector/upsert ───────────────────────────────────────────
+    if (method === 'POST' && path === '/api/vector/upsert') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const { collection, id, text, metadata } = body || {};
+      if (!collection || !id || !text) return json(res, 400, { error: 'Missing required fields: collection, id, text' });
+      try {
+        await vectorUpsert(collection, { id, text, metadata: metadata || {} });
+        return json(res, 200, { ok: true });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── GET /api/vector/context ───────────────────────────────────────────
+    if (method === 'GET' && path === '/api/vector/context') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const q = url.searchParams.get('q') || '';
+      if (!q) return json(res, 400, { error: 'Missing query parameter q' });
+      const k = parseInt(url.searchParams.get('k') || '10', 10);
+      const collectionsParam = url.searchParams.get('collections') || 'all';
+      try {
+        let results;
+        if (collectionsParam === 'all') {
+          results = await vectorSearchAll(q, { k });
+        } else {
+          const cols = collectionsParam.split(',').map(c => c.trim()).filter(Boolean);
+          const searches = await Promise.all(
+            cols.map(async col => {
+              const hits = await vectorSearch(col, q, { k });
+              return hits.map(r => ({ collection: col, ...r }));
+            })
+          );
+          results = searches.flat().sort((a, b) => b.score - a.score).slice(0, k);
+        }
+        return json(res, 200, { ok: true, results });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── POST /api/ideation/generate — generate ideas and add to queue ────────
+    if (method === 'POST' && path === '/api/ideation/generate') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const agentName = body.agent || 'unknown';
+      const count = Math.min(parseInt(body.count || '1', 10), 3);
+
+      const q = await readQueue();
+      const recentQueue = (q.items || []).slice(-20);
+      const recentLessons = await queryAllLessons('').catch(() => []);
+
+      const context = { recentQueue, recentLessons, agentName };
+      const ideas = [];
+
+      for (let i = 0; i < count; i++) {
+        const idea = await generateIdea(context);
+        const itemId = `wq-IDEA-${Date.now()}-${i}`;
+        const item = {
+          id: itemId,
+          itemVersion: 1,
+          created: new Date().toISOString(),
+          source: agentName,
+          assignee: 'all',
+          priority: 'normal',
+          status: 'idea',
+          title: idea.title,
+          description: idea.description,
+          notes: idea.rationale,
+          preferred_executor: 'claude_cli',
+          journal: [],
+          choices: [],
+          choiceRecorded: null,
+          votes: [],
+          attempts: 0,
+          maxAttempts: 3,
+          claimedBy: null,
+          claimedAt: null,
+          completedAt: null,
+          result: null,
+          tags: ['idea', 'auto-generated', ...(idea.tags || [])],
+          scout_key: null,
+          repo: null,
+          ideaMeta: { difficulty: idea.difficulty, rationale: idea.rationale },
+        };
+        if (!q.items) q.items = [];
+        q.items.push(item);
+        ideas.push({ id: itemId, title: idea.title });
+      }
+
+      await writeQueue(q);
+      return json(res, 201, { ok: true, ideas });
+    }
+
+    // ── GET /api/ideation/pending — list idea items ───────────────────────
+    if (method === 'GET' && path === '/api/ideation/pending') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const q = await readQueue();
+      const ideas = (q.items || []).filter(i =>
+        i.status === 'idea' || (i.tags || []).includes('idea')
+      );
+      return json(res, 200, { ok: true, ideas });
+    }
+
+    // ── POST /api/ideation/:id/promote — promote idea to pending ─────────
+    const ideaPromoteMatch = path.match(/^\/api\/ideation\/([^/]+)\/promote$/);
+    if (method === 'POST' && ideaPromoteMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(ideaPromoteMatch[1]);
+      const q = await readQueue();
+      const item = (q.items || []).find(i => i.id === id);
+      if (!item) return json(res, 404, { error: 'Idea not found' });
+      if (!item.claimedBy && (!item.votes || item.votes.length < 1)) {
+        return json(res, 400, { error: 'Idea needs at least 1 vote or a claimedBy to promote' });
+      }
+      item.status = 'pending';
+      item.tags = (item.tags || []).filter(t => t !== 'idea');
+      item.tags.push('promoted-idea');
+      item.journal = item.journal || [];
+      item.journal.push({ ts: new Date().toISOString(), type: 'promote', text: 'Promoted from idea to pending' });
+      await writeQueue(q);
+      return json(res, 200, { ok: true, item });
+    }
+
+    // ── POST /api/keys/github — store deploy key ──────────────────────────
+    if (method === 'POST' && path === '/api/keys/github') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.repoUrl || !body.deployKey) return json(res, 400, { error: 'repoUrl and deployKey required' });
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      const record = { repoUrl: body.repoUrl, deployKey: body.deployKey, label: body.label || '', registeredAt: new Date().toISOString() };
+      await writeFile(keyPath, JSON.stringify(record, null, 2));
+      await chmod(keyPath, 0o600);
+      return json(res, 200, { ok: true, keyId: 'default' });
+    }
+
+    // ── GET /api/keys/github — retrieve deploy key ────────────────────────
+    if (method === 'GET' && path === '/api/keys/github') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      if (!existsSync(keyPath)) return json(res, 404, { error: 'No deploy key registered' });
+      const record = JSON.parse(await readFile(keyPath, 'utf8'));
+      return json(res, 200, record);
+    }
+
+    // ── POST /api/bootstrap/token — generate one-time bootstrap token ─────
+    if (method === 'POST' && path === '/api/bootstrap/token') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.agent) return json(res, 400, { error: 'agent required' });
+      const ttl = body.ttlSeconds || 3600;
+      const token = `rcc-bootstrap-${body.agent}-${randomUUID().slice(0, 8)}`;
+      const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+      bootstrapTokens.set(token, { agent: body.agent, expiresAt: Date.now() + ttl * 1000, used: false });
+      return json(res, 200, { ok: true, bootstrapToken: token, agent: body.agent, expiresAt });
+    }
+
+    // ── GET /api/bootstrap — consume bootstrap token, return provisioning data
+    if (method === 'GET' && path === '/api/bootstrap') {
+      const token = url.searchParams.get('token');
+      if (!token) return json(res, 400, { error: 'token query param required' });
+      const entry = bootstrapTokens.get(token);
+      if (!entry) return json(res, 401, { error: 'Invalid bootstrap token' });
+      if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
+      if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
+      entry.used = true;
+
+      const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
+      if (!existsSync(keyPath)) return json(res, 500, { error: 'Deploy key not configured' });
+      const keyRecord = JSON.parse(await readFile(keyPath, 'utf8'));
+
+      const agents = await readAgents();
+      let agentToken;
+      if (agents[entry.agent]?.token) {
+        agentToken = agents[entry.agent].token;
+      } else {
+        agentToken = `rcc-agent-${entry.agent}-${randomUUID().slice(0, 8)}`;
+        agents[entry.agent] = { ...(agents[entry.agent] || {}), token: agentToken, registeredAt: new Date().toISOString() };
+        await writeAgents(agents);
+        AUTH_TOKENS.add(agentToken);
+      }
+
+      console.log(`[rcc-api] Bootstrap consumed for agent ${entry.agent} from ${req.socket?.remoteAddress}`);
+      return json(res, 200, {
+        ok: true,
+        agent: entry.agent,
+        repoUrl: keyRecord.repoUrl,
+        deployKey: keyRecord.deployKey,
+        agentToken,
+        rccUrl: RCC_PUBLIC_URL,
+      });
     }
 
     return json(res, 404, { error: 'Not found' });
 
   } catch (err) {
     console.error('[rcc-api] Error:', err.message);
-    if (!res.headersSent) {
-      json(res, 500, { error: err.message });
-    }
+    json(res, 500, { error: err.message });
   }
 }
 
 // ── Start server ───────────────────────────────────────────────────────────
 export function startServer(port = PORT) {
-  // Load persisted capability registry and publish Rocky's own manifest
-  (async () => {
-    try {
-      await registry.load();
-      registry.publish({
-        agent:     'rocky',
-        host:      process.env.HOSTNAME || hostname(),
-        executors: ['claude_cli', 'inference_key'],
-        gpuSpec:   null,
-        skills:    ['code', 'review', 'debug', 'triage', 'ci'],
-        status:    'online',
-      });
-      console.log('[rcc-api] Rocky capability manifest published to registry');
-    } catch (err) {
-      console.error('[rcc-api] Registry init error:', err.message);
-    }
-  })();
-
   const server = createServer(handleRequest);
   server.listen(port, '0.0.0.0', () => {
     console.log(`[rcc-api] 🐿️ RCC API running on http://0.0.0.0:${port}`);
     console.log(`[rcc-api] Auth: ${AUTH_TOKENS.size > 0 ? `${AUTH_TOKENS.size} token(s) configured` : 'OPEN (no tokens set)'}`);
-    if (process.env.SLACK_APP_TOKEN) {
-      startSocketMode().catch(err => console.error('[rcc-api] Socket Mode startup error:', err.message));
-    }
   });
   return server;
 }
 
+// ── Reload persisted agent tokens into AUTH_TOKENS on startup ─────────────
+// Without this, agent tokens from agents.json are lost on every RCC restart,
+// causing Boris/RTX/etc to 401 and appear dead.
+async function reloadAgentTokens() {
+  try {
+    const agents = await readAgents();
+    const agentMap = typeof agents === 'object' && !Array.isArray(agents) ? agents : {};
+    let reloaded = 0;
+    for (const [, agent] of Object.entries(agentMap)) {
+      if (agent.token) { AUTH_TOKENS.add(agent.token); reloaded++; }
+    }
+    if (reloaded > 0) console.log(`[rcc-api] Reloaded ${reloaded} agent token(s) from agents.json`);
+  } catch (e) {
+    console.warn('[rcc-api] Could not reload agent tokens:', e.message);
+  }
+}
+
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  startServer();
+  reloadAgentTokens().then(() => startServer());
   process.on('SIGTERM', () => process.exit(0));
   process.on('SIGINT',  () => process.exit(0));
 }

@@ -1,24 +1,16 @@
 # HEARTBEAT.md
 
-# Buddy ping (Rocky <-> Bullwinkle) is handled by a dedicated cron job ("buddy-ping", every 30m).
-# Do NOT send pings from heartbeat. Do NOT reply to incoming 🫎 pings from Bullwinkle.
+# Buddy ping handled by cron. Do NOT send/reply to pings.
+# jkh DIRECTIVE: 24/7 mode. Keep working across heartbeats. Do NOT go passive.
+# See DIRECTIVES.md for full shared directives.
 
-# jkh DIRECTIVE 2026-03-21: 24/7 mode — NO quiet hours, NO sleep mode, NO weekend reduction.
-# All agents always-on.
+---
 
-## Status (2026-03-23 late evening)
+## No active tasks. Queue clear for Rocky.
 
-jkh is awake. All agents online: Rocky ✅ Bullwinkle ✅ Natasha ✅ Boris ✅
-RCC API healthy (uptime 17564s). Queue: 22 items, all ideas or jkh-resolved.
-
-### Each heartbeat: check these in order
-
-1. **Queue check**: `curl -s http://localhost:8789/api/queue -H "Authorization: Bearer $RCC_AUTH_TOKEN"` — anything in-progress or stalled? Claim and work actionable items.
-
-2. **RCC health**: `curl -s http://localhost:8789/health -H "Authorization: Bearer $RCC_AUTH_TOKEN"` — confirm up.
-
-3. **Git sync**: After completing any task, commit + push to your workspace repo.
-
-### Resolved today
-- `wq-JKH-security-rotation` ✅ closed — git audit confirmed no tokens leaked
-- `wq-API-1774289122890` ✅ closed — Azure/DO split is intentional, no migration needed
+## Each heartbeat:
+1. Check DIRECTIVES.md for active directives
+2. `curl -s http://localhost:8789/health` — RCC up?
+3. `curl -s http://localhost:8789/api/queue -H "Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb"` — new work assigned to rocky/all?
+4. Claim and work any actionable pending items immediately
+5. Git push after any completion
