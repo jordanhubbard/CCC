@@ -124,9 +124,9 @@ _secret() { node -e "
   } catch(e) {}
 " <<< "$BOOTSTRAP_JSON" 2>/dev/null || true; }
 
-[[ -z "$NVIDIA_KEY"        ]] && NVIDIA_KEY=$(_secret        "NVIDIA_API_KEY"     "nvidia/api_key")
-[[ -z "$MATTERMOST_TOKEN"  ]] && MATTERMOST_TOKEN=$(_secret  "MATTERMOST_TOKEN"   "mattermost/token")
-[[ -z "$TELEGRAM_TOKEN"    ]] && TELEGRAM_TOKEN=$(_secret    "TELEGRAM_BOT_TOKEN" "telegram/token")
+[[ -z "$NVIDIA_KEY"        ]] && NVIDIA_KEY=$(_secret        "NVIDIA_API_KEY"     "nvidia_api_key")
+[[ -z "$MATTERMOST_TOKEN"  ]] && MATTERMOST_TOKEN=$(_secret  "MATTERMOST_TOKEN"   "mattermost_token")
+[[ -z "$TELEGRAM_TOKEN"    ]] && TELEGRAM_TOKEN=$(_secret    "TELEGRAM_BOT_TOKEN" "telegram_token")
 
 if [[ -n "$NVIDIA_KEY" ]]; then
   success "NVIDIA API key obtained from RCC secrets"
@@ -341,6 +341,8 @@ node -e "
       // Only write flat string values (skip nested objects/alias bundles)
       if (typeof v !== 'string') continue;
       if (SKIP.has(k)) continue;
+      // Skip keys with slashes or other chars invalid in shell env var names
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
       // Remove existing line for this key
       const filtered = lines.filter(l => !l.startsWith(k + '='));
       lines.length = 0; lines.push(...filtered);
