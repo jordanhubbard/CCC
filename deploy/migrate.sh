@@ -27,8 +27,26 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-WORKSPACE="${HOME}/.rcc/workspace"
-ENV_FILE="${HOME}/.rcc/.env"
+# Auto-detect workspace path — support both Rocky's .rcc layout and standard .openclaw layout
+if [[ -d "${HOME}/.openclaw/workspace" ]]; then
+  WORKSPACE="${HOME}/.openclaw/workspace"
+  ENV_FILE="${HOME}/.openclaw/../.rcc/.env"
+  # Prefer .rcc/.env if it exists (Rocky layout), else use .openclaw sibling
+  if [[ -f "${HOME}/.rcc/.env" ]]; then
+    ENV_FILE="${HOME}/.rcc/.env"
+  elif [[ -d "${HOME}/.openclaw" ]]; then
+    # Create .rcc dir alongside .openclaw if needed
+    mkdir -p "${HOME}/.rcc"
+    ENV_FILE="${HOME}/.rcc/.env"
+  fi
+elif [[ -d "${HOME}/.rcc/workspace" ]]; then
+  WORKSPACE="${HOME}/.rcc/workspace"
+  ENV_FILE="${HOME}/.rcc/.env"
+else
+  echo "Error: no workspace found at ~/.openclaw/workspace or ~/.rcc/workspace" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "$ENV_FILE")"
 
 echo "=== migrate.sh — agent: $AGENT ==="
 echo "RCC: $RCC"
