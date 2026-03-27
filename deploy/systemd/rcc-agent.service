@@ -1,0 +1,15 @@
+[Unit]
+Description=RCC Agent Pull Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+EnvironmentFile=%h/.rcc/.env
+ExecStart=/bin/bash %h/.rcc/workspace/deploy/agent-pull.sh
+StandardOutput=append:%h/.rcc/logs/pull.log
+StandardError=append:%h/.rcc/logs/pull.log
+
+[Install]
+WantedBy=multi-user.target

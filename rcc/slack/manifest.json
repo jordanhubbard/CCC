@@ -1,0 +1,51 @@
+{
+  "_comment": "Rocky RCC Slack App Manifest — paste this into api.slack.com/apps when creating the app",
+  "display_information": {
+    "name": "Rocky RCC",
+    "description": "Rocky Command Center — work queue, agent status, and AI brain for the Rocky & Friends agent team",
+    "background_color": "#1a1a2e"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Rocky",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/rcc",
+        "request_url": "https://YOUR_RCC_URL/api/slack/commands",
+        "description": "Rocky Command Center",
+        "usage_hint": "[status | queue | ask <question>]",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "chat:write",
+        "app_mentions:read",
+        "commands",
+        "channels:read",
+        "channels:history",
+        "im:history",
+        "im:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://YOUR_RCC_URL/api/slack/events",
+      "bot_events": [
+        "app_mention",
+        "message.im"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

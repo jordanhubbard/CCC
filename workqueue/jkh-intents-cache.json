@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "lastUpdated": "2026-03-21T11:01:51.320Z",
+  "intents": [
+    {
+      "id": "intent-1774090911319-a6f3eb",
+      "ts": "2026-03-21T11:01:51.319Z",
+      "lastSeen": "2026-03-21T11:01:51.320Z",
+      "seenCount": 1,
+      "agent": "rocky",
+      "channel": "mattermost",
+      "confidence": "low",
+      "phrase": "it would be nice if agents could detect when they are being redundant",
+      "intent": "agents should detect and suppress redundant outputs",
+      "tags": [
+        "infrastructure",
+        "coordination"
+      ],
+      "status": "open",
+      "workqueueId": null,
+      "source_context": "jkh mentioned in passing during workqueue review"
+    }
+  ]
+}

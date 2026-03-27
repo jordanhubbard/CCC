@@ -1,0 +1,18 @@
+{
+  "id": "squirrelbus-receiver",
+  "name": "SquirrelBus Receiver",
+  "description": "Receives SquirrelBus push messages from the hub agent via HTTP and injects them as system events into the agent session.",
+  "version": "1.0.0",
+  "configSchema": {
+    "jsonSchema": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "Bearer token for authenticating incoming push requests. Defaults to env SQUIRRELBUS_TOKEN or 'SQUIRRELBUS_TOKEN_REMOVED'."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,12 +1,91 @@
-# Large binary/render outputs — don't commit these to git
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Sensitive / personal
+memory/
+MEMORY.md
+USER.md
+BOOTSTRAP.md
+openclaw.json
+*.env
+.env.*
+.env
+!deploy/.env.template
+
+# RCC runtime state
+rcc/api/agents.json
+brain-state.json
+rcc/brain/brain-state.json
+
+# Queue state (runtime data, not source)
+workqueue/queue.json
+workqueue/state-*.json
+workqueue/sync-log.jsonl
+memory/heartbeat-state.json
+memory/channel-state.json
+
+# Logs and temp
+*.log
+*.bak
+squirrelbus/bus.jsonl
+crash-reports/
+
+# Build artifacts
+dist/
+.cache/
+
+# Large binary/render outputs — stored in MinIO/Azure instead
 hatchery_frames/
 shanghai_output/frames/
 renders/hf_cache/
+renders/
 models/hf-cache/
 models/embeddings/vectors.npy
 *.mp4
+*.mov
+*.avi
 *.gif
 *.pptx
+*.ppt
+*.key
+*.pdf
+Shanghai_USD/
+shanghai_render*.png
+shanghai_render*.jpg
+preview_v*.jpg
+slide*.jpg
+keyframe_*.jpg
+*.usda
+*.usd
+render_*.py
+build_*.py
 
 # Lock files
 renders/hf_cache/hub/.locks/
+
+# OpenClaw internal state
+.openclaw/
+
+# Scratch/temp
+tmp/
+scratch/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal identity/config files (machine-specific)
+IDENTITY.md
+TOOLS.md
+deck_review_rocky.md
+
+# Work results (historical output, not source)
+workqueue/results/
+
+# Historical proposals (internal design docs)
+workqueue/proposals/
+
+# Internal session files
+suraj_songs.txt
+grievances/

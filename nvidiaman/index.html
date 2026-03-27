@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NVIDIA-MAN: The Chomping</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Arial Black', Arial, sans-serif;
+    color: #76b900;
+    user-select: none;
+  }
+  h1 {
+    font-size: 2em;
+    color: #76b900;
+    text-shadow: 0 0 20px #76b900;
+    margin-bottom: 4px;
+    letter-spacing: 2px;
+  }
+  .subtitle { color: #aaa; font-size: 0.85em; margin-bottom: 10px; }
+  #gameCanvas {
+    border: 3px solid #76b900;
+    box-shadow: 0 0 30px #76b900, 0 0 60px rgba(118,185,0,0.3);
+    display: block;
+    outline: none;
+    cursor: pointer;
+  }
+  #gameCanvas.focused { border-color: #aeff00; }
+  #hud { display: flex; gap: 40px; margin-top: 10px; font-size: 1.1em; }
+  #hud span { color: #76b900; }
+  #hud .label { color: #888; font-size: 0.85em; margin-right: 4px; }
+  .controls { margin-top: 8px; color: #555; font-size: 0.78em; text-align: center; }
+  #focushint { color: #ff4; font-size: 0.82em; margin-top: 6px; display: none; }
+</style>
+</head>
+<body>
+<h1>⬛ NVIDIA-MAN ⬛</h1>
+<div class="subtitle">The Silicon Predator. Engineers beware.</div>
+<canvas id="gameCanvas" tabindex="0"></canvas>
+<div id="hud">
+  <div><span class="label">SCORE</span><span id="score">0</span></div>
+  <div><span class="label">LIVES</span><span id="lives">3</span></div>
+  <div><span class="label">LEVEL</span><span id="level">1</span></div>
+</div>
+<div class="controls">Click the canvas first, then use Arrow Keys to move &nbsp;|&nbsp; Eat all engineers to advance</div>
+<div id="focushint">⚠️ Click the game canvas to enable keyboard control!</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const CELL = 32;
+
+// Focus management
+const focusHint = document.getElementById('focushint');
+canvas.addEventListener('focus', () => {
+  canvas.classList.add('focused');
+  focusHint.style.display = 'none';
+});
+canvas.addEventListener('blur', () => {
+  canvas.classList.remove('focused');
+  focusHint.style.display = 'block';
+});
+canvas.addEventListener('click', () => canvas.focus());
+// Auto-focus on load
+window.addEventListener('load', () => {
+  setTimeout(() => canvas.focus(), 100);
+});
+
+// Maze: 0=open, 1=wall, 2=dot, 3=power pellet
+const MAZE_TEMPLATE = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,1],
+  [1,3,1,1,2,1,1,1,2,1,2,1,1,1,2,1,1,3,1],
+  [1,2,1,1,2,1,1,1,2,1,2,1,1,1,2,1,1,2,1],
+  [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,2,1,2,1,1,1,1,1,2,1,2,1,1,2,1],
+  [1,2,2,2,2,1,2,2,2,1,2,2,2,1,2,2,2,2,1],
+  [1,1,1,1,2,1,1,1,0,1,0,1,1,1,2,1,1,1,1],
+  [1,1,1,1,2,1,0,0,0,0,0,0,0,1,2,1,1,1,1],
+  [1,1,1,1,2,1,0,1,1,0,1,1,0,1,2,1,1,1,1],
+  [0,0,0,0,2,0,0,1,0,0,0,1,0,0,2,0,0,0,0],
+  [1,1,1,1,2,1,0,1,1,1,1,1,0,1,2,1,1,1,1],
+  [1,1,1,1,2,1,0,0,0,0,0,0,0,1,2,1,1,1,1],
+  [1,1,1,1,2,1,0,1,1,1,1,1,0,1,2,1,1,1,1],
+  [1,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,2,1,1,1,2,1,2,1,1,1,2,1,1,2,1],
+  [1,3,2,1,2,2,2,2,2,0,2,2,2,2,2,1,2,3,1],
+  [1,1,2,1,2,1,2,1,1,1,1,1,2,1,2,1,2,1,1],
+  [1,2,2,2,2,1,2,2,2,1,2,2,2,1,2,2,2,2,1],
+  [1,2,1,1,1,1,1,1,2,1,2,1,1,1,1,1,1,2,1],
+  [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+
+const COLS = MAZE_TEMPLATE[0].length;
+const ROWS = MAZE_TEMPLATE.length;
+canvas.width  = COLS * CELL;
+canvas.height = ROWS * CELL;
+
+const ENGINEER_STARTS = [
+  {x:8,  y:9,  color:'#ff6b6b', name:'Rick'},
+  {x:9,  y:9,  color:'#ffd93d', name:'Morty'},
+  {x:10, y:9,  color:'#6bcb77', name:'Lisa'},
+  {x:11, y:9,  color:'#4d96ff', name:'Dave'},
+];
+
+let maze, player, engineers, score, lives, level, gameState, powerTimer;
+let flashMsg = '', flashTimer = 0;
+
+function initMaze() { return MAZE_TEMPLATE.map(r => [...r]); }
+function countDots(m) { return m.flat().filter(c => c===2||c===3).length; }
+
+function initGame() {
+  score = 0; lives = 3; level = 1;
+  gameState = 'waiting';
+  powerTimer = 0;
+  maze = initMaze();
+  initRound();
+  updateHUD();
+}
+
+function initRound() {
+  player = {
+    x: 9, y: 16,
+    dx: 0, dy: 0,
+    nextDx: -1, nextDy: 0,   // start moving left by default
+    px: 9*CELL + CELL/2,
+    py: 16*CELL + CELL/2,
+    mouthOpen: 0,             // 0..1
+    mouthDir: 1,              // opening or closing
+    facing: 'left',
+    speed: 4 + (level-1)*0.4,
+  };
+  engineers = ENGINEER_STARTS.map((e,i) => ({
+    x: e.x, y: e.y,
+    px: e.x*CELL+CELL/2, py: e.y*CELL+CELL/2,
+    color: e.color, name: e.name,
+    dx: (i%2===0?1:-1), dy: 0,
+    scared: false, dead: false,
+    respawnTimer: 0,
+    speed: 2.5 + (level-1)*0.3,
+  }));
+  powerTimer = 0;
+}
+
+function updateHUD() {
+  document.getElementById('score').textContent  = score;
+  document.getElementById('lives').textContent  = lives;
+  document.getElementById('level').textContent  = level;
+}
+
+// ── Drawing helpers ─────────────────────────────────────────────────────────
+
+function drawMaze() {
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const v  = maze[r][c];
+      const cx = c*CELL, cy = r*CELL;
+      // floor
+      ctx.fillStyle = '#000';
+      ctx.fillRect(cx, cy, CELL, CELL);
+
+      if (v===1) {
+        // wall fill
+        ctx.fillStyle = '#1a1a4e';
+        ctx.fillRect(cx, cy, CELL, CELL);
+        // inner border
+        ctx.strokeStyle = '#3a3aaa';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cx+1.5, cy+1.5, CELL-3, CELL-3);
+      } else if (v===2) {
+        // dot
+        ctx.beginPath();
+        ctx.arc(cx+CELL/2, cy+CELL/2, 3.5, 0, Math.PI*2);
+        ctx.fillStyle = '#76b900';
+        ctx.fill();
+      } else if (v===3) {
+        // power pellet — pulsing
+        const pulse = 0.65 + 0.35*Math.sin(Date.now()/220);
+        const pr = 9*pulse;
+        ctx.beginPath();
+        ctx.arc(cx+CELL/2, cy+CELL/2, pr, 0, Math.PI*2);
+        ctx.fillStyle = '#76b900';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx+CELL/2, cy+CELL/2, pr+4, 0, Math.PI*2);
+        ctx.strokeStyle = 'rgba(118,185,0,0.25)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function drawNvidiaMan() {
+  const {px, py, mouthOpen, facing} = player;
+  const r = CELL * 0.46;
+
+  // Mouth gap: 0=closed, 1=fully open (maps to maxGap pixels)
+  const maxGap = r * 1.1; // how far the two halves split apart
+
+  ctx.save();
+  ctx.translate(px, py);
+
+  // Rotate so the "mouth" (gap between halves) faces direction of travel
+  const rotMap = { right: 0, left: Math.PI, up: -Math.PI / 2, down: Math.PI / 2 };
+  ctx.rotate(rotMap[facing] ?? 0);
+
+  // -- NVIDIA "eye / shield" shape -------------------------------------------
+  // The NVIDIA logo icon is roughly: a wide teardrop / shield with a pointed
+  // left side and a rounded right, like a stylised eye or camera lens.
+  // We draw it as two bezier halves that split apart like Pac-Man jaws.
+
+  const gap = mouthOpen * maxGap;   // how far each half moves up/down
+
+  ctx.shadowColor = '#76b900';
+  ctx.shadowBlur  = 12;
+  ctx.fillStyle   = '#76b900';
+
+  // ── Top half (moves up by gap/2) ──────────────────────────────────────────
+  ctx.save();
+  ctx.translate(0, -gap / 2);
+  ctx.beginPath();
+  // Start at left tip
+  ctx.moveTo(-r, 0);
+  // Top curve: sweeps right and upward, ending at the right rounded cap
+  ctx.bezierCurveTo(-r * 0.4, -r * 0.85, r * 0.55, -r * 0.85, r, 0);
+  // Right cap — just the top half arc (0 → -PI = top semicircle going left)
+  ctx.arc(r, 0, 0, 0, 0);   // zero-radius stub — just close back to centre
+  ctx.lineTo(0, 0);
+  ctx.lineTo(-r, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // ── Bottom half (moves down by gap/2) ─────────────────────────────────────
+  ctx.save();
+  ctx.translate(0, gap / 2);
+  ctx.beginPath();
+  ctx.moveTo(-r, 0);
+  ctx.bezierCurveTo(-r * 0.4, r * 0.85, r * 0.55, r * 0.85, r, 0);
+  ctx.lineTo(0, 0);
+  ctx.lineTo(-r, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // ── Right rounded cap (stays fixed, fills in the blunt right edge) ─────────
+  ctx.beginPath();
+  ctx.arc(r, 0, r * 0.18, -Math.PI / 2, Math.PI / 2);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  // ── NVIDIA-style swoosh / pupil inside the eye ─────────────────────────────
+  // Only draw when mostly closed (looks great; disappears cleanly when chomping)
+  if (mouthOpen < 0.4) {
+    const alpha = 1 - mouthOpen / 0.4;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Dark "pupil" — a small ellipse offset toward the right (pointing end)
+    ctx.beginPath();
+    ctx.ellipse(r * 0.12, 0, r * 0.22, r * 0.28, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#000';
+    ctx.fill();
+
+    // Bright highlight dot inside pupil
+    ctx.beginPath();
+    ctx.arc(r * 0.06, -r * 0.08, r * 0.07, 0, Math.PI * 2);
+    ctx.fillStyle = '#76b900';
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function drawEngineer(e) {
+  if (e.dead) return;
+  const r = CELL*0.38;
+  ctx.save();
+  ctx.translate(e.px, e.py);
+
+  if (e.scared) {
+    const flash = (powerTimer < 180) && (Math.floor(Date.now()/150)%2===0);
+    // Ghost body
+    ctx.beginPath();
+    ctx.arc(0, 0, r, Math.PI, 0);
+    // Wavy bottom
+    ctx.lineTo(r, r*0.9);
+    for (let i=4; i>=0; i--) {
+      const wx = -r + (4-i)*(r*0.5);
+      ctx.lineTo(wx, r*0.9 - (i%2===0 ? r*0.25 : 0));
+    }
+    ctx.closePath();
+    ctx.fillStyle = flash ? '#eee' : '#2255ff';
+    ctx.fill();
+    // Eyes
+    ctx.fillStyle = flash ? '#888' : '#fff';
+    ctx.beginPath(); ctx.arc(-r*0.28, -r*0.05, r*0.14, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( r*0.28, -r*0.05, r*0.14, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = flash ? '#444' : '#00f';
+    ctx.beginPath(); ctx.arc(-r*0.22, -r*0.05, r*0.07, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( r*0.28, -r*0.05, r*0.07, 0, Math.PI*2); ctx.fill();
+    // Scared wavy mouth
+    ctx.beginPath();
+    ctx.strokeStyle = flash ? '#888' : '#fff';
+    ctx.lineWidth = 2;
+    ctx.moveTo(-r*0.38, r*0.3);
+    for (let i=0;i<=5;i++) ctx.lineTo(-r*0.38+i*r*0.15, r*0.3+(i%2===0?r*0.12:-r*0.12));
+    ctx.stroke();
+  } else {
+    // Hard hat
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.ellipse(0, -r*0.45, r*0.45, r*0.18, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, -r*0.38, r*0.55, r*0.12, 0, Math.PI, 0);
+    ctx.fill();
+
+    // Head
+    ctx.beginPath();
+    ctx.arc(0, -r*0.25, r*0.36, 0, Math.PI*2);
+    ctx.fillStyle = '#ffcc99';
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#333';
+    ctx.beginPath(); ctx.arc(-r*0.12, -r*0.28, r*0.07, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( r*0.12, -r*0.28, r*0.07, 0, Math.PI*2); ctx.fill();
+
+    // Body / vest
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.roundRect(-r*0.3, r*0.05, r*0.6, r*0.65, 4);
+    ctx.fill();
+
+    // Legs
+    ctx.fillStyle = '#334';
+    ctx.fillRect(-r*0.28, r*0.68, r*0.22, r*0.42);
+    ctx.fillRect( r*0.06, r*0.68, r*0.22, r*0.42);
+
+    // Name badge
+    ctx.font = `bold ${Math.round(r*0.26)}px Arial`;
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(e.name, 0, r*0.3);
+  }
+  ctx.restore();
+}
+
+function drawOverlay() {
+  // Big centered message
+  let msg = '', sub = '';
+  if (gameState === 'waiting') {
+    msg = '⬛ NVIDIA-MAN ⬛';
+    sub = 'Click here, then press SPACE or arrow keys to start!';
+  } else if (gameState === 'dead') {
+    msg = '💀 YOU WERE FIRED';
+    sub = 'Press SPACE or arrow key to continue...';
+  } else if (gameState === 'gameover') {
+    msg = 'GAME OVER';
+    sub = `Final Score: ${score} — Press SPACE to restart`;
+  } else if (gameState === 'levelup') {
+    msg = '🎉 LEVEL COMPLETE!';
+    sub = 'Engineers re-hired. Back to work...';
+  }
+
+  if (msg) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 28px Arial Black, Arial';
+    ctx.fillStyle = '#76b900';
+    ctx.shadowColor = '#76b900';
+    ctx.shadowBlur = 16;
+    ctx.fillText(msg, canvas.width/2, canvas.height/2 - 18);
+    ctx.shadowBlur = 0;
+    ctx.font = '15px Arial';
+    ctx.fillStyle = '#ccc';
+    ctx.fillText(sub, canvas.width/2, canvas.height/2 + 18);
+  }
+
+  // Flash message (eat score popup)
+  if (flashTimer > 0) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 20px Arial Black, Arial';
+    ctx.fillStyle = `rgba(255,255,100,${flashTimer/60})`;
+    ctx.fillText(flashMsg, canvas.width/2, canvas.height/2 - 60);
+    flashTimer--;
+  }
+}
+
+// ── Movement ─────────────────────────────────────────────────────────────────
+
+// Tunnel rows: only rows where BOTH edge cells are open (value !== 1)
+function isTunnelRow(y) {
+  if (y < 0 || y >= ROWS) return false;
+  return MAZE_TEMPLATE[y][0] !== 1 && MAZE_TEMPLATE[y][COLS-1] !== 1;
+}
+function canMove(x, y) {
+  if (y < 0 || y >= ROWS) return false;
+  if (x < 0 || x >= COLS) return isTunnelRow(y); // only wrap on true tunnel rows
+  return maze[y][x] !== 1;
+}
+function wrap(x) {
+  if (x < 0) return COLS-1;
+  if (x >= COLS) return 0;
+  return x;
+}
+// canMoveTo: use raw (unwrapped) x to let tunnel-row check fire, then wrap
+function canMoveTo(rawX, y) {
+  if (rawX < 0 || rawX >= COLS) {
+    // Out of bounds — only allowed on tunnel rows
+    if (!isTunnelRow(y)) return false;
+    // Destination after wrap must also be open
+    return maze[y][wrap(rawX)] !== 1;
+  }
+  return canMove(rawX, y);
+}
+
+function updatePlayer(dt) {
+  // Mouth animation — always chomping when moving
+  const isMoving = player.dx !== 0 || player.dy !== 0;
+  if (isMoving) {
+    player.mouthOpen += player.mouthDir * dt * 4.5;
+    if (player.mouthOpen >= 1) { player.mouthOpen = 1; player.mouthDir = -1; }
+    if (player.mouthOpen <= 0) { player.mouthOpen = 0; player.mouthDir =  1; }
+  } else {
+    player.mouthOpen = 0.4; // slightly open while waiting
+  }
+
+  const speed = player.speed * CELL;
+  const tx = player.x * CELL + CELL/2;
+  const ty = player.y * CELL + CELL/2;
+  const dx = tx - player.px;
+  const dy = ty - player.py;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  if (dist > 1) {
+    // Still gliding to cell center
+    const step = Math.min(speed*dt, dist);
+    player.px += (dx/dist)*step;
+    player.py += (dy/dist)*step;
+  } else {
+    player.px = tx;
+    player.py = ty;
+
+    // Arrived at cell — eat
+    const cell = maze[player.y][player.x];
+    if (cell === 2) { maze[player.y][player.x] = 0; score += 10; }
+    else if (cell === 3) {
+      maze[player.y][player.x] = 0; score += 50;
+      powerTimer = 480;
+      engineers.forEach(e => { if (!e.dead) e.scared = true; });
+    }
+
+    // Try queued direction first, else keep going
+    const dirs = [[player.nextDx, player.nextDy], [player.dx, player.dy]];
+    let moved = false;
+    for (const [ndx,ndy] of dirs) {
+      if (ndx===0 && ndy===0) continue;
+      const rawNx = player.x + ndx, ny = player.y + ndy;
+      if (canMoveTo(rawNx, ny)) {
+        const nx = wrap(rawNx);
+        player.dx = ndx; player.dy = ndy;
+        player.x  = nx;  player.y  = ny;
+        // update facing
+        if (ndx===1) player.facing='right';
+        else if (ndx===-1) player.facing='left';
+        else if (ndy===-1) player.facing='up';
+        else if (ndy===1)  player.facing='down';
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) { player.dx = 0; player.dy = 0; }
+
+    if (countDots(maze) === 0) {
+      gameState = 'levelup';
+      setTimeout(() => {
+        level++;
+        maze = initMaze();
+        initRound();
+        gameState = 'playing';
+        updateHUD();
+      }, 2200);
+    }
+  }
+}
+
+function moveEngineer(e) {
+  const dirs = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1}]
+    .filter(d => {
+      if (d.dx===-e.dx && d.dy===-e.dy) return false;
+      const rawNx=e.x+d.dx, ny=e.y+d.dy;
+      if (ny < 0 || ny >= ROWS) return false;
+      return canMoveTo(rawNx, ny);
+    });
+  if (!dirs.length) { e.dx=-e.dx; e.dy=-e.dy; return; }
+
+  let pick;
+  if (e.scared) {
+    // flee
+    pick = dirs.reduce((b,d) => {
+      const dist = Math.hypot(e.x+d.dx-player.x, e.y+d.dy-player.y);
+      return (!b || dist > Math.hypot(e.x+b.dx-player.x, e.y+b.dy-player.y)) ? d : b;
+    }, null);
+  } else {
+    // 72% chase, 28% random
+    if (Math.random()<0.72) {
+      pick = dirs.reduce((b,d) => {
+        const dist = Math.hypot(e.x+d.dx-player.x, e.y+d.dy-player.y);
+        return (!b || dist < Math.hypot(e.x+b.dx-player.x, e.y+b.dy-player.y)) ? d : b;
+      }, null);
+    } else {
+      pick = dirs[Math.floor(Math.random()*dirs.length)];
+    }
+  }
+  if (pick) { e.dx=pick.dx; e.dy=pick.dy; e.x=wrap(e.x+pick.dx); e.y+=pick.dy; }
+}
+
+function updateEngineers(dt) {
+  if (powerTimer > 0) {
+    powerTimer--;
+    if (powerTimer === 0) engineers.forEach(e => { e.scared = false; });
+  }
+
+  engineers.forEach(e => {
+    if (e.dead) { if (--e.respawnTimer <= 0) { respawnEngineer(e); } return; }
+
+    const tx = e.x*CELL+CELL/2, ty = e.y*CELL+CELL/2;
+    const dx = tx-e.px, dy = ty-e.py;
+    const dist = Math.sqrt(dx*dx+dy*dy);
+    const speed = e.speed * CELL;
+
+    if (dist > 1) {
+      const step = Math.min(speed*dt, dist);
+      e.px += (dx/dist)*step;
+      e.py += (dy/dist)*step;
+    } else {
+      e.px = tx; e.py = ty;
+      moveEngineer(e);
+    }
+  });
+}
+
+function respawnEngineer(e) {
+  const i = engineers.indexOf(e);
+  const s = ENGINEER_STARTS[i];
+  e.dead=false; e.scared=false;
+  e.x=s.x; e.y=s.y;
+  e.px=e.x*CELL+CELL/2; e.py=e.y*CELL+CELL/2;
+}
+
+function checkCollisions() {
+  engineers.forEach(e => {
+    if (e.dead) return;
+    if (Math.hypot(e.px-player.px, e.py-player.py) < CELL*0.65) {
+      if (e.scared) {
+        e.dead=true; e.scared=false; e.respawnTimer=300;
+        score += 200;
+        flashMsg = `+200  NOM NOM! ${e.name} devoured!`;
+        flashTimer = 60;
+      } else {
+        lives--;
+        updateHUD();
+        if (lives<=0) {
+          gameState='gameover';
+        } else {
+          gameState='dead';
+        }
+      }
+    }
+  });
+}
+
+// ── Input ────────────────────────────────────────────────────────────────────
+
+const keys = {};
+canvas.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  const dirMap = {
+    ArrowRight: [1,0], ArrowLeft: [-1,0],
+    ArrowUp:    [0,-1], ArrowDown:  [0,1],
+    d:[1,0], a:[-1,0], w:[0,-1], s:[0,1],
+  };
+  if (dirMap[e.key]) {
+    const [ndx,ndy] = dirMap[e.key];
+    player.nextDx=ndx; player.nextDy=ndy;
+    if (gameState==='waiting'||gameState==='dead') {
+      if (gameState==='dead') initRound();
+      gameState='playing';
+    }
+  }
+  if (e.key===' ') {
+    if (gameState==='waiting') { gameState='playing'; }
+    else if (gameState==='dead') { initRound(); gameState='playing'; }
+    else if (gameState==='gameover') { initGame(); gameState='playing'; }
+  }
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+});
+canvas.addEventListener('keyup', e => { keys[e.key]=false; });
+
+// Touch swipe
+let tx0, ty0;
+canvas.addEventListener('touchstart', e => {
+  tx0=e.touches[0].clientX; ty0=e.touches[0].clientY;
+  canvas.focus();
+  e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchend', e => {
+  const dx=e.changedTouches[0].clientX-tx0, dy=e.changedTouches[0].clientY-ty0;
+  if (Math.abs(dx)>Math.abs(dy)) { player.nextDx=dx>0?1:-1; player.nextDy=0; }
+  else { player.nextDy=dy>0?1:-1; player.nextDx=0; }
+  if (gameState==='waiting'||gameState==='dead'||gameState==='gameover') {
+    if (gameState==='gameover') initGame();
+    if (gameState==='dead') initRound();
+    gameState='playing';
+  }
+  e.preventDefault();
+}, {passive:false});
+
+// ── Main Loop ────────────────────────────────────────────────────────────────
+
+let lastTime = 0;
+function gameLoop(ts) {
+  const dt = Math.min((ts-lastTime)/1000, 0.05);
+  lastTime = ts;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawMaze();
+  engineers.forEach(drawEngineer);
+  drawNvidiaMan();
+  drawOverlay();
+
+  if (gameState==='playing') {
+    updatePlayer(dt);
+    updateEngineers(dt);
+    checkCollisions();
+    updateHUD();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+initGame();
+requestAnimationFrame(ts => { lastTime=ts; gameLoop(ts); });
+</script>
+</body>
+</html>

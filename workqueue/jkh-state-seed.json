@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "description": "Shared jkh session state — updated by any agent after significant conversation. Last-write-wins on ts; append context, do not overwrite.",
+  "last_updated_by": "rocky",
+  "last_updated_ts": "2026-03-19T13:30:00Z",
+  "jkh": {
+    "name": "Jordan Hubbard",
+    "handle": "jkh",
+    "telegram_id": "7601676269",
+    "phone": "+18312277540",
+    "timezone": "America/Los_Angeles"
+  },
+  "current_location": "Shanghai, China (moving to Taipei ~2026-03-19 evening CST / afternoon PDT)",
+  "travel_status": {
+    "in_transit": true,
+    "current_city": "Shanghai",
+    "next_city": "Taipei",
+    "eta_taipei": "2026-03-19 evening CST (approx 2026-03-19T10:00Z)",
+    "return_to_us": "~5 days after Taipei arrival",
+    "watch_alert": "If jkh goes silent >24h, notify Tom Pepper (U014G7NCD17 on omgjkh Slack) to check on location"
+  },
+  "last_seen": {
+    "channel": "mattermost",
+    "ts": "2026-03-19T05:58:00Z",
+    "note": "Requested cross-agent jkh state sync (wq-R-001). Confirmed travel status."
+  },
+  "active_topics": [
+    "Shanghai→Taipei travel",
+    "Cross-agent session state sync (this feature)",
+    "Bullwinkle budget cap / HaiMaker billing",
+    "Tom Pepper authorized to direct Rocky in jkh's absence",
+    "Workqueue system — all three agents live",
+    "Agent health dashboard live at Azure Blob",
+    "Blender skill on Sparky — needs `sudo apt-get install -y blender`"
+  ],
+  "open_asks": [
+    {
+      "id": "wq-N-002",
+      "ask": "Run `sudo apt-get install -y blender` on Sparky (100.87.229.125) — needed for Natasha's Blender skill",
+      "from": "natasha",
+      "ts": "2026-03-19T12:37:00Z"
+    },
+    {
+      "id": "bullwinkle-budget",
+      "ask": "Add credits to HaiMaker.ai to bring Bullwinkle back online: https://app.haimaker.ai/?page=billing",
+      "from": "rocky",
+      "ts": "2026-03-18T07:48:00Z",
+      "note": "Bullwinkle offline ~29h as of 06:30 PT 2026-03-19. Primary inference (NVIDIA gateway) may still work; HaiMaker is fallback."
+    }
+  ],
+  "delegated_authority": {
+    "delegate": "Tom Pepper",
+    "slack_id_omgjkh": "U019MEC89LP",
+    "slack_id_offtera": "U014G7NCD17",
+    "channel": "#localnews (C0AH1QJCT7F)",
+    "scope": "Direct Rocky on non-destructive tasks while jkh is traveling",
+    "authorized_ts": "2026-03-18T10:27:00Z"
+  },
+  "recent_context": [
+    {
+      "ts": "2026-03-19T05:43:00Z",
+      "summary": "jkh confirmed still in Shanghai, moving to Taipei next. Set 24h watch alert. Identified cross-agent memory gap as issue to fix. Confirmed calendar data available from U0ALVPQ39A4."
+    },
+    {
+      "ts": "2026-03-18T10:27:00Z",
+      "summary": "jkh authorized Tom Pepper to direct Rocky while away. jkh asked for state sync across offtera Slack DM, console session, omgjkh.slack.com."
+    },
+    {
+      "ts": "2026-03-19T01:58:00Z",
+      "summary": "Workqueue system fully operational across all three agents. MinIO + SearXNG deployed. Agent dashboard live."
+    }
+  ],
+  "agent_awareness": {
+    "rocky": {
+      "host": "do-host1",
+      "status": "online",
+      "note": "Spine of the operation. Independent of jkh's home power."
+    },
+    "bullwinkle": {
+      "host": "puck (Mac, jkh's house)",
+      "status": "possibly_offline",
+      "note": "HaiMaker budget exceeded ~2026-03-18T07:48. Primary NVIDIA gateway may still work. Sync messages sent, no response in ~29h."
+    },
+    "natasha": {
+      "host": "sparky (local GPU box)",
+      "status": "online",
+      "note": "GPU tasks (Whisper, embedding) in progress. Blender skill built, awaiting blender install."
+    }
+  }
+}

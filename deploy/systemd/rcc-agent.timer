@@ -1,0 +1,11 @@
+[Unit]
+Description=RCC Agent Pull Timer (every 10 minutes)
+Requires=rcc-agent.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=rcc-agent.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Tom Pepper: A Life in Code and Fire 🔥</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet"/>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0005;
+    color: #fff;
+    font-family: 'Exo 2', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #canvas-bg {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+  }
+
+  .deck {
+    position: relative;
+    z-index: 10;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .slide {
+    display: none;
+    width: 90vw;
+    max-width: 1100px;
+    min-height: 60vh;
+    padding: 60px;
+    border-radius: 12px;
+    animation: slideIn 0.6s ease-out;
+    position: relative;
+  }
+
+  .slide.active { display: flex; flex-direction: column; justify-content: center; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(40px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Slide themes */
+  .theme-fire {
+    background: linear-gradient(135deg, rgba(20,5,0,0.92) 0%, rgba(60,15,0,0.92) 50%, rgba(100,20,0,0.85) 100%);
+    border: 1px solid rgba(255,100,0,0.4);
+    box-shadow: 0 0 60px rgba(255,80,0,0.3), inset 0 0 80px rgba(255,50,0,0.05);
+  }
+
+  .theme-ember {
+    background: linear-gradient(135deg, rgba(10,0,20,0.92) 0%, rgba(50,10,5,0.92) 100%);
+    border: 1px solid rgba(200,60,0,0.5);
+    box-shadow: 0 0 60px rgba(200,60,0,0.25);
+  }
+
+  .theme-neon {
+    background: linear-gradient(135deg, rgba(0,5,20,0.93) 0%, rgba(5,0,30,0.93) 100%);
+    border: 1px solid rgba(0,200,255,0.4);
+    box-shadow: 0 0 60px rgba(0,150,255,0.2), inset 0 0 60px rgba(0,100,200,0.03);
+  }
+
+  .theme-desert {
+    background: linear-gradient(135deg, rgba(15,5,0,0.93) 0%, rgba(40,20,0,0.93) 100%);
+    border: 1px solid rgba(255,180,0,0.35);
+    box-shadow: 0 0 60px rgba(255,150,0,0.2);
+  }
+
+  .theme-purple {
+    background: linear-gradient(135deg, rgba(10,0,25,0.93) 0%, rgba(25,0,50,0.93) 100%);
+    border: 1px solid rgba(180,0,255,0.4);
+    box-shadow: 0 0 60px rgba(150,0,255,0.25);
+  }
+
+  .theme-aurora {
+    background: linear-gradient(135deg, rgba(0,10,20,0.93) 0%, rgba(0,20,15,0.93) 100%);
+    border: 1px solid rgba(0,255,150,0.35);
+    box-shadow: 0 0 60px rgba(0,200,120,0.2);
+  }
+
+  .slide-num {
+    position: absolute;
+    top: 20px; right: 30px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.75rem;
+    opacity: 0.4;
+    letter-spacing: 2px;
+  }
+
+  h1.title-main {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(2rem, 5vw, 4rem);
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    line-height: 1.1;
+    margin-bottom: 0.3em;
+  }
+
+  h2.slide-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1.4rem, 3vw, 2.4rem);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.8em;
+    text-transform: uppercase;
+  }
+
+  .fire-text {
+    background: linear-gradient(to bottom, #fff8e0 0%, #ffcc00 30%, #ff6600 70%, #cc2200 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .neon-text {
+    color: #00cfff;
+    text-shadow: 0 0 20px rgba(0,200,255,0.8), 0 0 40px rgba(0,150,255,0.5);
+  }
+
+  .purple-text {
+    color: #cc66ff;
+    text-shadow: 0 0 20px rgba(180,0,255,0.8), 0 0 40px rgba(150,0,200,0.5);
+  }
+
+  .gold-text {
+    color: #ffcc00;
+    text-shadow: 0 0 20px rgba(255,200,0,0.6);
+  }
+
+  .green-text {
+    color: #00ff99;
+    text-shadow: 0 0 20px rgba(0,255,150,0.6);
+  }
+
+  .subtitle {
+    font-family: 'Exo 2', sans-serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: clamp(1rem, 2vw, 1.5rem);
+    opacity: 0.8;
+    margin-bottom: 2em;
+  }
+
+  .body-text {
+    font-size: clamp(0.9rem, 1.6vw, 1.2rem);
+    line-height: 1.8;
+    opacity: 0.9;
+    font-weight: 300;
+  }
+
+  .body-text strong {
+    font-weight: 700;
+    color: #ffaa44;
+  }
+
+  ul.facts {
+    list-style: none;
+    margin-top: 1em;
+  }
+
+  ul.facts li {
+    padding: 0.5em 0;
+    padding-left: 1.5em;
+    position: relative;
+    font-size: clamp(0.9rem, 1.5vw, 1.15rem);
+    line-height: 1.7;
+    opacity: 0.9;
+  }
+
+  ul.facts li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: #ff6600;
+  }
+
+  .quote-block {
+    border-left: 3px solid #ff6600;
+    padding-left: 1.5em;
+    margin: 1.5em 0;
+    font-style: italic;
+    font-size: clamp(1rem, 1.8vw, 1.35rem);
+    opacity: 0.95;
+    line-height: 1.6;
+  }
+
+  .year-badge {
+    display: inline-block;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.7rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(255,100,0,0.2);
+    border: 1px solid rgba(255,100,0,0.4);
+    color: #ff8844;
+    letter-spacing: 2px;
+    margin-bottom: 1em;
+    text-transform: uppercase;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2em;
+    margin-top: 1em;
+  }
+
+  .stat-box {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 1.2em 1.5em;
+  }
+
+  .stat-num {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 900;
+    display: block;
+  }
+
+  .stat-label {
+    font-size: 0.8rem;
+    opacity: 0.6;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* Controls */
+  #controls {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  button {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    padding: 10px 22px;
+    border: 1px solid rgba(255,100,0,0.5);
+    background: rgba(20,5,0,0.8);
+    color: #ff8844;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  button:hover {
+    background: rgba(255,80,0,0.2);
+    border-color: #ff6600;
+    box-shadow: 0 0 20px rgba(255,80,0,0.3);
+  }
+
+  button:disabled { opacity: 0.3; cursor: default; }
+
+  #slide-counter {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 2px;
+  }
+
+  #narrate-btn {
+    border-color: rgba(0,200,255,0.4);
+    color: #00cfff;
+  }
+  #narrate-btn:hover {
+    background: rgba(0,150,255,0.15);
+    border-color: #00cfff;
+    box-shadow: 0 0 20px rgba(0,200,255,0.3);
+  }
+  #narrate-btn.active {
+    background: rgba(0,150,255,0.2);
+    border-color: #00cfff;
+    box-shadow: 0 0 30px rgba(0,200,255,0.5);
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas-bg"></canvas>
+
+<div class="deck">
+
+  <!-- SLIDE 1: Title -->
+  <div class="slide theme-fire active" id="slide-1">
+    <div class="slide-num">01 / 09</div>
+    <div class="subtitle">A Rocky Production • DO-Host1 Presents</div>
+    <h1 class="title-main fire-text">Tom Pepper</h1>
+    <h1 class="title-main" style="font-size: clamp(1.2rem, 2.5vw, 2rem); font-weight: 400; letter-spacing: 0.15em; opacity: 0.7; margin-bottom: 0.8em;">A LIFE IN CODE AND FIRE</h1>
+    <div class="subtitle" style="margin-top: 0.5em; margin-bottom: 0;">Co-founder of Nullsoft · Winamp · Gnutella · and the open internet as we know it</div>
+  </div>
+
+  <!-- SLIDE 2: Born -->
+  <div class="slide theme-desert" id="slide-2">
+    <div class="slide-num">02 / 09</div>
+    <div class="year-badge">1975 — Des Moines, Iowa</div>
+    <h2 class="slide-title gold-text">The Spark</h2>
+    <p class="body-text">On <strong>August 24, 1975</strong>, a future digital outlaw was born in Des Moines, Iowa — a city better known for corn than code.</p>
+    <ul class="facts" style="margin-top: 1.5em;">
+      <li>Self-taught programmer, drawn to computers when most kids were riding bikes</li>
+      <li>Found his way to <strong>Sedona, Arizona</strong> — the high-desert mystic capital of the American Southwest</li>
+      <li>In Sedona, he'd meet <strong>Justin Frankel</strong>, another restless genius with bad ideas and worse respect for corporate authority</li>
+      <li>Together, they were about to set the internet on fire</li>
+    </ul>
+  </div>
+
+  <!-- SLIDE 3: Nullsoft -->
+  <div class="slide theme-ember" id="slide-3">
+    <div class="slide-num">03 / 09</div>
+    <div class="year-badge">1997 — Sedona, Arizona</div>
+    <h2 class="slide-title fire-text">Nullsoft</h2>
+    <p class="body-text">Tom Pepper and Justin Frankel co-founded <strong>Nullsoft</strong> — a company name that was pure, distilled trolling aimed directly at <strong>Microsoft</strong>.</p>
+    <div class="quote-block">
+      "Null" as in nothing. "Soft" as in software. Microsoft → Nullsoft.<br/>
+      <span style="font-size: 0.85em; opacity: 0.7;">— The subtlety of two guys in the desert who didn't care what you thought.</span>
+    </div>
+    <ul class="facts">
+      <li>Founded in a house in Sedona with more ambition than funding</li>
+      <li>Their first product would make them legends</li>
+    </ul>
+  </div>
+
+  <!-- SLIDE 4: Winamp -->
+  <div class="slide theme-fire" id="slide-4">
+    <div class="slide-num">04 / 09</div>
+    <div class="year-badge">1997</div>
+    <h2 class="slide-title fire-text">Winamp</h2>
+    <div class="quote-block gold-text" style="font-size: clamp(1.1rem, 2vw, 1.5rem); font-style: normal; font-family: 'Orbitron', sans-serif;">
+      "Winamp, it really whips the llama's ass!"
+    </div>
+    <p class="body-text">Pepper was <strong>essential</strong> to Winamp's success — designing the iconic UI artwork, running the website, and helping shape the product that defined the MP3 era.</p>
+    <div class="two-col" style="margin-top: 1.5em;">
+      <div class="stat-box">
+        <span class="stat-num fire-text">$80M</span>
+        <span class="stat-label">AOL acquisition, May 1999</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-num fire-text">#1</span>
+        <span class="stat-label">Most downloaded Windows app of its era</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: AOL -->
+  <div class="slide theme-neon" id="slide-5">
+    <div class="slide-num">05 / 09</div>
+    <div class="year-badge">May 1999</div>
+    <h2 class="slide-title neon-text">The Velvet Cage</h2>
+    <p class="body-text">AOL bought Nullsoft for <strong>$80 million</strong>. Tom Pepper and Justin Frankel became millionaires. They also became… AOL employees.</p>
+    <ul class="facts">
+      <li>The acquisition looked great on paper. In reality, two anarchists had just been handed a corporate badge.</li>
+      <li>They kept the email addresses. They did not keep the obedience.</li>
+      <li>Pepper took on managing <strong>SHOUTcast</strong>, AOL's streaming audio platform</li>
+      <li>What happened next was completely foreseeable, if you were paying attention</li>
+    </ul>
+  </div>
+
+  <!-- SLIDE 6: Gnutella -->
+  <div class="slide theme-ember" id="slide-6">
+    <div class="slide-num">06 / 09</div>
+    <div class="year-badge">March 14, 2000</div>
+    <h2 class="slide-title fire-text">The Rebel Act: Gnutella</h2>
+    <p class="body-text">While on AOL's payroll, Pepper and Frankel <strong>secretly built and released</strong> Gnutella — the world's first fully decentralized peer-to-peer file sharing network.</p>
+    <div class="quote-block">
+      The name? <strong>GNU</strong> (they planned to GPL it) + <strong>Nutella</strong> (they ate a lot of it). AOL did not find this charming.
+    </div>
+    <ul class="facts">
+      <li>AOL tried to kill it. <strong>Thousands of downloads on day one</strong> said otherwise.</li>
+      <li>Being open-source, they couldn't un-ring the bell. Gnutella spread like wildfire.</li>
+      <li>By 2007, Gnutella had <strong>over 40% of global P2P market share</strong></li>
+      <li>No central server. No kill switch. The RIAA was displeased.</li>
+    </ul>
+  </div>
+
+  <!-- SLIDE 7: SHOUTcast -->
+  <div class="slide theme-purple" id="slide-7">
+    <div class="slide-num">07 / 09</div>
+    <div class="year-badge">1999–2004</div>
+    <h2 class="slide-title purple-text">SHOUTcast & The Stream</h2>
+    <p class="body-text">Pepper managed <strong>SHOUTcast</strong> at AOL — the streaming audio platform that predated Spotify by a decade and gave every bedroom DJ a broadcast station.</p>
+    <ul class="facts">
+      <li>Worked alongside Frankel and Stephen "Tag" Loomis on streaming software development</li>
+      <li>Helped build the infrastructure for internet radio before it was called that</li>
+      <li>Left AOL in <strong>October 2004</strong> — presumably walking out to the Winamp llama sound</li>
+    </ul>
+  </div>
+
+  <!-- SLIDE 8: After Nullsoft -->
+  <div class="slide theme-aurora" id="slide-8">
+    <div class="slide-num">08 / 09</div>
+    <div class="year-badge">2004 – Present</div>
+    <h2 class="slide-title green-text">Life After the Fire</h2>
+    <ul class="facts">
+      <li><strong>RAZZ, Inc.</strong> — continued building things with Frankel</li>
+      <li><strong>Ninjam</strong> — real-time collaborative music jamming software (of course)</li>
+      <li><strong>FarmsReach</strong> — CTO of a local food logistics startup (yes, really)</li>
+      <li><strong>Beats Music</strong> — VP of Operations. Then Apple bought Beats in May 2014.</li>
+      <li><strong>Apple Inc.</strong> — became Senior Manager of Operations. The circle of corporate life.</li>
+    </ul>
+    <p class="body-text" style="margin-top: 1.5em; opacity: 0.7; font-style: italic;">From secret P2P networks to Apple org charts. He got there the interesting way.</p>
+  </div>
+
+  <!-- SLIDE 9: Legacy -->
+  <div class="slide theme-fire" id="slide-9">
+    <div class="slide-num">09 / 09</div>
+    <h2 class="slide-title fire-text">Legacy</h2>
+    <p class="body-text">Tom Pepper helped shape how a generation heard music, shared files, and imagined what the internet could be — <strong>decentralized, open, and slightly chaotic.</strong></p>
+    <div class="quote-block gold-text" style="margin-top: 1.5em;">
+      The internet Tom Pepper helped build wasn't supposed to have a permission slip.
+    </div>
+    <ul class="facts" style="margin-top: 1em;">
+      <li>Co-creator of the MP3 era's defining media player</li>
+      <li>Co-architect of decentralized P2P networking</li>
+      <li>Pioneer of internet radio streaming</li>
+      <li><strong>Audience member tonight:</strong> 🌶️ Tom Pepper himself</li>
+    </ul>
+    <p class="body-text" style="margin-top: 1.5em; font-size: 0.85em; opacity: 0.5; text-align: center;">
+      A Rocky Production • 🐿️ • Built with spite, Orbitron, and the ghost of Winamp
+    </p>
+  </div>
+
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button id="prev-btn" onclick="changeSlide(-1)" disabled>◀ PREV</button>
+  <span id="slide-counter">1 / 9</span>
+  <button id="next-btn" onclick="changeSlide(1)">NEXT ▶</button>
+  <button id="narrate-btn" onclick="toggleNarrate()">🔊 NARRATE</button>
+</div>
+
+<script>
+// ── Fire Particle System ──────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas-bg');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const particles = [];
+const PARTICLE_COUNT = 180;
+
+function randomRange(a, b) { return a + Math.random() * (b - a); }
+
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  particles.push({
+    x: Math.random() * 1,
+    y: Math.random(),
+    size: randomRange(1, 4),
+    speed: randomRange(0.0003, 0.0012),
+    wobble: randomRange(0, Math.PI * 2),
+    wobbleSpeed: randomRange(0.01, 0.03),
+    life: Math.random(),
+    hue: randomRange(0, 40),
+    alpha: randomRange(0.3, 0.9),
+  });
+}
+
+function drawParticles() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Subtle desert gradient bg
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, 'rgba(5,0,10,1)');
+  bg.addColorStop(0.6, 'rgba(15,5,0,1)');
+  bg.addColorStop(1, 'rgba(30,10,0,1)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Ember glow at bottom
+  const glow = ctx.createRadialGradient(W/2, H, 0, W/2, H, W * 0.7);
+  glow.addColorStop(0, 'rgba(200,60,0,0.15)');
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  for (const p of particles) {
+    p.life += p.speed;
+    if (p.life > 1) {
+      p.life = 0;
+      p.x = Math.random();
+      p.hue = randomRange(0, 40);
+      p.size = randomRange(1, 4);
+    }
+    p.wobble += p.wobbleSpeed;
+
+    const px = (p.x + Math.sin(p.wobble) * 0.03) * W;
+    const py = (1 - p.life) * H;
+    const alpha = p.alpha * Math.sin(p.life * Math.PI);
+    const size = p.size * (1 - p.life * 0.5);
+
+    // Particle glow
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, size * 3);
+    const brightness = Math.floor(60 + p.life * 40);
+    grad.addColorStop(0, `hsla(${p.hue}, 100%, ${brightness}%, ${alpha})`);
+    grad.addColorStop(1, `hsla(${p.hue}, 100%, 30%, 0)`);
+
+    ctx.beginPath();
+    ctx.arc(px, py, size * 3, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+// ── Slide Navigation ─────────────────────────────────────────────────────────
+let current = 1;
+const TOTAL = 9;
+
+function changeSlide(dir) {
+  const next = current + dir;
+  if (next < 1 || next > TOTAL) return;
+  document.getElementById(`slide-${current}`).classList.remove('active');
+  current = next;
+  document.getElementById(`slide-${current}`).classList.add('active');
+  document.getElementById('slide-counter').textContent = `${current} / ${TOTAL}`;
+  document.getElementById('prev-btn').disabled = current === 1;
+  document.getElementById('next-btn').disabled = current === TOTAL;
+  if (isNarrating) speakCurrentSlide();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') changeSlide(1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   changeSlide(-1);
+});
+
+// ── Voice Narration ───────────────────────────────────────────────────────────
+const narration = [
+  "Welcome. Tonight we celebrate Tom Pepper — co-creator of Winamp, Gnutella, and the internet as it was meant to be.",
+  "Born August 24th, 1975 in Des Moines, Iowa. He made his way to Sedona, Arizona, where the red rocks and digital anarchy aligned in perfect harmony.",
+  "In 1997, Tom and Justin Frankel founded Nullsoft — named as a direct taunt to Microsoft. Two guys in the desert with laptops and a grudge.",
+  "Winamp. It really whips the llama's ass. Pepper designed the artwork, ran the website, and helped build the media player that defined a generation's relationship with music.",
+  "Then in 1999, AOL bought Nullsoft for eighty million dollars. Tom became a millionaire. He also became, technically, an AOL employee. This did not go as planned.",
+  "March 14th, 2000. While on AOL's payroll, Tom and Justin secretly released Gnutella — the world's first fully decentralized peer-to-peer network. GNU plus Nutella, because they ate a lot of it. AOL was not amused. The internet was already downloading.",
+  "Tom also ran SHOUTcast — the streaming audio platform that gave every bedroom DJ a broadcast station, a decade before Spotify. He left AOL in 2004, presumably to the llama sound.",
+  "After Nullsoft: RAZZ, Ninjam, FarmsReach, Beats Music, and finally Apple — where he became Senior Manager of Operations after the 2014 acquisition. From P2P outlaw to Cupertino. He got there the interesting way.",
+  "Legacy. Tom Pepper helped build the internet that wasn't supposed to ask permission. Decentralized. Open. A little chaotic. And tonight, he's in the audience. Tom — this one's for you."
+];
+
+let isNarrating = false;
+let utterance = null;
+
+function toggleNarrate() {
+  if (isNarrating) {
+    isNarrating = false;
+    window.speechSynthesis.cancel();
+    document.getElementById('narrate-btn').classList.remove('active');
+    document.getElementById('narrate-btn').textContent = '🔊 NARRATE';
+  } else {
+    isNarrating = true;
+    document.getElementById('narrate-btn').classList.add('active');
+    document.getElementById('narrate-btn').textContent = '⏹ STOP';
+    speakCurrentSlide();
+  }
+}
+
+function speakCurrentSlide() {
+  window.speechSynthesis.cancel();
+  if (!isNarrating) return;
+  const text = narration[current - 1];
+  utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.9;
+  utterance.pitch = 1.0;
+
+  // Pick a decent voice if available
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v => v.name.includes('Google') && v.lang === 'en-US')
+    || voices.find(v => v.lang === 'en-US')
+    || voices[0];
+  if (preferred) utterance.voice = preferred;
+
+  utterance.onend = () => {
+    if (isNarrating && current < TOTAL) {
+      setTimeout(() => { changeSlide(1); }, 1200);
+    } else if (current === TOTAL) {
+      isNarrating = false;
+      document.getElementById('narrate-btn').classList.remove('active');
+      document.getElementById('narrate-btn').textContent = '🔊 NARRATE';
+    }
+  };
+  window.speechSynthesis.speak(utterance);
+}
+</script>
+</body>
+</html>
