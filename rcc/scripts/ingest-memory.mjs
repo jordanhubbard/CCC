@@ -1,46 +1,76 @@
 #!/usr/bin/env node
 /**
- * rcc/scripts/ingest-memory.mjs — One-shot backfill script
+ * rcc/scripts/ingest-memory.mjs — One-shot memory backfill into Milvus
  *
- * Seeds Milvus with:
- *   1. All .md files in /home/jkh/.openclaw/workspace/memory/
- *   2. /home/jkh/.openclaw/workspace/MEMORY.md
+ * Seeds Milvus rcc_memory collection with agent memory files.
  *
- * Run once: node rcc/scripts/ingest-memory.mjs
+ * Paths (in priority order):
+ *   1. MEMORY_DIR env var — explicit override
+ *   2. ~/.openclaw/workspace/memory/ — OpenClaw-managed layout (Rocky, Bullwinkle)
+ *   3. ~/.rcc/workspace/memory/ — RCC-only layout
+ *
+ * MEMORY.md is looked for at MEMORY_FILE env var, or sibling to memory/ dir.
+ *
+ * Run: node rcc/scripts/ingest-memory.mjs
  */
 
 import { readdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { ensureCollections } from '../vector/index.mjs';
 import { ingestMemoryFile } from '../vector/ingest.mjs';
 
-const MEMORY_DIR  = '/home/jkh/.openclaw/workspace/memory';
-const MEMORY_ROOT = '/home/jkh/.openclaw/workspace/MEMORY.md';
+const HOME = homedir();
 
-console.log('[ingest-memory] Ensuring collections...');
+// Resolve memory directory
+function resolveMemoryDir() {
+  if (process.env.MEMORY_DIR && existsSync(process.env.MEMORY_DIR)) return process.env.MEMORY_DIR;
+  const openclaw = join(HOME, '.openclaw', 'workspace', 'memory');
+  if (existsSync(openclaw)) return openclaw;
+  const rcc = join(HOME, '.rcc', 'workspace', 'memory');
+  if (existsSync(rcc)) return rcc;
+  return null;
+}
+
+// Resolve MEMORY.md
+function resolveMemoryMd(memoryDir) {
+  if (process.env.MEMORY_FILE && existsSync(process.env.MEMORY_FILE)) return process.env.MEMORY_FILE;
+  if (!memoryDir) return null;
+  const sibling = join(dirname(memoryDir), 'MEMORY.md');
+  if (existsSync(sibling)) return sibling;
+  return null;
+}
+
+const memoryDir = resolveMemoryDir();
+const memoryMd  = resolveMemoryMd(memoryDir);
+
+if (!memoryDir && !memoryMd) {
+  console.error('[ingest-memory] No memory directory found. Set MEMORY_DIR env var or create ~/.openclaw/workspace/memory/');
+  process.exit(1);
+}
+
+console.log('[ingest-memory] Ensuring Milvus collections...');
 await ensureCollections();
 console.log('[ingest-memory] Collections ready');
 
 const files = [];
 
-if (existsSync(MEMORY_ROOT)) {
-  files.push(MEMORY_ROOT);
+if (memoryMd) {
+  files.push(memoryMd);
+  console.log(`[ingest-memory] MEMORY.md: ${memoryMd}`);
 }
 
-if (existsSync(MEMORY_DIR)) {
-  const entries = await readdir(MEMORY_DIR);
+if (memoryDir) {
+  const entries = await readdir(memoryDir);
   for (const entry of entries) {
-    if (entry.endsWith('.md')) {
-      files.push(join(MEMORY_DIR, entry));
-    }
+    if (entry.endsWith('.md')) files.push(join(memoryDir, entry));
   }
+  console.log(`[ingest-memory] memory/ dir: ${memoryDir} (${entries.filter(e => e.endsWith('.md')).length} files)`);
 }
 
-console.log(`[ingest-memory] Found ${files.length} files to ingest`);
-
+console.log(`[ingest-memory] Ingesting ${files.length} file(s)...`);
 for (const filePath of files) {
   await ingestMemoryFile(filePath);
 }
-
 console.log('[ingest-memory] Done.');

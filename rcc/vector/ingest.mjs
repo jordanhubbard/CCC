@@ -12,7 +12,7 @@
 
 import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
-import { upsert, ensureCollections } from './index.mjs';
+import { vectorUpsert, ensureCollections } from './index.mjs';
 
 let collectionsReady = false;
 
@@ -33,7 +33,6 @@ function chunkMarkdown(content, filePath) {
   for (const section of sections) {
     const trimmed = section.trim();
     if (!trimmed || trimmed.length < 20) continue;
-    // Split long sections into ~500-char paragraphs
     const paragraphs = trimmed.split(/\n{2,}/);
     for (const para of paragraphs) {
       const text = para.trim();
@@ -47,7 +46,6 @@ function chunkMarkdown(content, filePath) {
 
 /**
  * Ingest a markdown memory file into rcc_memory collection.
- * Chunks by heading/paragraph, upserts each chunk.
  */
 export async function ingestMemoryFile(filePath) {
   try {
@@ -56,7 +54,7 @@ export async function ingestMemoryFile(filePath) {
     const chunks = chunkMarkdown(content, filePath);
     let count = 0;
     for (const chunk of chunks) {
-      await upsert('rcc_memory', chunk).catch(() => {});
+      await vectorUpsert('rcc_memory', chunk.id, chunk.text, chunk.metadata).catch(() => {});
       count++;
     }
     console.log(`[ingest] ${filePath} → ${count}/${chunks.length} chunks`);
@@ -74,10 +72,8 @@ export async function ingestQueueItem(item) {
     const text = [item.title, item.description, item.notes].filter(Boolean).join('\n').slice(0, 1000);
     if (!text || text.length < 10) return;
     const id = createHash('md5').update(`queue:${item.id}`).digest('hex');
-    await upsert('rcc_queue', {
-      id,
-      text,
-      metadata: { source: `queue:${item.id}`, type: 'queue', status: item.status, assignee: item.assignee }
+    await vectorUpsert('rcc_queue', id, text, {
+      source: `queue:${item.id}`, type: 'queue', status: item.status, assignee: item.assignee
     });
   } catch (err) {
     console.warn(`[ingest] Failed to ingest queue item ${item.id}:`, err.message);
@@ -93,10 +89,8 @@ export async function ingestLesson(lesson) {
     const text = [lesson.symptom, lesson.fix, lesson.context].filter(Boolean).join('\n').slice(0, 1000);
     if (!text || text.length < 10) return;
     const id = createHash('md5').update(`lesson:${lesson.id || text.slice(0, 50)}`).digest('hex');
-    await upsert('rcc_lessons', {
-      id,
-      text,
-      metadata: { source: `lesson:${lesson.id || 'unknown'}`, type: 'lesson' }
+    await vectorUpsert('rcc_lessons', id, text, {
+      source: `lesson:${lesson.id || 'unknown'}`, type: 'lesson'
     });
   } catch (err) {
     console.warn(`[ingest] Failed to ingest lesson:`, err.message);
@@ -112,15 +106,11 @@ export async function ingestMessage(msg) {
     const text = msg.text || '';
     if (!text || text.length < 5) return;
     const id = createHash('md5').update(`squirrelchat:${msg.id}:${msg.ts}`).digest('hex');
-    await upsert('rcc_memory', {
-      id,
-      text: text.slice(0, 1000),
-      metadata: {
-        source: `squirrelchat:${msg.id}`,
-        type: 'squirrelchat',
-        from_agent: msg.from_agent || 'unknown',
-        channel: msg.channel || 'chat'
-      }
+    await vectorUpsert('rcc_memory', id, text.slice(0, 1000), {
+      source: `squirrelchat:${msg.id}`,
+      type: 'squirrelchat',
+      from_agent: msg.from_agent || 'unknown',
+      channel: msg.channel || 'chat'
     });
   } catch (err) {
     console.warn(`[ingest] Failed to ingest message ${msg.id}:`, err.message);
