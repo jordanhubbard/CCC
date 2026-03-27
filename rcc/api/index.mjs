@@ -9,7 +9,7 @@
  */
 
 import { createServer } from 'http';
-import { readFile, writeFile, mkdir, chmod } from 'fs/promises';
+import { readFile, writeFile, mkdir, chmod, appendFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname } from 'path';
 import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
@@ -21,6 +21,7 @@ import { generateIdea } from '../ideation/ideation.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT            = parseInt(process.env.RCC_PORT || '8789', 10);
+const EXEC_LOG_PATH   = process.env.EXEC_LOG_PATH || './data/exec-log.jsonl';
 const QUEUE_PATH      = process.env.QUEUE_PATH    || '../../workqueue/queue.json';
 const AGENTS_PATH        = process.env.AGENTS_PATH        || './agents.json';
 const CAPABILITIES_PATH  = process.env.CAPABILITIES_PATH  || './data/agent-capabilities.json';
@@ -2430,6 +2431,118 @@ async function handleRequest(req, res) {
         rccUrl: RCC_PUBLIC_URL,
         secrets,  // full secrets bundle — agent should write to ~/.rcc/.env
       });
+    }
+
+    // ── POST /api/exec — broadcast exec payload via SquirrelBus (admin only) ──
+    if (method === 'POST' && path === '/api/exec') {
+      if (!isAdminAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body.code) return json(res, 400, { error: 'code required' });
+
+      const SQUIRRELBUS_TOKEN = process.env.SQUIRRELBUS_TOKEN || '';
+      if (!SQUIRRELBUS_TOKEN) return json(res, 500, { error: 'SQUIRRELBUS_TOKEN not configured' });
+
+      // Import signing lib lazily
+      const { signPayload } = await import('../exec/index.mjs');
+
+      const execId = `exec-${randomUUID()}`;
+      const payload = {
+        execId,
+        code:    body.code,
+        target:  body.target  || 'all',
+        replyTo: body.replyTo || null,
+        ts:      new Date().toISOString(),
+      };
+
+      // Sign the payload
+      const sig = signPayload(payload, SQUIRRELBUS_TOKEN);
+      const envelope = { ...payload, sig };
+
+      // Broadcast on SquirrelBus (best-effort)
+      const BUS_URL   = process.env.SQUIRRELBUS_URL || 'http://localhost:8788';
+      const BUS_TOKEN = SQUIRRELBUS_TOKEN;
+      let busSent = false;
+      try {
+        const busResp = await fetch(`${BUS_URL}/bus/send`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${BUS_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from:    'rocky',
+            to:      body.target || 'all',
+            type:    'rcc.exec',
+            subject: `rcc.exec:${execId}`,
+            body:    JSON.stringify(envelope),
+          }),
+        });
+        busSent = busResp.ok;
+      } catch (busErr) {
+        console.warn('[rcc-api] SquirrelBus broadcast failed:', busErr.message);
+      }
+
+      // Persist to exec-log.jsonl
+      const logRecord = {
+        execId,
+        ts:      payload.ts,
+        code:    body.code,
+        target:  payload.target,
+        replyTo: payload.replyTo,
+        results: [],
+        busSent,
+        requestedBy: 'admin',
+      };
+      const logPath = new URL(EXEC_LOG_PATH, import.meta.url).pathname;
+      await mkdir(new URL('./data', import.meta.url).pathname, { recursive: true });
+      await appendFile(logPath, JSON.stringify(logRecord) + '\n', 'utf8');
+
+      return json(res, 200, { ok: true, execId, busSent });
+    }
+
+    // ── GET /api/exec/:id — get exec record + results (agent auth) ────────
+    const execGetMatch = path.match(/^\/api\/exec\/([^/]+)$/);
+    if (method === 'GET' && execGetMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const execId = decodeURIComponent(execGetMatch[1]);
+      const logPath = new URL(EXEC_LOG_PATH, import.meta.url).pathname;
+      if (!existsSync(logPath)) return json(res, 404, { error: 'Exec record not found' });
+      const lines = (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean);
+      const record = lines.map(l => { try { return JSON.parse(l); } catch { return null; } })
+        .filter(Boolean)
+        .find(r => r.execId === execId);
+      if (!record) return json(res, 404, { error: 'Exec record not found' });
+      return json(res, 200, record);
+    }
+
+    // ── POST /api/exec/:id/result — append agent result (agent auth) ──────
+    const execResultMatch = path.match(/^\/api\/exec\/([^/]+)\/result$/);
+    if (method === 'POST' && execResultMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const execId = decodeURIComponent(execResultMatch[1]);
+      const body = await readBody(req);
+      const logPath = new URL(EXEC_LOG_PATH, import.meta.url).pathname;
+      await mkdir(new URL('./data', import.meta.url).pathname, { recursive: true });
+
+      // Read, find, update, rewrite (log is not huge — exec records are admin-only)
+      let records = [];
+      if (existsSync(logPath)) {
+        const lines = (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean);
+        records = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      }
+      const idx = records.findIndex(r => r.execId === execId);
+      if (idx === -1) {
+        // Record not found — create a stub (agent may have restarted)
+        records.push({
+          execId,
+          ts:      new Date().toISOString(),
+          results: [{ ...body, ts: new Date().toISOString() }],
+          stub:    true,
+        });
+      } else {
+        if (!records[idx].results) records[idx].results = [];
+        records[idx].results.push({ ...body, ts: new Date().toISOString() });
+      }
+      await writeFile(logPath, records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+
+      return json(res, 200, { ok: true, execId });
     }
 
     return json(res, 404, { error: 'Not found' });
