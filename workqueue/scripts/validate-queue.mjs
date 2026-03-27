@@ -37,8 +37,8 @@ const ALERTS_PATH = arg('--alerts') || resolve(WORKQUEUE_DIR, 'alerts.jsonl');
 const STRICT = flag('--strict');
 const QUIET = flag('--quiet');
 
-const VALID_PRIORITIES = ['urgent', 'high', 'normal', 'low', 'idea'];
-const VALID_STATUSES = ['pending', 'in_progress', 'completed', 'failed', 'blocked', 'deferred'];
+const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'normal', 'low', 'idea'];
+const VALID_STATUSES = ['pending', 'in_progress', 'in-progress', 'completed', 'failed', 'blocked', 'deferred', 'cancelled', 'closed', 'incubating'];
 const VALID_AGENTS = ['rocky', 'bullwinkle', 'natasha', 'all', 'jkh'];
 const VALID_DIRECTIONS = ['outbound', 'inbound'];
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
@@ -132,6 +132,35 @@ if (Array.isArray(queue.items)) {
 }
 if (Array.isArray(queue.completed)) {
   queue.completed.forEach((item, i) => validateItem(item, 'completed', i));
+}
+
+// ── Cross-array integrity checks ─────────────────────────────────────────────
+
+// Items in completed[] should have status 'completed' or 'failed'.
+// completedAt presence is the truth — status string must agree.
+if (Array.isArray(queue.completed)) {
+  queue.completed.forEach((item, i) => {
+    const p = (f) => `completed[${i}].${f}`;
+    if (isISO(item.completedAt) && item.status !== 'completed' && item.status !== 'failed' &&
+        item.status !== 'cancelled' && item.status !== 'closed') {
+      warn(p('status'),
+        `Item ${item.id} is in completed[] with completedAt=${item.completedAt} but status="${item.status}" — should be completed/failed/cancelled/closed`);
+    }
+    if (!isISO(item.completedAt) && (item.status === 'completed' || item.status === 'failed')) {
+      warn(p('completedAt'),
+        `Item ${item.id} is in completed[] with status="${item.status}" but completedAt is missing or invalid`);
+    }
+  });
+}
+
+// Items in items[] that have completedAt set are probably in the wrong array
+if (Array.isArray(queue.items)) {
+  queue.items.forEach((item, i) => {
+    if (isISO(item.completedAt)) {
+      warn(`items[${i}].completedAt`,
+        `Item ${item.id} is in items[] but has completedAt=${item.completedAt} — should be in completed[]`);
+    }
+  });
 }
 
 // ── SyncLog validation ───────────────────────────────────────────────────────

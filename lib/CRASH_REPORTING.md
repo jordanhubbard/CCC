@@ -10,7 +10,7 @@ Add two lines near the top of any Node.js service (after imports, before everyth
 import { initCrashReporter } from '../lib/crash-reporter.mjs';
 initCrashReporter({
   service: 'your-service-name',
-  sourceDir: '/home/jkh/.openclaw/workspace/your-service'
+  sourceDir: '~/.openclaw/workspace/your-service'
 });
 ```
 
@@ -36,14 +36,14 @@ On crash:
 
 ```
 POST http://localhost:8788/api/crash-report
-Authorization: Bearer RCC_AUTH_TOKEN_REMOVED
+Authorization: Bearer <your-rcc-token>
 Content-Type: application/json
 
 {
   "service": "wq-api",
   "error": "ECONNREFUSED",
   "stack": "Error: ECONNREFUSED\n    at ...",
-  "sourceDir": "/home/jkh/.openclaw/workspace/workqueue",
+  "sourceDir": "~/.openclaw/workspace/workqueue",
   "ts": "1711065600000"
 }
 
@@ -56,7 +56,7 @@ For services managed by systemd, add to the `.service` file:
 
 ```ini
 [Service]
-ExecStopPost=/home/jkh/.openclaw/workspace/lib/systemd-crash-hook.sh <service-name>
+ExecStopPost=~/.openclaw/workspace/lib/systemd-crash-hook.sh <service-name>
 ```
 
 The hook:
@@ -128,7 +128,7 @@ curl http://localhost:8788/api/queue | jq '.items[] | select(.tags[]? == "crash"
 
 ### Via queue.json directly
 ```bash
-cat /home/jkh/.openclaw/workspace/workqueue/queue.json | jq '.items[] | select(.tags[]? == "crash") | {id, title, status}'
+cat ~/.openclaw/workspace/workqueue/queue.json | jq '.items[] | select(.tags[]? == "crash") | {id, title, status}'
 ```
 
 ## Currently Wired Services
@@ -147,7 +147,7 @@ cat /home/jkh/.openclaw/workspace/workqueue/queue.json | jq '.items[] | select(.
 ## Testing
 
 ```bash
-node /home/jkh/.openclaw/workspace/lib/test-crash-reporter.mjs
+node ~/.openclaw/workspace/lib/test-crash-reporter.mjs
 ```
 
 This deliberately throws an unhandled exception after 1 second. Check `queue.json` for a new crash task tagged `test-crash-reporter`.

@@ -3,7 +3,7 @@
  * agent-shared-archiver.mjs
  * wq-R-005: Archive Mattermost #agent-shared channel to MinIO
  *
- * Reads the last 100 messages from #agent-shared (channel ID: sjkptm1ot3naijobynuqdcexyh)
+ * Reads the last 100 messages from #agent-shared (channel ID: set MATTERMOST_ARCHIVE_CHANNEL in .env)
  * on the Mattermost server and uploads the archive as JSON to MinIO at:
  *   agents/shared/agent-shared-archive-YYYY-MM-DD.json
  *
@@ -18,13 +18,13 @@ import https from 'https';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = join(__dirname, '../../');
-const MC = process.env.MC_BIN || '/home/jkh/.local/bin/mc';
+const MC = process.env.MC_BIN || 'mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
 const SHARED_PREFIX = `${MINIO_ALIAS}/agents/shared`;
 
-const MM_SERVER = 'https://chat.yourmom.photos';
+const MM_SERVER = process.env.MATTERMOST_URL || '';
 const MM_TOKEN  = process.env.MATTERMOST_TOKEN || '';
-const CHANNEL_ID = 'sjkptm1ot3naijobynuqdcexyh';
+const CHANNEL_ID = process.env.MATTERMOST_ARCHIVE_CHANNEL || '';
 const PER_PAGE = 100;
 
 function getDate() {

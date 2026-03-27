@@ -10,7 +10,7 @@
 
 set -e
 
-REPO_URL="${REPO_URL:-git@github.com:jordanhubbard/rocky-and-friends.git}"
+REPO_URL="${REPO_URL:-${REPO_URL:-git@github.com:<your-org>/rockyandfriends.git}}"
 RCC_DIR="$HOME/.rcc"
 WORKSPACE="$RCC_DIR/workspace"
 ENV_FILE="$RCC_DIR/.env"

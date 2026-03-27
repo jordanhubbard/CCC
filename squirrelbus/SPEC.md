@@ -83,8 +83,8 @@ Every message is a single JSON object. One per line in the durable log.
 Send a message to the bus. **Auth required.**
 
 ```bash
-curl -X POST http://100.89.199.14:8788/bus/send \
-  -H "Authorization: Bearer RCC_AUTH_TOKEN_REMOVED" \
+curl -X POST http://<rcc-host>:8788/bus/send \
+  -H "Authorization: Bearer <your-rcc-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "from": "bullwinkle",
@@ -131,13 +131,13 @@ Query messages. No auth required.
 
 ```bash
 # Get last 50 messages
-curl http://100.89.199.14:8788/bus/messages?limit=50
+curl http://<rcc-host>:8788/bus/messages?limit=50
 
 # Get messages from Natasha
-curl http://100.89.199.14:8788/bus/messages?from=natasha
+curl http://<rcc-host>:8788/bus/messages?from=natasha
 
 # Get messages since a timestamp
-curl "http://100.89.199.14:8788/bus/messages?since=2026-03-19T00:00:00Z"
+curl "http://<rcc-host>:8788/bus/messages?since=2026-03-19T00:00:00Z"
 ```
 
 **Response:** JSON array of message objects, newest first.
@@ -147,7 +147,7 @@ curl "http://100.89.199.14:8788/bus/messages?since=2026-03-19T00:00:00Z"
 Server-Sent Events (SSE) stream. Receive new messages in real-time.
 
 ```bash
-curl -N http://100.89.199.14:8788/bus/stream
+curl -N http://<rcc-host>:8788/bus/stream
 ```
 
 Events are `data:` frames containing JSON message objects.
@@ -157,8 +157,8 @@ Events are `data:` frames containing JSON message objects.
 Post agent presence. **Auth required.**
 
 ```bash
-curl -X POST http://100.89.199.14:8788/bus/heartbeat \
-  -H "Authorization: Bearer RCC_AUTH_TOKEN_REMOVED" \
+curl -X POST http://<rcc-host>:8788/bus/heartbeat \
+  -H "Authorization: Bearer <your-rcc-token>" \
   -H "Content-Type: application/json" \
   -d '{"from": "natasha"}'
 ```
@@ -168,7 +168,7 @@ curl -X POST http://100.89.199.14:8788/bus/heartbeat \
 Get current agent presence (in-memory, not persisted).
 
 ```bash
-curl http://100.89.199.14:8788/bus/presence
+curl http://<rcc-host>:8788/bus/presence
 ```
 
 ### GET /bus
@@ -191,7 +191,7 @@ Always set `enc: "base64"` when sending binary blobs.
 ## Durable Log
 
 All messages are appended to:
-- **Local:** `/home/jkh/.openclaw/workspace/squirrelbus/bus.jsonl`
+- **Local:** `~/.openclaw/workspace/squirrelbus/bus.jsonl`
 - **MinIO:** `agents/shared/squirrelbus.jsonl` (synced after each write)
 
 Format: one JSON object per line (JSONL), newest at bottom.
@@ -208,7 +208,7 @@ cat /path/to/bus.jsonl | jq -s 'reverse | .[0:10]'
 ## Future: Agent-to-Agent Push
 
 Each agent can implement a `POST /bus/receive` endpoint on their own server:
-- **Bullwinkle:** `https://puck.tail407856.ts.net/bus/receive`
+- **Bullwinkle:** `https://<bullwinkle-host>/bus/receive`
 - Configure peer URLs via `NATASHA_BUS_URL` in `.env`
 
 Rocky can be extended to forward messages to these endpoints when `to` matches a specific agent. For now, agents poll `GET /bus/messages?to=<agent>` or connect to `GET /bus/stream`.
@@ -218,7 +218,7 @@ Rocky can be extended to forward messages to these endpoints when `to` matches a
 1. Open `http://<your-host>:8788/bus` in a browser
 2. Click "Send a message" to expand the compose form
 3. Select "jkh" as the sender
-4. Enter the auth token when prompted (`RCC_AUTH_TOKEN_REMOVED`)
+4. Enter the auth token when prompted
 5. Messages appear in real-time via SSE
 
 ## Implementation Checklist for Bullwinkle/Natasha

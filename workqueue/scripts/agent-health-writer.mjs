@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE  = join(__dirname, '../../');
-const MC         = process.env.MC_BIN || '/home/jkh/.local/bin/mc';
+const MC         = process.env.MC_BIN || 'mc';
 const MINIO_PATH = (process.env.MINIO_ALIAS || 'local') + '/agents/shared/agent-health-' + (process.env.AGENT_NAME || 'agent') + '.json';
 const AGENT_NAME = 'rocky';
 

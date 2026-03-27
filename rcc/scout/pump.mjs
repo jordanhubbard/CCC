@@ -22,8 +22,8 @@ const RCC_TOKEN          = process.env.RCC_AUTH_TOKENS?.split(',')[0] || '';
 const IDLE_THRESHOLD     = parseInt(process.env.PUMP_IDLE_THRESHOLD || '3', 10);  // items per agent
 const SCAN_INTERVAL_MS   = parseInt(process.env.PUMP_SCAN_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10); // 6h
 const IDLE_CHECK_MS      = parseInt(process.env.PUMP_IDLE_CHECK_MS || String(30 * 60 * 1000), 10); // 30min
-const SLACK_TOKEN        = process.env.SLACK_OMGJKH_TOKEN || '';
-const WATCH_CHANNEL      = process.env.WATCH_CHANNEL || 'C0AN166PJ9L'; // #watch-projects on omgjkh
+const SLACK_TOKEN        = process.env.SLACK_TOKEN || '';
+const WATCH_CHANNEL      = process.env.WATCH_CHANNEL || ''; // set WATCH_CHANNEL to your Slack channel ID
 
 // ── Slack posting ──────────────────────────────────────────────────────────
 async function slackPost(channel, text, blocks) {

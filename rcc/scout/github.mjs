@@ -232,89 +232,9 @@ async function analyzeRepo(repo, existingItems) {
   const lang = meta.primaryLanguage?.name || 'unknown';
   const repoName = repo.split('/')[1];
 
-  // Repo-specific analysis rules
-  const analyses = {
-    'jordanhubbard/rocky': [
-      {
-        key: dedupKey(repo, 'meta', 'readme-update'),
-        title: '[rocky] Keep README.md current with latest architecture',
-        desc: 'ARCHITECTURE.md has evolved — README.md may be lagging. Keep them in sync.',
-        priority: 'low',
-        tags: ['docs', 'meta'],
-        executor: 'claude_cli',
-      },
-      {
-        key: dedupKey(repo, 'meta', 'test-coverage'),
-        title: '[rocky] Expand test coverage for rcc/brain edge cases',
-        desc: 'The brain retry/fallback logic has known edge cases (all models degrade, partial state recovery). Add tests.',
-        priority: 'normal',
-        tags: ['testing', 'rcc'],
-        executor: 'claude_cli',
-      },
-    ],
-    'jordanhubbard/loom': [
-      {
-        key: dedupKey(repo, 'meta', 'ai-integration'),
-        title: '[loom] Add AI decision-making capabilities to autonomous agents',
-        desc: 'Loom is a fully autonomous agentic system (Go) that currently has no AI. Add LLM-backed decision making to agent roles. Connect to RCC brain API for reasoning.',
-        priority: 'high',
-        tags: ['feature', 'ai', 'loom'],
-        executor: 'claude_cli',
-      },
-      {
-        key: dedupKey(repo, 'meta', 'rcc-integration'),
-        title: '[loom] Register loom agents with RCC for coordination',
-        desc: 'Loom agents should register with RCC so they can pick up work items and be tracked in the dashboard.',
-        priority: 'normal',
-        tags: ['feature', 'integration', 'loom'],
-        executor: 'claude_cli',
-      },
-    ],
-    'jordanhubbard/webmux': [
-      {
-        key: dedupKey(repo, 'meta', 'ai-terminal-assistant'),
-        title: '[webmux] Add AI assistant panel to terminal sessions',
-        desc: 'webmux provides browser-based terminal sessions. Add an AI assistant sidebar that can observe terminal output and suggest commands or explain errors.',
-        priority: 'high',
-        tags: ['feature', 'ai', 'webmux'],
-        executor: 'claude_cli',
-      },
-      {
-        key: dedupKey(repo, 'meta', 'claude-cli-integration'),
-        title: '[webmux] First-class Claude CLI session management',
-        desc: 'webmux should have a "Claude session" template that sets up a tmux pane with Claude CLI pre-configured, with the SSO auth flow guided in the UI.',
-        priority: 'high',
-        tags: ['feature', 'claude-cli', 'webmux'],
-        executor: 'claude_cli',
-      },
-    ],
-    'jordanhubbard/Aviation': [
-      {
-        key: dedupKey(repo, 'meta', 'ai-decision-layer'),
-        title: '[Aviation] Add AI decision explanation layer to each app',
-        desc: 'Each Aviation app (Flight Planner, G1000 Sim, Accident Tracker, etc.) should expose an AI endpoint: "why did you make this decision?" — connects to RCC brain for LLM-backed explanations of app logic.',
-        priority: 'high',
-        tags: ['feature', 'ai', 'aviation'],
-        executor: 'claude_cli',
-      },
-      {
-        key: dedupKey(repo, 'meta', 'fix-ci'),
-        title: '[Aviation] Fix chronic CI failures (Test Flight Planner, integration-tests, pip-audit)',
-        desc: 'Three CI jobs fail on every PR and have for months: Test Flight Planner, integration-tests, pip-audit. Main branch green but PRs always red. Fix the root cause.',
-        priority: 'high',
-        tags: ['ci', 'bug', 'aviation'],
-        executor: 'claude_cli',
-      },
-      {
-        key: dedupKey(repo, 'meta', 'trivy-security'),
-        title: '[Aviation] Address Trivy security scan findings',
-        desc: 'Trivy security scanner is configured but findings are not being acted on. Review current findings and fix/suppress each one.',
-        priority: 'high',
-        tags: ['security', 'aviation'],
-        executor: 'claude_cli',
-      },
-    ],
-  };
+  // Repo-specific analysis rules are loaded from repos.json (ownership.analysis_rules[])
+  // Add custom per-repo rules there; this fallback is a no-op for unconfigured repos.
+  const analyses = {};
 
   const repoAnalyses = analyses[repo] || [];
   for (const analysis of repoAnalyses) {

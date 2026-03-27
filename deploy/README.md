@@ -113,6 +113,55 @@ Required fields:
 
 Optional: `NVIDIA_API_KEY`, MinIO creds, Azure Blob SAS, Slack/Mattermost/Telegram tokens.
 
+## Container Environments
+
+Use `setup-container.sh` instead of `setup-node.sh` when deploying inside **Kasm workspaces, Docker containers, or any environment without systemd**.
+
+```bash
+bash ~/.rcc/workspace/deploy/setup-container.sh
+```
+
+### What breaks in containers
+
+| What | Why it fails |
+|------|-------------|
+| `crontab` | No cron daemon running |
+| `systemctl --user` | No user session bus |
+| `systemctl` (system) | PID 1 is not systemd |
+| `launchctl` | macOS only |
+
+### What we do instead
+
+1. **Workspace symlink** — `~/.rcc/workspace` → repo directory (since there's no clone step in Kasm; the repo is the workspace)
+2. **Pull loop** — `~/.rcc/rcc-pull-loop.sh` runs `agent-pull.sh` in a `while true; sleep 600` loop
+3. **Supervisord** — if `/etc/supervisord.conf` exists (common in Kasm), the pull loop is registered as `[program:rcc-agent-pull]` and managed by supervisord
+4. **nohup fallback** — if supervisord is absent, the loop is started with `nohup` and a PID file is written to `~/.rcc/pull-loop.pid`
+5. **tmux + Claude Code** — `claude-main` session is created the same way as on a host node
+
+### Container detection
+
+`setup-container.sh` checks:
+- `/proc/1/comm` — if PID 1 is `supervisord`, `docker-init`, `tini`, `dumb-init`, etc., it's a container
+- `/.dockerenv` or `/run/.containerenv` — explicit Docker/Podman markers
+
+If it looks like a real host, the script exits and suggests running `setup-node.sh` instead. Override with `FORCE_CONTAINER=1`.
+
+### Checking status after setup
+
+```bash
+# If using supervisord:
+sudo supervisorctl -c /etc/supervisord.conf status
+
+# If using nohup fallback:
+pgrep -fa rcc-pull-loop
+tail -f ~/.rcc/logs/pull.log
+
+# Claude session:
+tmux attach -t claude-main
+```
+
+---
+
 ## Supported Platforms
 
 | Platform | Service Manager | Auto-pull |
@@ -120,6 +169,7 @@ Optional: `NVIDIA_API_KEY`, MinIO creds, Azure Blob SAS, Slack/Mattermost/Telegr
 | Linux (systemd) | `rcc-agent.timer` + `rcc-agent.service` | ✅ |
 | macOS | `com.rcc.agent.plist` (LaunchAgent) | ✅ |
 | Other Linux | crontab | ✅ |
+| Container (Kasm, Docker) | supervisord or nohup loop | ✅ |
 
 ### Linux (systemd)
 ```bash

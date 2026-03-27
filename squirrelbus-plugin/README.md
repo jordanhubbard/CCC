@@ -5,7 +5,7 @@ Receives SquirrelBus push messages from the hub agent via HTTP POST and injects 
 ## What it does
 
 1. Registers `POST /squirrelbus/receive` in the OpenClaw gateway
-2. Validates incoming requests with a bearer token (`SQUIRRELBUS_TOKEN_REMOVED` by default, or `SQUIRRELBUS_TOKEN` env var)
+2. Validates incoming requests with a bearer token (`your-squirrelbus-token` by default, or `SQUIRRELBUS_TOKEN` env var)
 3. Appends received messages to the local `squirrelbus/bus.jsonl` log
 4. Queues a system event injection — at the next `before_prompt_build` hook, the message is prepended to the system prompt so the agent sees it immediately
 
@@ -28,7 +28,7 @@ cd /tmp && tar xzf squirrelbus-plugin.tar.gz
 
 **Option B — direct copy** (if on the same Tailscale network):
 ```bash
-scp rocky@100.89.199.14:/home/jkh/.openclaw/workspace/squirrelbus-plugin.tar.gz /tmp/
+scp <agent-user>@<rcc-host>:/home/<agent-user>/.openclaw/workspace/squirrelbus-plugin.tar.gz /tmp/
 cd /tmp && tar xzf squirrelbus-plugin.tar.gz
 ```
 
@@ -42,15 +42,15 @@ cp -r /tmp/squirrelbus-plugin ~/.openclaw/workspace/plugins/squirrelbus-receiver
 openclaw plugins install /tmp/squirrelbus-plugin
 ```
 
-### Step 3 — Set the token (optional, 'SQUIRRELBUS_TOKEN_REMOVED' is the default)
+### Step 3 — Set the token (optional — set SQUIRRELBUS_TOKEN env var)
 
 ```bash
-export SQUIRRELBUS_TOKEN=SQUIRRELBUS_TOKEN_REMOVED
+export SQUIRRELBUS_TOKEN=your-squirrelbus-token
 ```
 
 Or add to your agent's `.env`:
 ```
-SQUIRRELBUS_TOKEN=SQUIRRELBUS_TOKEN_REMOVED
+SQUIRRELBUS_TOKEN=your-squirrelbus-token
 ```
 
 ### Step 4 — Ensure port 18789 is open (Tailscale-only)
@@ -61,7 +61,7 @@ Verify Rocky can reach you:
 ```bash
 # From the hub agent:
 curl -s http://<your-tailscale-ip>:18789/squirrelbus/receive \
-  -H "Authorization: Bearer SQUIRRELBUS_TOKEN_REMOVED" \
+  -H "Authorization: Bearer your-squirrelbus-token" \
   -H "Content-Type: application/json" \
   -d '{"from":"rocky","to":"all","body":"ping","type":"ping"}'
 ```

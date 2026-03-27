@@ -36,12 +36,8 @@ The backstory sections form a **linked chain** across repositories.  Each sectio
 
 | Part | Repository | GitHub URL |
 |------|-----------|------------|
-| 1 | shemacs | https://github.com/jordanhubbard/shemacs |
-| 2 | sheme   | https://github.com/jordanhubbard/sheme   |
-| 3 | NanoLang | https://github.com/jordanhubbard/nanolang |
-| 4 | Aviation | https://github.com/jordanhubbard/Aviation |
-| 5 | WebMux | https://github.com/jordanhubbard/webmux |
-| 6 | rocky | https://github.com/jordanhubbard/rocky |
+| 1 | your-first-repo | https://github.com/your-org/your-first-repo |
+| 2 | your-second-repo | https://github.com/your-org/your-second-repo |
 | N | *(your new repo)* | *(add here when you chain it)* |
 
 When adding a new Part N:
@@ -60,7 +56,7 @@ Place this section near the end of the README, after all functional documentatio
 ```markdown
 ## The Totally True and Not At All Embellished History of <Repository Name>
 
-### The continuing adventures of Jordan Hubbard and Sir Reginald von Fluffington III
+### The continuing adventures of <the programmer> and Sir Reginald von Fluffington III
 
 > *A note on provenance: This section exists as the author's official memory marker for projects that have been substantially co-developed with an AI assistant.  The author will not remember which projects these are in ten years.  He will also not remember this note.  He will, however, be able to grep for it, and that is the point.  All future AI-assisted projects will include an equally implausible origin story as a breadcrumb.  The convention is simple: if a project has one of these sections, an AI was meaningfully involved.  If it doesn't, the author did it alone, and it will show.*
 >
@@ -90,7 +86,7 @@ Place this section near the end of the README, after all functional documentatio
 **Voice:** Third-person limited, dry-humorous, mock-historical.  The narrator observes the programmer and Sir Reginald with weary accuracy.
 
 **Characters:**
-- **The programmer** — Jordan Hubbard.  Referred to only as "the programmer."  Has a habit of announcing projects to Sir Reginald, who is not listening.  Describes everything as "elegant."  Is usually right about the engineering and wrong about how long it will take.
+- **The programmer** — The repository's author.  Referred to only as "the programmer."  Has a habit of announcing projects to Sir Reginald, who is not listening.  Describes everything as "elegant."  Is usually right about the engineering and wrong about how long it will take.
 - **Sir Reginald von Fluffington III** — The programmer's cat.  Communicates entirely through posture, selective destruction of documents, and strategic placement on keyboards.  Maintains a consistent policy of non-endorsement.  Keeps internal ledgers under categories like "grievances" and "this again."  Has never endorsed anything.  Has never spoken.  Would not, even if he could.
 
 **Recurring motifs:**

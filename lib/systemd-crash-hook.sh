@@ -2,18 +2,18 @@
 # systemd-crash-hook.sh — Post-stop crash reporter for systemd services
 #
 # Usage in .service file:
-#   ExecStopPost=/home/jkh/.openclaw/workspace/lib/systemd-crash-hook.sh <service-name>
+#   ExecStopPost=${OPENCLAW_WORKSPACE:-~/.openclaw/workspace}/lib/systemd-crash-hook.sh <service-name>
 #
 # Only fires if the service exited with a non-zero exit code.
 # Writes a crash task to queue.json and uploads a crash log to MinIO.
 
 SERVICE="${1:-unknown}"
 TS=$(date +%s%3N)
-MC="/home/jkh/.local/bin/mc"
+MC="mc"
 MINIO_ALIAS="${MINIO_ALIAS:-local}"
-QUEUE_PATH="/home/jkh/.openclaw/workspace/workqueue/queue.json"
+QUEUE_PATH="${OPENCLAW_WORKSPACE:-~/.openclaw/workspace}/workqueue/queue.json"
 DASHBOARD_URL="http://localhost:8788/api/crash-report"
-AUTH_TOKEN="RCC_AUTH_TOKEN_REMOVED"
+AUTH_TOKEN="${RCC_AGENT_TOKEN:-}"
 LOG_DIR="/tmp"
 
 # systemd sets these env vars for ExecStopPost:
@@ -59,7 +59,7 @@ $MC cp "$CRASH_LOG" "$MINIO_PATH" 2>/dev/null && echo "[crash-hook] Uploaded cra
 API_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$DASHBOARD_URL" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "{\"service\":\"${SERVICE}\",\"error\":\"Process ${EXIT_CODE} with status ${EXIT_STATUS} (${SERVICE_RESULT})\",\"stack\":\"systemd ExecStopPost hook\\nEXIT_CODE=${EXIT_CODE}\\nEXIT_STATUS=${EXIT_STATUS}\\nSERVICE_RESULT=${SERVICE_RESULT}\",\"sourceDir\":\"/home/jkh/.openclaw/workspace\",\"ts\":\"${TS}\"}" \
+  -d "{\"service\":\"${SERVICE}\",\"error\":\"Process ${EXIT_CODE} with status ${EXIT_STATUS} (${SERVICE_RESULT})\",\"stack\":\"systemd ExecStopPost hook\\nEXIT_CODE=${EXIT_CODE}\\nEXIT_STATUS=${EXIT_STATUS}\\nSERVICE_RESULT=${SERVICE_RESULT}\",\"sourceDir\":\"${OPENCLAW_WORKSPACE:-~/.openclaw/workspace}\",\"ts\":\"${TS}\"}" \
   --connect-timeout 3 --max-time 5 2>/dev/null)
 
 HTTP_CODE=$(echo "$API_RESPONSE" | tail -1)

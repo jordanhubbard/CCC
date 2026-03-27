@@ -1,0 +1,49 @@
+# Example docker-compose snippet for Boris-style containerized OpenClaw
+# Watchdog runs as a sidecar with access to the Docker socket.
+#
+# Usage: merge this into your existing docker-compose.yml
+#   docker compose -f docker-compose.yml -f claw-watchdog-compose.yml up -d
+
+services:
+  openclaw:
+    image: openclaw:latest          # replace with your actual image
+    container_name: <agent-name>-openclaw
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "18789:18789"
+    volumes:
+      - openclaw-data:/home/agent/.openclaw
+
+  claw-watchdog:
+    build:
+      context: .
+      dockerfile: deploy/claw-watchdog.Dockerfile
+    container_name: <agent-name>-watchdog
+    restart: unless-stopped
+    depends_on:
+      - openclaw
+    environment:
+      MODE: docker
+      CONTAINER_NAME: <agent-name>-openclaw
+      OPENCLAW_HEALTH: http://openclaw:18789/health
+      AGENT_NAME: <agent-name>
+      CHECK_INTERVAL: "30"
+      HANG_THRESHOLD: "120"
+      HEARTBEAT_STALE: "600"
+      MAX_RESTARTS: "5"
+      RESTART_WINDOW: "3600"
+      # Set these from your .env or secrets:
+      RCC_URL: "${RCC_URL:-}"
+      RCC_AGENT_TOKEN: "${RCC_AGENT_TOKEN:-}"
+      MATTERMOST_URL: "${MATTERMOST_URL:-}"
+      MATTERMOST_TOKEN: "${MATTERMOST_TOKEN:-}"
+      MATTERMOST_CHANNEL: "${MATTERMOST_CHANNEL:-}"
+      LOG_FILE: /var/log/claw-watchdog.log
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # needed for docker restart
+      - watchdog-logs:/var/log
+
+volumes:
+  openclaw-data:
+  watchdog-logs:

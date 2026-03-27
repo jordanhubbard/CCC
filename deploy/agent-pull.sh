@@ -104,4 +104,20 @@ if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ]; then
   fi
 fi
 
+# ── Sync shared openclaw identity files ───────────────────────────────────
+OPENCLAW_WORKSPACE="$HOME/.openclaw/workspace"
+SHARED_DIR="$WORKSPACE/openclaw/shared"
+if [ -d "$OPENCLAW_WORKSPACE" ] && [ -d "$SHARED_DIR" ]; then
+  for f in "$SHARED_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    fname=$(basename "$f")
+    # Never overwrite soul/memory/heartbeat/tools — those are local
+    case "$fname" in
+      MEMORY.md|HEARTBEAT.md|TOOLS.md|SOUL.md|IDENTITY.md) continue ;;
+    esac
+    cp "$f" "$OPENCLAW_WORKSPACE/$fname"
+  done
+  log "Synced shared openclaw files"
+fi
+
 log "Pull complete"

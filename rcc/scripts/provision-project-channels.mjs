@@ -6,7 +6,7 @@
  * Each channel becomes a first-class project context: channel = project.
  *
  * Usage:
- *   node provision-project-channels.mjs [--repo owner/name] [--workspace omgjkh|offtera|all] [--dry-run]
+ *   node provision-project-channels.mjs [--repo owner/name] [--workspace workspace1|workspace2|all] [--dry-run]
  *
  * What it does per channel:
  *   1. Creates the channel if it doesn't exist
@@ -25,20 +25,20 @@ import { dirname, join, resolve } from 'path';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const REPOS_PATH = process.env.REPOS_PATH || resolve(__dir, '../api/repos.json');
 const RCC_API    = process.env.RCC_API    || 'http://localhost:8789';
-const RCC_TOKEN  = process.env.RCC_TOKEN  || 'RCC_AUTH_TOKEN_REMOVED';
+const RCC_TOKEN  = process.env.RCC_TOKEN  || '';
 const RCC_PUBLIC = process.env.RCC_PUBLIC || 'http://localhost:8788';
 
 // Slack tokens per workspace
 const SLACK_TOKENS = {
-  offtera: {
+  workspace1: {
     bot:  process.env.OFFTERA_BOT  || '',
     team: 'THJ9A47K3',
-    url:  'https://offtera.slack.com',
+    url:  process.env.SLACK_WORKSPACE1_URL || '',
   },
-  omgjkh: {
+  workspace2: {
     bot:  process.env.OMGJKH_BOT   || '',
     team: 'TE0V8MBEJ',
-    url:  'https://omgjkh.slack.com',
+    url:  process.env.SLACK_WORKSPACE2_URL || '',
   },
 };
 
@@ -103,9 +103,7 @@ async function getOrCreateChannel(workspace, name) {
 }
 
 function channelName(repo) {
-  // e.g. "NVIDIA-dev/horde" → "project-horde"
-  //      "jordanhubbard/loom" → "project-loom"
-  //      "NVIDIA-dev/omniverse-kit" → "project-omniverse-kit"
+  // e.g. "yourorg/myproject" → "project-myproject"
   const base = repo.full_name.split('/')[1].toLowerCase().replace(/[^a-z0-9-]/g, '-');
   return `project-${base}`;
 }
@@ -280,13 +278,13 @@ async function main() {
       }
     }
 
-    // Write back the primary channel ID to repos.json (omgjkh is primary)
-    const omgjkhResult = results.find(r => r.repo === repo.full_name && r.workspace === 'omgjkh' && r.ok && r.channelId);
-    if (omgjkhResult && !dryRun) {
+    // Write back the primary channel ID to repos.json
+    const primaryResult = results.find(r => r.repo === repo.full_name && r.workspace === 'workspace1' && r.ok && r.channelId);
+    if (primaryResult && !dryRun) {
       if (!repo.ownership) repo.ownership = {};
-      repo.ownership.slack_channel   = omgjkhResult.channelId;
-      repo.ownership.slack_workspace = 'omgjkh';
-      console.log(`  ✓ Wrote channel ID ${omgjkhResult.channelId} → repos.json`);
+      repo.ownership.slack_channel   = primaryResult.channelId;
+      repo.ownership.slack_workspace = 'workspace1';
+      console.log(`  ✓ Wrote channel ID ${primaryResult.channelId} → repos.json`);
     }
   }
 

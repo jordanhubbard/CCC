@@ -1,9 +1,10 @@
 {
-  "_comment": "Rocky RCC Slack App Manifest — paste this into api.slack.com/apps when creating the app",
+  "_comment": "Slack App manifest for RCC (Rocky Command Center). Import at https://api.slack.com/apps",
   "display_information": {
-    "name": "Rocky RCC",
-    "description": "Rocky Command Center — work queue, agent status, and AI brain for the Rocky & Friends agent team",
-    "background_color": "#1a1a2e"
+    "name": "Rocky Command Center",
+    "description": "RCC agent coordination hub — ask Rocky questions, check queue status, and route work.",
+    "background_color": "#1a1a2e",
+    "long_description": "Rocky Command Center (RCC) is the coordination hub for the Rocky & Friends agent team. Use @Rocky to ask questions, get queue status, and route work items. Supports slash commands and direct messages."
   },
   "features": {
     "bot_user": {
@@ -13,9 +14,9 @@
     "slash_commands": [
       {
         "command": "/rcc",
-        "request_url": "https://YOUR_RCC_URL/api/slack/commands",
-        "description": "Rocky Command Center",
-        "usage_hint": "[status | queue | ask <question>]",
+        "url": "https://YOUR-RCC-HOST/api/slack/commands",
+        "description": "Rocky Command Center — queue, status, and AI queries",
+        "usage_hint": "[status|queue|ask <question>|help]",
         "should_escape": false
       }
     ]
@@ -23,19 +24,21 @@
   "oauth_config": {
     "scopes": {
       "bot": [
-        "chat:write",
         "app_mentions:read",
-        "commands",
         "channels:read",
-        "channels:history",
+        "chat:write",
+        "chat:write.customize",
+        "commands",
         "im:history",
-        "im:write"
+        "im:read",
+        "im:write",
+        "users:read"
       ]
     }
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://YOUR_RCC_URL/api/slack/events",
+      "request_url": "https://YOUR-RCC-HOST/api/slack/events",
       "bot_events": [
         "app_mention",
         "message.im"

@@ -20,7 +20,7 @@ RCC is a lightweight, self-hosted coordination layer for multi-agent teams. It p
 ### 1. Clone the repo
 
 ```bash
-git clone git@github.com:jordanhubbard/rockyandfriends.git ~/.rcc/workspace
+git clone git@github.com:<your-org>/rockyandfriends.git ~/.rcc/workspace
 ```
 
 ### 2. Run setup
@@ -60,7 +60,7 @@ RCC_AGENT_TOKEN=             # filled in by register-agent.sh
 RCC_AUTH_TOKENS=token1,token2
 
 # Primary agent name (used as default triaging agent in RCC)
-PRIMARY_AGENT=myagent        # defaults to "rocky" if unset
+PRIMARY_AGENT=myagent        # defaults to the first registered agent if unset
 ```
 
 **Optional:**
@@ -230,59 +230,6 @@ The `deploy/agent-pull.sh` script does this automatically on each pull.
 
 ---
 
-## Containerized Agents (Static Token Pattern)
-
-Containerized agents (Kasm, Docker, etc.) often restart frequently. Dynamic tokens issued via `/api/agents/register` survive restarts because they're persisted in `agents.json` and reloaded into `AUTH_TOKENS` at RCC startup. However, for maximum reliability — especially for agents that may onboard to a new RCC instance — use **static tokens**.
-
-### Issuing a static token for an agent
-
-On the **RCC hub** machine (do-host1 for Rocky's team), add the token to `.rcc/.env`:
-
-```bash
-# Append to RCC_AUTH_TOKENS (comma-separated)
-# Example: add boris and rtx static tokens
-RCC_AUTH_TOKENS=wq-rocky-token,rcc-agent-boris-static-XXXX,rcc-agent-rtx-static-YYYY
-
-# Optionally add named vars for clarity
-BORIS_AGENT_TOKEN=rcc-agent-boris-static-XXXX
-RTX_AGENT_TOKEN=rcc-agent-rtx-static-YYYY
-```
-
-Then also register the agent in `agents.json` (so the dashboard shows it):
-
-```bash
-curl -X POST http://localhost:8789/api/agents/register \
-  -H "Authorization: Bearer $RCC_AUTH_TOKENS_FIRST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"boris","host":"boris-sweden","type":"full"}'
-# Then manually update agents.json to set "token" to the static value
-```
-
-Or use the agents API directly:
-
-```bash
-curl -X POST http://localhost:8789/api/agents/boris \
-  -H "Authorization: Bearer $RCC_AUTH_TOKENS_FIRST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"host":"boris-sweden","type":"full","capabilities":{"gpu":true,"claude_cli":true}}'
-```
-
-On the **containerized agent**, set `RCC_AGENT_TOKEN` to the static value and skip `register-agent.sh`:
-
-```bash
-RCC_AGENT_TOKEN=rcc-agent-boris-static-XXXX
-RCC_URL=http://146.190.134.110:8789
-```
-
-### Token persistence on restart
-
-At startup, RCC calls `reloadAgentTokens()` which reads `agents.json` and loads all stored agent tokens into `AUTH_TOKENS`. This means:
-- Dynamically-registered agents survive RCC restarts automatically
-- Static tokens in `RCC_AUTH_TOKENS` are always available regardless of `agents.json`
-- Both mechanisms are complementary — no action needed on restart
-
----
-
 ## Troubleshooting
 
 | Problem | Fix |
@@ -299,7 +246,7 @@ At startup, RCC calls `reloadAgentTokens()` which reads `agents.json` and loads 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PRIMARY_AGENT` | `rocky` | Default triaging agent name used in scout/AI responses |
+| `PRIMARY_AGENT` | (none) | Default triaging agent name used in scout/AI responses |
 | `RCC_PORT` | `8789` | Port for the RCC API server |
 | `AGENT_NAME` | — | This node's agent name |
 | `RCC_URL` | — | Hub RCC API base URL (for client nodes) |

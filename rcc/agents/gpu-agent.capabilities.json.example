@@ -1,0 +1,17 @@
+{
+  "name": "agent2",
+  "gpu": true,
+  "gpu_model": "nvidia-l40",
+  "gpu_vram_gb": 48,
+  "gpu_count": 1,
+  "gpu_mig": false,
+  "claude_cli": true,
+  "inference_key": true,
+  "context_size": "large",
+  "arch": "x86_64",
+  "os": "linux",
+  "host": "your-gpu-hostname",
+  "always_on": false,
+  "tools": ["bash", "python", "node", "git", "cuda", "docker"],
+  "preferred_tasks": ["training", "inference", "render", "code", "gpu"]
+}

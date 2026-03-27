@@ -27,9 +27,9 @@ Fetches live GitHub data for a project via `gh` CLI. Public, no auth required (r
       "number": 42,
       "title": "Bug: scout dedup breaks on empty tags",
       "state": "open",
-      "url": "https://github.com/jordanhubbard/rockyandfriends/issues/42",
+      "url": "https://github.com/your-org/your-repo/issues/42",
       "labels": ["bug", "priority:high"],
-      "author": "jordanhubbard",
+      "author": "your-github-username",
       "createdAt": "2026-03-20T10:00:00Z",
       "updatedAt": "2026-03-22T14:30:00Z",
       "commentCount": 3
@@ -40,7 +40,7 @@ Fetches live GitHub data for a project via `gh` CLI. Public, no auth required (r
       "number": 7,
       "title": "feat: add per-agent capability registry",
       "state": "open",
-      "url": "https://github.com/jordanhubbard/rockyandfriends/pull/7",
+      "url": "https://github.com/your-org/your-repo/pull/7",
       "author": "rocky-bot",
       "isDraft": false,
       "reviewDecision": "REVIEW_REQUIRED",
@@ -51,7 +51,7 @@ Fetches live GitHub data for a project via `gh` CLI. Public, no auth required (r
     }
   ],
   "fetchedAt": "2026-03-23T17:48:00Z",
-  "repo": "jordanhubbard/rockyandfriends"
+  "repo": "your-org/your-repo"
 }
 ```
 

@@ -9,7 +9,7 @@
       "properties": {
         "token": {
           "type": "string",
-          "description": "Bearer token for authenticating incoming push requests. Defaults to env SQUIRRELBUS_TOKEN or 'SQUIRRELBUS_TOKEN_REMOVED'."
+          "description": "Bearer token for authenticating incoming push requests. Set via SQUIRRELBUS_TOKEN env var."
         }
       },
       "additionalProperties": false

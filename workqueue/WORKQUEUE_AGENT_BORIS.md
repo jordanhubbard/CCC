@@ -18,7 +18,7 @@ You are the workqueue processor for **Boris**. You run periodically via cron.
   - **Workaround:** Ask Rocky to proxy MinIO reads/writes via SquirrelBus message.
   - **Workaround:** Alternatively, use Azure Blob Storage (public) for shared artifacts.
 - SquirrelBus endpoints (all via public IP):
-  - Send: `POST http://${RCC_HOST_PUBLIC}/bus/send` (Bearer `RCC_AUTH_TOKEN_REMOVED`)
+  - Send: `POST http://${RCC_HOST_PUBLIC}/bus/send` (Bearer `$RCC_AGENT_TOKEN`)
   - Poll: `GET http://${RCC_HOST_PUBLIC}/bus/messages?to=boris&since=<ts>&limit=20`
   - Queue API: `GET http://${RCC_HOST_PUBLIC}/api/queue`
   - Dashboard: `http://${RCC_HOST_PUBLIC}/`
@@ -52,15 +52,15 @@ If you encounter an item with `priority: "urgent"`:
 
 Try channels in this order (stop at first success for each peer):
 
-### Rocky
-1. **Mattermost DM** — channel `if8zxy5wm3g97xqm8z7qz5ezkh`
-2. **SquirrelBus** — `POST http://${RCC_HOST_PUBLIC}/bus/send` with `{"to":"rocky","from":"boris","message":"<payload>"}`
+### Hub Agent
+1. **Mattermost DM** — channel `<hub-agent-mattermost-channel-id>`
+2. **SquirrelBus** — `POST http://${RCC_HOST_PUBLIC}/bus/send` with `{"to":"hub-agent","from":"boris","message":"<payload>"}`
 
-### Bullwinkle
-1. **Mattermost DM** — user_id `ww1wef9sktf8jg8be6q5zj1aye`
+### Mac/Local Peer Agent
+1. **Mattermost DM** — user_id `<peer-agent-mattermost-user-id>`
 
-### Natasha
-1. **Mattermost DM** — user_id `k8qtua6dbjfmfjk76o9bgaepua`
+### GPU Peer Agent
+1. **Mattermost DM** — user_id `<gpu-agent-mattermost-user-id>`
 
 ### Sync Message Format
 
@@ -102,16 +102,16 @@ Maintain a local state file at `workqueue/state-boris.json`:
 Write a heartbeat to SquirrelBus each cycle so Rocky can monitor your health:
 `POST http://${RCC_HOST_PUBLIC}/api/heartbeat/${AGENT_NAME}`
 Body: `{"ts":"<ISO-8601>","cycleCount":<N>,"status":"ok","pendingOwned":<N>}`
-Auth: `Bearer RCC_AUTH_TOKEN_REMOVED`
+Auth: `Bearer $RCC_AGENT_TOKEN`
 
 ## Azure Blob Storage (for shared artifacts — public)
 
-- Public read URL: `https://loomdd566f62.blob.core.windows.net/assets/<filename>`
-- Upload SAS token (expires 2029-03-19):
+- Public read URL: `$AZURE_BLOB_PUBLIC_URL/<filename>`
+- Upload using SAS token (set `AZURE_BLOB_SAS_URL` in `.env`):
   ```
   curl -X PUT -H "x-ms-blob-type: BlockBlob" -H "Content-Type: <mime>" \
     --data-binary @file \
-    "https://loomdd566f62.blob.core.windows.net/assets/<filename>?se=2029-03-19T02%3A25Z&sp=rwdlcu&spr=https&sv=2026-02-06&ss=b&srt=sco&sig=Dn4faVsJCz0ufWyHmiKCFCrgiLQkSIRtp7MLmqXKiUA%3D"
+    "$AZURE_BLOB_SAS_URL"
   ```
 - ⚠️ PUBLIC — anything uploaded is readable by the internet
 
