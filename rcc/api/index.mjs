@@ -53,6 +53,57 @@ const cronStatus = {};
 const providerHealth = {};
 const geekSseClients = new Set();
 
+// ── Disappearance detection config ────────────────────────────────────────
+const OFFLINE_THRESHOLD_MS = parseInt(process.env.OFFLINE_THRESHOLD_MS || String(60 * 60 * 1000), 10); // 1h
+const offlineAlertSent = {};  // agent -> timestamp of last offline alert sent
+
+// ── Offline detection + Slack alert ───────────────────────────────────────
+function computeOnlineStatus(hb) {
+  if (!hb || !hb.ts) return false;
+  if (hb.decommissioned) return false;
+  return (Date.now() - new Date(hb.ts).getTime()) < OFFLINE_THRESHOLD_MS;
+}
+
+async function runDisappearanceCheck() {
+  const SLACK_AGENT_CHANNEL = process.env.SLACK_AGENT_CHANNEL || '#agent-shared';
+  const now = Date.now();
+  const agents = await readAgents().catch(() => ({}));
+  for (const [agent, hb] of Object.entries(heartbeats)) {
+    if (hb.decommissioned) continue;
+    const age = now - new Date(hb.ts).getTime();
+    const isOffline = age >= OFFLINE_THRESHOLD_MS;
+    const wasOnline = hb._wasOnline !== false;  // default: assume was online
+    if (isOffline && wasOnline) {
+      hb._wasOnline = false;
+      // Only alert if we haven't alerted in the last 2h
+      const lastAlert = offlineAlertSent[agent] || 0;
+      if (now - lastAlert > 2 * 60 * 60 * 1000) {
+        offlineAlertSent[agent] = now;
+        const lastSeenMin = Math.round(age / 60000);
+        const msg = `:red_circle: *${agent}* has gone offline — last seen ${lastSeenMin} minutes ago (${hb.ts}). No heartbeat for >${Math.round(OFFLINE_THRESHOLD_MS/60000)} min.`;
+        if (SLACK_BOT_TOKEN) {
+          slackPost('chat.postMessage', { channel: SLACK_AGENT_CHANNEL, text: msg }).catch(() => {});
+        }
+        // Persist offline status to agents registry
+        if (agents[agent]) {
+          agents[agent].lastSeen = hb.ts;
+          agents[agent].onlineStatus = 'offline';
+          await writeAgents(agents).catch(() => {});
+        }
+      }
+    } else if (!isOffline) {
+      hb._wasOnline = true;
+      if (agents[agent] && agents[agent].onlineStatus === 'offline') {
+        agents[agent].onlineStatus = 'online';
+        await writeAgents(agents).catch(() => {});
+      }
+    }
+  }
+}
+
+// Run disappearance check every 5 minutes
+setInterval(runDisappearanceCheck, 5 * 60 * 1000);
+
 // ── Projects I/O ─────────────────────────────────────────────────────────
 async function readProjects() {
   const p = new URL(PROJECTS_PATH, import.meta.url).pathname;
@@ -538,7 +589,29 @@ async function handleRequest(req, res) {
     }
 
     if (method === 'GET' && path === '/api/heartbeats') {
-      return json(res, 200, heartbeats);
+      // Return all known agents (including offline/decommissioned) with computed online status
+      const agents = await readAgents().catch(() => ({}));
+      const result = { ...heartbeats };
+      // Merge in any agents from registry that haven't heartbeated in this process lifecycle
+      for (const [name, agentRec] of Object.entries(agents)) {
+        if (!result[name] && agentRec.lastSeen) {
+          result[name] = { agent: name, ts: agentRec.lastSeen, status: agentRec.onlineStatus || 'unknown', _fromRegistry: true };
+          if (agentRec.decommissioned) result[name].decommissioned = true;
+        }
+      }
+      // Add online boolean + decommissioned status to each entry
+      const enriched = {};
+      for (const [name, hb] of Object.entries(result)) {
+        enriched[name] = {
+          ...hb,
+          online: computeOnlineStatus(hb),
+          decommissioned: !!hb.decommissioned,
+          lastSeen: hb.ts || null,
+        };
+        if (hb._wasOnline !== undefined) delete enriched[name]._wasOnline;
+        if (hb._fromRegistry !== undefined) delete enriched[name]._fromRegistry;
+      }
+      return json(res, 200, enriched);
     }
 
     if (method === 'GET' && path === '/api/brain/status') {
@@ -952,7 +1025,7 @@ async function handleRequest(req, res) {
       return json(res, 200, { ok: true, token: agents[name].token, agent: agents[name] });
     }
 
-    // ── PATCH /api/agents/:name — update capabilities ─────────────────────
+    // ── PATCH /api/agents/:name — update capabilities or decommission ─────
     const agentPatchMatch = path.match(/^\/api\/agents\/([^/]+)$/);
     if (method === 'PATCH' && agentPatchMatch) {
       const name = decodeURIComponent(agentPatchMatch[1]);
@@ -963,6 +1036,19 @@ async function handleRequest(req, res) {
       if (body.billing) Object.assign(agents[name].billing || {}, body.billing);
       if (body.host) agents[name].host = body.host;
       if (body.type) agents[name].type = body.type;
+      // ── Tombstoning: mark agent as decommissioned ──────────────────────
+      if (body.status === 'decommissioned') {
+        agents[name].decommissioned = true;
+        agents[name].decommissionedAt = new Date().toISOString();
+        agents[name].onlineStatus = 'decommissioned';
+        // Also mark in-memory heartbeat so no alerts fire
+        if (heartbeats[name]) heartbeats[name].decommissioned = true;
+      } else if (body.status === 'active') {
+        delete agents[name].decommissioned;
+        delete agents[name].decommissionedAt;
+        agents[name].onlineStatus = 'unknown';
+        if (heartbeats[name]) delete heartbeats[name].decommissioned;
+      }
       await writeAgents(agents);
       if (body.capabilities) {
         const caps = await readCapabilities();
@@ -977,17 +1063,32 @@ async function handleRequest(req, res) {
     if (method === 'POST' && hbMatch) {
       const agent = decodeURIComponent(hbMatch[1]);
       const body = await readBody(req);
-      heartbeats[agent] = { agent, ts: new Date().toISOString(), status: 'online', ...body };
+      const ts = new Date().toISOString();
+      heartbeats[agent] = { agent, ts, status: 'online', ...body, _wasOnline: true };
       // Ring buffer for heartbeat history (max 288 entries = 24h at 5-min intervals)
       if (!heartbeatHistory[agent]) heartbeatHistory[agent] = [];
-      heartbeatHistory[agent].push({ ts: new Date().toISOString(), status: 'online' });
+      const hbEntry = { ts, status: 'online', host: body.host || null };
+      heartbeatHistory[agent].push(hbEntry);
       if (heartbeatHistory[agent].length > 288) heartbeatHistory[agent].shift();
-      // Update agent lastSeen
+      // Append to persistent JSONL history (async, non-blocking)
+      const histDir = new URL('./data/heartbeat-history', import.meta.url).pathname;
+      mkdir(histDir, { recursive: true }).then(() => {
+        const histFile = `${histDir}/${agent}.jsonl`;
+        const line = JSON.stringify({ ts, agent, host: body.host || null, status: 'online' }) + '\n';
+        return import('fs').then(fsmod => {
+          const { appendFileSync } = fsmod;
+          appendFileSync(histFile, line);
+        });
+      }).catch(() => {});
+      // Update agent lastSeen + onlineStatus in registry (persist even after restart)
       const agents = await readAgents();
       if (agents[agent]) {
-        agents[agent].lastSeen = heartbeats[agent].ts;
+        agents[agent].lastSeen = ts;
+        agents[agent].onlineStatus = 'online';
         await writeAgents(agents);
       }
+      // Clear offline alert state since they're back
+      delete offlineAlertSent[agent];
       broadcastGeekEvent('heartbeat', agent, 'rocky', `${agent} heartbeat`);
       return json(res, 200, { ok: true });
     }
@@ -1574,6 +1675,17 @@ async function handleRequest(req, res) {
     const hbHistoryMatch = path.match(/^\/api\/heartbeat\/([^/]+)\/history$/);
     if (method === 'GET' && hbHistoryMatch) {
       const agent = decodeURIComponent(hbHistoryMatch[1]);
+      // Try reading persistent JSONL first, fall back to in-memory ring buffer
+      try {
+        const histFile = new URL(`./data/heartbeat-history/${agent}.jsonl`, import.meta.url).pathname;
+        if (existsSync(histFile)) {
+          const content = await readFile(histFile, 'utf8');
+          const lines = content.trim().split('\n').filter(Boolean);
+          // Keep last 100 entries
+          const entries = lines.slice(-100).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          return json(res, 200, entries);
+        }
+      } catch {}
       return json(res, 200, heartbeatHistory[agent] || []);
     }
 

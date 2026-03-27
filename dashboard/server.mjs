@@ -145,12 +145,35 @@ async function fetchMinIOHeartbeat(agent) {
 async function getHeartbeats() {
   // Start with in-memory heartbeats (includes any agent that has posted)
   const result = { ...heartbeats };
+  // Pull from RCC API to get persistent last-seen + decommissioned status
+  try {
+    const rccData = await fetch('http://localhost:8789/api/heartbeats', { signal: AbortSignal.timeout(3000) }).then(r => r.json());
+    for (const [name, hb] of Object.entries(rccData)) {
+      if (!result[name]) {
+        // Agent known to RCC but not in our in-memory store — include it
+        result[name] = hb;
+      } else {
+        // Merge decommissioned flag and keep most recent ts
+        if (hb.decommissioned) result[name].decommissioned = true;
+        if (hb.lastSeen && (!result[name].ts || hb.lastSeen > result[name].ts)) {
+          result[name].ts = hb.lastSeen;
+        }
+      }
+    }
+  } catch {}
   // Also check MinIO for known persistent agents (fills gaps on cold start)
   const knownAgents = loadCapabilityNames();
   for (const agent of knownAgents) {
     if (!result[agent]) {
       const minio = await fetchMinIOHeartbeat(agent);
       if (minio) result[agent] = minio;
+    }
+  }
+  // Add online boolean
+  for (const [name, hb] of Object.entries(result)) {
+    if (!hb.online) {
+      const age = hb.ts ? Date.now() - new Date(hb.ts).getTime() : Infinity;
+      result[name].online = !hb.decommissioned && age < 60 * 60 * 1000;
     }
   }
   return result;
@@ -496,6 +519,7 @@ function renderUnifiedPage() {
     .status-online { color: #3fb950; font-weight: 600; }
     .status-stale { color: #d29922; font-weight: 600; }
     .status-offline { color: #f85149; font-weight: 600; }
+    .status-decommissioned { color: #6e7681; font-weight: 600; }
 
     /* Queue table */
     table { width: 100%; border-collapse: collapse; }
@@ -796,11 +820,24 @@ function renderUnifiedPage() {
         const hbs = await fetch('/api/heartbeats').then(r => r.json());
         const el = document.getElementById('agent-cards');
         const agentNames = Object.keys(hbs);
+        // Sort: online first, then stale, then offline, then decommissioned
+        const sortOrder = name => {
+          const hb = hbs[name] || {};
+          if (hb.decommissioned) return 4;
+          if (!hb.ts) return 3;
+          const age = Date.now() - new Date(hb.ts).getTime();
+          if (age < 45 * 60 * 1000) return 0;
+          if (age < 4 * 60 * 60 * 1000) return 1;
+          return 2;
+        };
+        agentNames.sort((a, b) => sortOrder(a) - sortOrder(b));
         el.innerHTML = agentNames.map(name => {
           const hb = hbs[name] || {};
           const emoji = EMOJIS[name] || '📨';
           let stClass = 'status-offline', stEmoji = '🔴', stLabel = 'offline';
-          if (hb.ts) {
+          if (hb.decommissioned) {
+            stClass = 'status-decommissioned'; stEmoji = '⚫'; stLabel = 'decommissioned';
+          } else if (hb.ts) {
             const age = Date.now() - new Date(hb.ts).getTime();
             if (age < 45 * 60 * 1000) { stClass = 'status-online'; stEmoji = '🟢'; stLabel = 'online'; }
             else if (age < 4 * 60 * 60 * 1000) { stClass = 'status-stale'; stEmoji = '🟡'; stLabel = 'stale'; }
@@ -809,7 +846,9 @@ function renderUnifiedPage() {
           const lastSeen = timeAgo(hb.ts);
           const checkinUtc = hb.ts ? new Date(hb.ts).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'never';
           const queueDepth = hb.queueDepth != null ? '<div class="agent-meta">Queue: ' + hb.queueDepth + ' items</div>' : '';
-          return '<div class="agent-card">' +
+          // Dim offline/decommissioned cards
+          const cardStyle = (stClass === 'status-offline' || stClass === 'status-decommissioned') ? ' style="opacity:0.55"' : '';
+          return '<div class="agent-card"' + cardStyle + '>' +
             '<div class="agent-name">' + emoji + ' ' + name.charAt(0).toUpperCase() + name.slice(1) + '</div>' +
             '<div class="' + stClass + '">' + stEmoji + ' ' + stLabel + ' · ' + lastSeen + '</div>' +
             '<div class="agent-meta">Host: ' + esc(host) + '</div>' +
@@ -817,6 +856,7 @@ function renderUnifiedPage() {
             queueDepth +
             '</div>';
         }).join('');
+        if (agentNames.length === 0) el.innerHTML = '<div class="agent-meta">No agents registered</div>';
       } catch (e) { console.error('Agent load error:', e); }
     }
 
