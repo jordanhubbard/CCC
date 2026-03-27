@@ -70,3 +70,6 @@ workqueue/proposals/
 # Internal session files
 suraj_songs.txt
 grievances/
+rcc/api/data/heartbeat-history/*.jsonl
+rcc/api/data/heartbeat-history/*.jsonl
+squirrelchat/squirrelchat.db
