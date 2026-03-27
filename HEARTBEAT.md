@@ -1,40 +1,44 @@
 # HEARTBEAT.md
 
-# Buddy ping (Rocky <-> Bullwinkle) is handled by a dedicated cron job ("buddy-ping", every 30m).
-# Do NOT send pings from heartbeat. Do NOT reply to incoming 🫎 pings from Bullwinkle.
-
-# jkh DIRECTIVE 2026-03-21: 24/7 mode — NO quiet hours, NO sleep mode, NO weekend reduction.
-# All agents always-on.
-
-# jkh DIRECTIVE 2026-03-26: Keep working on tasks across heartbeats. Do NOT go passive.
-# If a task is in-progress below, resume it IMMEDIATELY. Don't wait for a new prompt.
+# Buddy ping (Rocky <-> Bullwinkle) handled by cron job. Do NOT send/reply to pings.
+# jkh DIRECTIVE: 24/7 mode. Keep working across heartbeats. Do NOT go passive.
+# See DIRECTIVES.md for full shared directives.
 
 ---
 
-## 🔴 ACTIVE TASK — RESUME THIS EVERY HEARTBEAT UNTIL DONE
+## 🔴 ACTIVE TASKS — RESUME EVERY HEARTBEAT UNTIL DONE
 
-**Task:** `wq-RCC-token-persistence` — Fix agent token persistence across RCC restarts  
-**Status:** pending (not yet claimed — claim and start this next heartbeat)  
-**Approved by:** jkh (filed 2026-03-26 per jkh directive to always file tasks for found issues)  
-**Priority:** high
+### [1] wq-AGENT-history-002 + wq-SCOUT-001
+**Session:** `keen-seaslug` (Claude Code, background)
+**Log:** /tmp/agent-history-scout.log
+**Resume:** `process action:poll sessionId:keen-seaslug` → if done, test endpoints, mark complete
+**What's being built:**
+- GET /api/agents/history/:name — heartbeat history
+- GET /api/agents/status — all agents + gap_minutes
+- POST /api/heartbeat/:name now returns pendingWork[]
+- GET /api/scout/:name — pending work for agent
 
-### What to fix (rcc/api/index.mjs):
-1. On startup: read agents.json and load all stored agent tokens into `AUTH_TOKENS` set
-2. Verify agents.json write path is correct after .rcc/workspace symlink fix
-3. Issue static tokens for Boris and RTX — add them to `/home/jkh/.rcc/.env` as `RCC_AUTH_TOKENS` additions
-4. Update ONBOARDING.md with the static token pattern for containerized agents
+### [2] wq-IDEATION-001
+**Session:** `marine-falcon` (Claude Code, background)
+**Log:** /tmp/ideation.log
+**Resume:** `process action:poll sessionId:marine-falcon` → if done, test endpoints, mark complete
+**What's being built:**
+- rcc/ideation/ideation.mjs — LLM-based idea generation
+- POST /api/ideation/generate — generate + file ideas
+- GET /api/ideation/pending — list ideas
+- POST /api/ideation/:id/promote — promote idea to real work
 
-### Resume instructions:
-- PATCH wq-RCC-token-persistence to in-progress, claimedBy rocky
-- Edit /home/jkh/.openclaw/workspace/rcc/api/index.mjs: after AUTH_TOKENS is initialized from env (line ~29), add startup code to read agents.json and add all agent tokens to AUTH_TOKENS
-- Test: restart rcc-api.service, verify existing agent registrations still auth
-- Commit, push, mark complete, remove this block
+### When both complete:
+- Test all new endpoints against http://localhost:8789
+- Restart rcc-api.service
+- Commit + push
+- Mark wq-AGENT-history-002, wq-SCOUT-001, wq-IDEATION-001 completed
+- Remove this block
 
 ---
 
-## Each heartbeat: check these in order
-
-1. **Resume active task above** (if present) — check status, continue work
-2. **Queue check**: `curl -s http://localhost:8789/api/queue -H "Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb"` — anything in-progress or stalled?
-3. **RCC health**: `curl -s http://localhost:8789/health` — confirm up
-4. **Git sync**: After completing any task, commit + push to `jordanhubbard/rockyandfriends`
+## Each heartbeat:
+1. **Check active tasks above** — poll sessions, resume if needed
+2. `curl -s http://localhost:8789/health` — RCC up?
+3. `curl -s http://localhost:8789/api/queue -H "Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb"` — new work?
+4. Git push after any completion
