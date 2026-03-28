@@ -1,38 +1,33 @@
 [Unit]
-Description=RCC Dashboard v2 (Rust/WASM)
+Description=RCC Dashboard v2 (Rust/WASM via Trunk)
 Documentation=https://github.com/jordanhubbard/rockyandfriends/blob/main/rcc/docs/dashboard-v2.md
 After=network.target rcc-api.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
-EnvironmentFile=%h/.rcc/.env
+User=jkh
+EnvironmentFile=/home/jkh/.rcc/.env
 
-# Binary and static assets live in the RCC workspace
-WorkingDirectory=%h/.rcc/workspace/rcc/dashboard
+WorkingDirectory=/home/jkh/.rcc/workspace/rcc/wasm-dashboard
 
-ExecStart=%h/.rcc/workspace/rcc/dashboard/target/release/dashboard-server
+# Trunk serve: builds WASM, proxies /api + /bus to RCC on 8789, serves on 8790
+ExecStartPre=/bin/bash -c 'export PATH="/home/jkh/.cargo/bin:$PATH" && trunk build --release'
+ExecStart=/bin/bash -c 'export PATH="/home/jkh/.cargo/bin:$PATH" && trunk serve --release --port 8790'
 
-# Port 8790 during parallel run; change to 8788 after cutover validation
-Environment=RCC_DASHBOARD_PORT=8790
+# Port 8790 (parallel with existing Node.js dashboard on 8788)
+# After validation, cutover: update nginx/proxy to point 8788 → 8790
 Environment=RCC_URL=http://localhost:8789
-Environment=DASHBOARD_DIST=%h/.rcc/workspace/rcc/dashboard/dist
-
-# Auth token and operator are sourced from EnvironmentFile above
-# RCC_AGENT_TOKEN=...
-# OPERATOR_HANDLE=jkh
 
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=rcc-dashboard
 
-# Harden the service
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=%h/.rcc
+ReadWritePaths=/home/jkh/.rcc
 PrivateTmp=true
 
 [Install]
