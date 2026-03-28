@@ -44,6 +44,13 @@ fi
 
 cd "$WORKSPACE"
 
+# ── Runtime symlinks (queue.json — RCC API is authoritative source) ────────
+RCC_QUEUE="$HOME/.rcc/data/queue.json"
+WQ_QUEUE="$WORKSPACE/workqueue/queue.json"
+if [ -f "$RCC_QUEUE" ] && [ ! -L "$WQ_QUEUE" ]; then
+  ln -sf "$RCC_QUEUE" "$WQ_QUEUE" 2>/dev/null || true
+fi
+
 # ── Git pull ───────────────────────────────────────────────────────────────
 BEFORE=$(git rev-parse HEAD)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
