@@ -3,7 +3,7 @@
  * claude-worker.mjs
  * Reusable module for delegating tasks to a local Claude Code tmux session.
  *
- * Usable by any OpenClaw agent (any OpenClaw agent).
+ * Usable by any OpenClaw agent (Rocky on do-host1, Bullwinkle on puck, Natasha on sparky).
  *
  * Exports:
  *   sendTask(sessionName, task, opts)      — send task, wait for prompt, return output
@@ -116,18 +116,16 @@ export function detectSession() {
   try {
     paneList = execFileSync(
       'tmux',
-      ['list-panes', '-a', '-F', '#{session_name}|||#{pane_current_command}|||#{pane_id}'],
+      ['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_command}\t#{pane_id}'],
       { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
   } catch {
     return null;
   }
 
-  // Note: we use ||| as separator instead of \t because tmux 3.6a on macOS
-  // does not reliably pass \t through execFileSync format strings.
   for (const line of paneList.trim().split('\n')) {
     if (!line.trim()) continue;
-    const [session, cmd] = line.split('|||');
+    const [session, cmd] = line.split('\t');
     if (!session) continue;
 
     // Fast path: current command is literally "claude"
