@@ -203,7 +203,7 @@ fn KanbanCard(item: QueueItem, queue: RwSignal<Vec<QueueItem>>) -> impl IntoView
     let priority = item.priority_str().to_string();
     let tags = item.tags.clone();
     let has_blocking = !item.blocked_by.is_empty() || !item.blocks.is_empty();
-    let id = item.id.clone();
+    let _id = item.id.clone();
     let id_appeal = item.id.clone();
     let queue_appeal = queue;
 
