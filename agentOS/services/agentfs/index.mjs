@@ -438,8 +438,8 @@ async function router(req, res) {
 // ── Start ─────────────────────────────────────────────────────────────────────
 await ensureBucket();
 const server = createServer(router);
-server.listen(PORT, () => {
-  console.log(`[agentfs] listening on :${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[agentfs] listening on 0.0.0.0:${PORT}`);
   console.log(`[agentfs] bucket=${BUCKET} minio=${MINIO_EP}`);
   console.log(`[agentfs] max_size=${MAX_SIZE / 1024 / 1024}MB`);
 });
