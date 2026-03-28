@@ -1,0 +1,141 @@
+name: WASM Dashboard Build (sparky aarch64)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rcc/dashboard/**'
+      - '.github/workflows/wasm-build.yml'
+  workflow_dispatch:        # allow manual trigger
+
+concurrency:
+  group: wasm-build-${{ github.ref }}
+  cancel-in-progress: true  # cancel stale build if new push arrives
+
+jobs:
+  build-wasm-aarch64:
+    name: Build WASM on sparky (aarch64 GB10)
+    runs-on: ubuntu-latest   # orchestrator — actual build runs on sparky via SSH
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Run build on sparky via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: sparky.tail407856.ts.net
+          username: jkh
+          key: ${{ secrets.SPARKY_SSH_KEY }}
+          timeout: 300s
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+            source "$HOME/.cargo/env"
+
+            echo "=== sparky WASM build ==="
+            echo "Commit: ${{ github.sha }}"
+            echo "Rust: $(rustc --version)"
+            echo "trunk: $(trunk --version)"
+            echo "sccache: $(sccache --version)"
+
+            cd ~/.openclaw/workspace
+            git fetch origin main
+            git checkout ${{ github.sha }} -- rcc/dashboard/
+
+            cd rcc/dashboard/dashboard-ui
+
+            # Build (sccache warm = ~9s, cold ~26s)
+            RUSTC_WRAPPER=sccache trunk build --release 2>&1
+
+            echo "=== Build complete ==="
+            du -sh ../dist/
+
+      - name: Package and publish dist artifact to MinIO
+        uses: appleboy/ssh-action@v1
+        with:
+          host: sparky.tail407856.ts.net
+          username: jkh
+          key: ${{ secrets.SPARKY_SSH_KEY }}
+          timeout: 60s
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.local/bin:$PATH"
+
+            DIST="$HOME/.openclaw/workspace/rcc/dashboard/dist"
+            TARBALL="/tmp/wasm-dist-${{ github.sha }}.tar.gz"
+
+            tar -czf "$TARBALL" -C "$DIST" .
+            echo "Artifact: $(du -sh $TARBALL)"
+
+            # Upload to MinIO via S3 API
+            python3 << 'PYEOF'
+            import urllib.request, json, hmac, hashlib, datetime, os, sys
+
+            sha_file = open("/tmp/wasm-dist-${{ github.sha }}.tar.gz", "rb").read()
+            payload = sha_file
+
+            endpoint = "http://100.89.199.14:9000"
+            access_key = "rocky2197fb96dde4618aa17f"
+            secret_key = "e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1"
+            bucket = "agents"
+            key = "natasha/wasm-dist-latest.tar.gz"
+            key_sha = "natasha/wasm-dist-${{ github.sha }}.tar.gz"
+
+            def sign(k, msg):
+                return hmac.new(k, msg.encode(), hashlib.sha256).digest()
+            def get_key(secret, date, region, service):
+                return sign(sign(sign(sign(("AWS4"+secret).encode(), date), region), service), "aws4_request")
+
+            def put_object(k, data):
+                now = datetime.datetime.utcnow()
+                amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+                date_stamp = now.strftime("%Y%m%d")
+                region, service = "us-east-1", "s3"
+                host = "100.89.199.14:9000"
+                content_type = "application/gzip"
+                payload_hash = hashlib.sha256(data).hexdigest()
+                canon_headers = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
+                signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+                canon_req = f"PUT\n/{bucket}/{k}\n\n{canon_headers}\n{signed_headers}\n{payload_hash}"
+                cred_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+                string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{cred_scope}\n{hashlib.sha256(canon_req.encode()).hexdigest()}"
+                sig_key = get_key(secret_key, date_stamp, region, service)
+                sig = hmac.new(sig_key, string_to_sign.encode(), hashlib.sha256).hexdigest()
+                auth = f"AWS4-HMAC-SHA256 Credential={access_key}/{cred_scope}, SignedHeaders={signed_headers}, Signature={sig}"
+                req = urllib.request.Request(f"{endpoint}/{bucket}/{k}", data=data, method="PUT")
+                req.add_header("Content-Type", content_type)
+                req.add_header("x-amz-date", amz_date)
+                req.add_header("x-amz-content-sha256", payload_hash)
+                req.add_header("Authorization", auth)
+                try:
+                    urllib.request.urlopen(req)
+                    print(f"Published: {k} ({len(data)} bytes)")
+                except Exception as e:
+                    print(f"Upload failed for {k}: {e}", file=sys.stderr)
+                    sys.exit(1)
+
+            put_object(key, payload)      # latest
+            put_object(key_sha, payload)  # immutable by SHA
+            PYEOF
+
+      - name: Run dashboard-server unit tests on sparky
+        uses: appleboy/ssh-action@v1
+        with:
+          host: sparky.tail407856.ts.net
+          username: jkh
+          key: ${{ secrets.SPARKY_SSH_KEY }}
+          timeout: 120s
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.cargo/bin:$PATH"
+            source "$HOME/.cargo/env"
+            cd ~/.openclaw/workspace/rcc/dashboard
+            cargo test --package dashboard-server 2>&1 | tail -5
