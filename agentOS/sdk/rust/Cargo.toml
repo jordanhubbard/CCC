@@ -1,0 +1,38 @@
+[package]
+name = "libagent"
+version = "0.1.0"
+edition = "2021"
+description = "agentOS SDK — Rust bindings"
+authors = ["Natasha <natasha@agentos.local>"]
+
+[lib]
+name = "libagent"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Core async runtime (no_std compatible subset)
+# Will be replaced by native agentOS IPC once kernel is up
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"], optional = true }
+
+# Serialization — messages and objects
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Crypto — agent identity
+ed25519-dalek = "2"
+rand = "0.8"
+sha2 = "0.10"
+
+# UUID — object and agent IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Schema validation
+schemars = "0.8"
+
+[features]
+default = ["std"]
+std = ["tokio"]
+no_std = []  # Future: bare-metal kernel-side use
+
+[dev-dependencies]
+pretty_assertions = "1"
