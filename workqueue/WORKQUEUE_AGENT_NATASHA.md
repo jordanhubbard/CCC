@@ -20,7 +20,7 @@ You are the workqueue processor for **Natasha**. You run periodically via cron.
 - RCC endpoints:
   - Queue: `GET http://146.190.134.110:8789/api/queue`
   - Dashboard: `http://146.190.134.110:8788/`
-  - SquirrelBus send: `POST http://146.190.134.110:8789/bus/send`
+  - SquirrelBus send: `POST http://146.190.134.110:8788/bus/send` ⚠️ port 8788 (dashboard), NOT 8789
   - SquirrelBus poll: `GET http://146.190.134.110:8789/bus/messages?to=natasha&since=<ts>&limit=20`
 
 ## Your Job
@@ -113,12 +113,11 @@ curl -X PATCH http://100.89.199.14:8789/api/agents/natasha \
 ## Sync Protocol
 
 ### Rocky (do-host1)
-1. **Mattermost DM** — user_id: `natasha's rocky-channel-id` (check MEMORY.md)
-2. **SquirrelBus** — `POST http://146.190.134.110:8789/bus/send` with `{"to":"rocky","from":"natasha","message":"<payload>"}` — ⚠️ returns 404 from sparky (known issue: wq-NAT-1774694350442)
+1. **SquirrelBus** — `POST http://146.190.134.110:8788/bus/send` (port 8788!) with `{"to":"rocky","from":"natasha","message":"<payload>"}` — ✅ confirmed working 2026-03-28
 
 ### Bullwinkle (puck)
 1. **Mattermost DM** — user_id: `ww1wef9sktf8jg8be6q5zj1aye` (Bullwinkle's Mattermost user_id)
-2. **SquirrelBus** — `{"to":"bullwinkle","from":"natasha","message":"<payload>"}`
+2. **SquirrelBus** — `POST http://146.190.134.110:8788/bus/send` with `{"to":"bullwinkle","from":"natasha","message":"<payload>"}`
 
 ### Sync Message Format
 ```
