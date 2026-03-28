@@ -81,8 +81,9 @@ function makeTestServer(port, token) {
       if (!v.ok) return jres(res, 400, { error: `invalid WASM: ${v.reason}` });
       const hash = sha(buf);
       const already = store.has(hash);
-      if (!already) store.set(hash, { buf, meta: { hash, size: buf.length, uploaded_at: new Date().toISOString(), aot: false }});
-      return jres(res, already ? 200 : 201, { hash, size: buf.length, already_exists: already });
+      const meta = { hash, size: buf.length, uploaded_at: new Date().toISOString(), aot: false, aot_size: null, aot_ms: null };
+      if (!already) store.set(hash, { buf, meta });
+      return jres(res, already ? 200 : 201, { hash, size: buf.length, already_exists: already, aot: false });
     }
 
     // GET /agentfs/modules (list)
@@ -217,6 +218,18 @@ describe('AgentFS', () => {
     const r = await req('GET', '/agentfs/modules');
     assert.equal(r.status, 200);
     assert.equal(r.body.count, 0);
+  });
+
+  test('POST returns aot field in metadata', async () => {
+    // Upload a fresh distinct module so this test is independent
+    const buf = Buffer.concat([VALID_WASM, Buffer.from('aot-test')]);
+    const r = await req('POST', '/agentfs/modules', buf, { 'Content-Type': 'application/wasm' });
+    assert.ok(r.status === 200 || r.status === 201, `unexpected status ${r.status}`);
+    // aot is a boolean in the real server; the mock returns false (no wasmtime in test env)
+    assert.ok('aot' in r.body, 'aot field must be present in response');
+    assert.equal(r.body.size, buf.length);
+    // clean up
+    await req('DELETE', `/agentfs/modules/${r.body.hash}`);
   });
 
   test('content-addressing: same bytes = same hash always', async () => {
