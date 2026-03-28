@@ -1,0 +1,8 @@
+[Unit]
+Description=Ollama GPU model keepalive ping (nomic-embed-text)
+After=ollama.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/.openclaw/workspace/rcc/scripts/ollama-keepalive.sh
+Environment=OLLAMA_KEEPALIVE_MODEL=nomic-embed-text

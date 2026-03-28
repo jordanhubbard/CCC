@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep nomic-embed-text loaded in GPU memory between cron ticks
+After=ollama.service
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=4min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
