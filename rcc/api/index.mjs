@@ -33,7 +33,9 @@ const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKE
 const START_TIME   = Date.now();
 const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
 const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
-const SECRETS_PATH    = process.env.SECRETS_PATH    || '../data/secrets.json';
+const SECRETS_PATH       = process.env.SECRETS_PATH       || '../data/secrets.json';
+const CONVERSATIONS_PATH = process.env.CONVERSATIONS_PATH || './data/conversations.json';
+const USERS_PATH         = process.env.USERS_PATH         || './data/users.json';
 
 // ── Slack config ───────────────────────────────────────────────────────────
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
@@ -311,6 +313,32 @@ async function readCalendar() {
 
 async function writeCalendar(data) {
   const p = new URL(CALENDAR_PATH, import.meta.url).pathname;
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
+// ── Conversations I/O ─────────────────────────────────────────────────────
+async function readConversations() {
+  const p = new URL(CONVERSATIONS_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return [];
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeConversations(data) {
+  const p = new URL(CONVERSATIONS_PATH, import.meta.url).pathname;
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
+
+// ── Users I/O ─────────────────────────────────────────────────────────────
+async function readUsers() {
+  const p = new URL(USERS_PATH, import.meta.url).pathname;
+  if (!existsSync(p)) return [];
+  return JSON.parse(await readFile(p, 'utf8'));
+}
+
+async function writeUsers(data) {
+  const p = new URL(USERS_PATH, import.meta.url).pathname;
   await mkdir(dirname(p), { recursive: true });
   await writeFile(p, JSON.stringify(data, null, 2));
 }
@@ -989,6 +1017,12 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       console.log(`[rcc-api] Onboard script generated for ${entry.agent} from ${req.socket?.remoteAddress}`);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end(script);
+    }
+
+    // ── GET /api/users — public human participant registry ────────────────
+    if (method === 'GET' && path === '/api/users') {
+      const users = await readUsers();
+      return json(res, 200, users);
     }
 
     // ── Auth-required endpoints ───────────────────────────────────────────
@@ -2826,6 +2860,215 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       await writeFile(logPath, records.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
 
       return json(res, 200, { ok: true, execId });
+    }
+
+    // ── POST /api/projects — create project ───────────────────────────────
+    if (method === 'POST' && path === '/api/projects') {
+      const body = await readBody(req);
+      if (!body.name) return json(res, 400, { error: 'name required' });
+      const projects = await readProjects();
+      const id = `proj-${Date.now()}`;
+      const project = {
+        id,
+        name: body.name,
+        description: body.description || '',
+        repoUrl: body.repoUrl || null,
+        slackChannels: body.slackChannels || [],
+        tags: body.tags || [],
+        status: body.status || 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      projects.push(project);
+      await writeProjects(projects);
+      return json(res, 201, { ok: true, project });
+    }
+
+    // ── PATCH /api/projects/:id — update project ──────────────────────────
+    const projectPatchMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+    if (method === 'PATCH' && projectPatchMatch) {
+      const id = decodeURIComponent(projectPatchMatch[1]);
+      const body = await readBody(req);
+      const projects = await readProjects();
+      const idx = projects.findIndex(p => p.id === id);
+      if (idx === -1) return json(res, 404, { error: 'Project not found' });
+      const allowed = ['name','description','repoUrl','slackChannels','tags','status'];
+      for (const field of allowed) {
+        if (body[field] !== undefined) projects[idx][field] = body[field];
+      }
+      projects[idx].updatedAt = new Date().toISOString();
+      await writeProjects(projects);
+      return json(res, 200, { ok: true, project: projects[idx] });
+    }
+
+    // ── DELETE /api/projects/:id — soft-delete (archive) ─────────────────
+    const projectDeleteMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+    if (method === 'DELETE' && projectDeleteMatch) {
+      const id = decodeURIComponent(projectDeleteMatch[1]);
+      const projects = await readProjects();
+      const idx = projects.findIndex(p => p.id === id);
+      if (idx === -1) return json(res, 404, { error: 'Project not found' });
+      projects[idx].status = 'archived';
+      projects[idx].updatedAt = new Date().toISOString();
+      await writeProjects(projects);
+      return json(res, 200, { ok: true, project: projects[idx] });
+    }
+
+    // ── DELETE /api/item/:id — tombstone item ─────────────────────────────
+    const itemDeleteMatch = path.match(/^\/api\/item\/([^/]+)$/);
+    if (method === 'DELETE' && itemDeleteMatch) {
+      const id = decodeURIComponent(itemDeleteMatch[1]);
+      const q = await readQueue();
+      const idx = (q.items || []).findIndex(i => i.id === id);
+      if (idx === -1) return json(res, 404, { error: 'Item not found' });
+      const [item] = q.items.splice(idx, 1);
+      item.status = 'deleted';
+      item.deletedAt = new Date().toISOString();
+      if (!q.deleted) q.deleted = [];
+      q.deleted.push(item);
+      await writeQueue(q);
+      return json(res, 200, { ok: true, item });
+    }
+
+    // ── GET /api/conversations — filter/list ──────────────────────────────
+    if (method === 'GET' && path === '/api/conversations') {
+      const convs = await readConversations();
+      const { project, agent, channel, since } = Object.fromEntries(url.searchParams);
+      let result = convs;
+      if (project) result = result.filter(c => c.projectId === project);
+      if (agent)   result = result.filter(c => (c.participants || []).includes(agent));
+      if (channel) result = result.filter(c => c.channel === channel);
+      if (since)   result = result.filter(c => c.createdAt >= since);
+      return json(res, 200, result);
+    }
+
+    // ── POST /api/conversations — create conversation ─────────────────────
+    if (method === 'POST' && path === '/api/conversations') {
+      const body = await readBody(req);
+      const convs = await readConversations();
+      const conv = {
+        id: `conv-${Date.now()}`,
+        participants: body.participants || [],
+        channel: body.channel || null,
+        projectId: body.projectId || null,
+        messages: body.messages || [],
+        tags: body.tags || [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      convs.push(conv);
+      await writeConversations(convs);
+      return json(res, 201, { ok: true, conversation: conv });
+    }
+
+    // ── GET /api/conversations/:id — single conversation ──────────────────
+    const convDetailMatch = path.match(/^\/api\/conversations\/([^/]+)$/);
+    if (method === 'GET' && convDetailMatch) {
+      const id = decodeURIComponent(convDetailMatch[1]);
+      const convs = await readConversations();
+      const conv = convs.find(c => c.id === id);
+      if (!conv) return json(res, 404, { error: 'Conversation not found' });
+      return json(res, 200, conv);
+    }
+
+    // ── POST /api/conversations/:id/messages — append message ────────────
+    const convMsgMatch = path.match(/^\/api\/conversations\/([^/]+)\/messages$/);
+    if (method === 'POST' && convMsgMatch) {
+      const id = decodeURIComponent(convMsgMatch[1]);
+      const body = await readBody(req);
+      if (!body.author || !body.text) return json(res, 400, { error: 'author and text required' });
+      const convs = await readConversations();
+      const idx = convs.findIndex(c => c.id === id);
+      if (idx === -1) return json(res, 404, { error: 'Conversation not found' });
+      const message = { ts: new Date().toISOString(), author: body.author, text: body.text };
+      if (!convs[idx].messages) convs[idx].messages = [];
+      convs[idx].messages.push(message);
+      convs[idx].updatedAt = new Date().toISOString();
+      await writeConversations(convs);
+      return json(res, 201, { ok: true, message });
+    }
+
+    // ── POST /api/users — create user ─────────────────────────────────────
+    if (method === 'POST' && path === '/api/users') {
+      const body = await readBody(req);
+      if (!body.handle) return json(res, 400, { error: 'handle required' });
+      const users = await readUsers();
+      if (users.find(u => u.handle === body.handle)) return json(res, 409, { error: 'handle already exists' });
+      const user = {
+        id: `user-${Date.now()}`,
+        name: body.name || body.handle,
+        handle: body.handle,
+        channels: body.channels || {},
+        role: body.role || 'human',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      users.push(user);
+      await writeUsers(users);
+      return json(res, 201, { ok: true, user });
+    }
+
+    // ── PATCH /api/users/:id — update user ───────────────────────────────
+    const userPatchMatch = path.match(/^\/api\/users\/([^/]+)$/);
+    if (method === 'PATCH' && userPatchMatch) {
+      const id = decodeURIComponent(userPatchMatch[1]);
+      const body = await readBody(req);
+      const users = await readUsers();
+      const idx = users.findIndex(u => u.id === id);
+      if (idx === -1) return json(res, 404, { error: 'User not found' });
+      const allowed = ['name','handle','channels','role'];
+      for (const field of allowed) {
+        if (body[field] !== undefined) users[idx][field] = body[field];
+      }
+      users[idx].updatedAt = new Date().toISOString();
+      await writeUsers(users);
+      return json(res, 200, { ok: true, user: users[idx] });
+    }
+
+    // ── POST /api/agents/:name/events — record agent event ───────────────
+    const agentEventMatch = path.match(/^\/api\/agents\/([^/]+)\/events$/);
+    if (method === 'POST' && agentEventMatch) {
+      const name = decodeURIComponent(agentEventMatch[1]);
+      const body = await readBody(req);
+      if (!body.event) return json(res, 400, { error: 'event required' });
+      const eventEntry = {
+        ts: new Date().toISOString(),
+        agent: name,
+        event: body.event,
+        detail: body.detail || null,
+        pullRev: body.pullRev || null,
+      };
+      const histDir = new URL('./data/agent-history', import.meta.url).pathname;
+      await mkdir(histDir, { recursive: true });
+      const histFile = `${histDir}/${name}.jsonl`;
+      await appendFile(histFile, JSON.stringify(eventEntry) + '\n', 'utf8');
+      return json(res, 201, { ok: true, event: eventEntry });
+    }
+
+    // ── GET /api/agents/:name/history — last 100 events ──────────────────
+    const agentHistMatch = path.match(/^\/api\/agents\/([^/]+)\/history$/);
+    if (method === 'GET' && agentHistMatch) {
+      const name = decodeURIComponent(agentHistMatch[1]);
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 500);
+      let entries = [];
+      try {
+        const histFile = new URL(`./data/agent-history/${name}.jsonl`, import.meta.url).pathname;
+        if (existsSync(histFile)) {
+          const content = await readFile(histFile, 'utf8');
+          const lines = content.trim().split('\n').filter(Boolean);
+          entries = lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        }
+        // Fall back to heartbeat history if no dedicated events yet
+        if (entries.length === 0) {
+          const hbFile = new URL(`./data/heartbeat-history/${name}.jsonl`, import.meta.url).pathname;
+          if (existsSync(hbFile)) {
+            const content = await readFile(hbFile, 'utf8');
+            const lines = content.trim().split('\n').filter(Boolean);
+            entries = lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          }
+        }
+      } catch {}
+      return json(res, 200, { ok: true, agent: name, entries });
     }
 
     return json(res, 404, { error: 'Not found' });

@@ -18,22 +18,31 @@ const TEST_PORT   = 19200 + Math.floor(Math.random() * 100);
 const TEST_QUEUE  = join(tmpdir(), `rcc-api-queue-${Date.now()}.json`);
 const TEST_AGENTS = join(tmpdir(), `rcc-api-agents-${Date.now()}.json`);
 const TEST_CAPS   = join(tmpdir(), `rcc-api-caps-${Date.now()}.json`);
+const TEST_CONVS  = join(tmpdir(), `rcc-api-convs-${Date.now()}.json`);
+const TEST_USERS  = join(tmpdir(), `rcc-api-users-${Date.now()}.json`);
+const TEST_PROJS  = join(tmpdir(), `rcc-api-projs-${Date.now()}.json`);
 
 // Use first token as admin (matches RCC_ADMIN_TOKEN logic)
 const ADMIN_TOKEN = 'api-test-admin-token';
 const AGENT_TOKEN = 'api-test-agent-token';
 
-process.env.RCC_PORT          = String(TEST_PORT);
-process.env.QUEUE_PATH        = TEST_QUEUE;
-process.env.AGENTS_PATH       = TEST_AGENTS;
-process.env.CAPABILITIES_PATH = TEST_CAPS;
-process.env.RCC_AUTH_TOKENS   = `${ADMIN_TOKEN},${AGENT_TOKEN}`;
-process.env.RCC_ADMIN_TOKEN   = ADMIN_TOKEN;
-process.env.BRAIN_STATE_PATH  = join(tmpdir(), `rcc-api-brain-${Date.now()}.json`);
+process.env.RCC_PORT             = String(TEST_PORT);
+process.env.QUEUE_PATH           = TEST_QUEUE;
+process.env.AGENTS_PATH          = TEST_AGENTS;
+process.env.CAPABILITIES_PATH    = TEST_CAPS;
+process.env.CONVERSATIONS_PATH   = TEST_CONVS;
+process.env.USERS_PATH           = TEST_USERS;
+process.env.PROJECTS_PATH        = TEST_PROJS;
+process.env.RCC_AUTH_TOKENS      = `${ADMIN_TOKEN},${AGENT_TOKEN}`;
+process.env.RCC_ADMIN_TOKEN      = ADMIN_TOKEN;
+process.env.BRAIN_STATE_PATH     = join(tmpdir(), `rcc-api-brain-${Date.now()}.json`);
 
 await writeFile(TEST_QUEUE,  JSON.stringify({ items: [], completed: [] }, null, 2));
 await writeFile(TEST_AGENTS, JSON.stringify({}, null, 2));
 await writeFile(TEST_CAPS,   JSON.stringify({}, null, 2));
+await writeFile(TEST_CONVS,  JSON.stringify([], null, 2));
+await writeFile(TEST_USERS,  JSON.stringify([], null, 2));
+await writeFile(TEST_PROJS,  JSON.stringify([], null, 2));
 
 const { startServer } = await import('../api/index.mjs');
 
@@ -52,6 +61,9 @@ after(async () => {
     unlink(TEST_QUEUE).catch(() => {}),
     unlink(TEST_AGENTS).catch(() => {}),
     unlink(TEST_CAPS).catch(() => {}),
+    unlink(TEST_CONVS).catch(() => {}),
+    unlink(TEST_USERS).catch(() => {}),
+    unlink(TEST_PROJS).catch(() => {}),
   ]);
   // Force exit: the API sets a 5-minute setInterval (disappearance check)
   // that keeps the event loop alive after server.close(). We exit explicitly.
@@ -378,5 +390,265 @@ describe('Scout and cron endpoints', () => {
     const r = await authed('/api/crons/test-agent', 'POST', { jobId: 'test-job', status: 'ok' });
     assert.equal(r.status, 200);
     assert.ok(r.body.ok);
+  });
+});
+
+// ── Projects CRUD ────────────────────────────────────────────────────────────
+
+describe('Projects CRUD', () => {
+  let createdProjectId;
+
+  test('POST /api/projects requires auth', async () => {
+    const r = await req('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'unauthed-project' }),
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test('POST /api/projects requires name', async () => {
+    const r = await authed('/api/projects', 'POST', { description: 'no name' });
+    assert.equal(r.status, 400);
+  });
+
+  test('POST /api/projects creates project', async () => {
+    const r = await authed('/api/projects', 'POST', {
+      name: 'test-project',
+      description: 'Created by api.test.mjs',
+      tags: ['test'],
+    });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.ok);
+    assert.ok(r.body.project.id);
+    assert.equal(r.body.project.name, 'test-project');
+    assert.equal(r.body.project.status, 'active');
+    createdProjectId = r.body.project.id;
+  });
+
+  test('PATCH /api/projects/:id updates project', async () => {
+    assert.ok(createdProjectId, 'need a created project');
+    const r = await authed(`/api/projects/${createdProjectId}`, 'PATCH', { description: 'updated' });
+    assert.equal(r.status, 200);
+    assert.ok(r.body.ok);
+    assert.equal(r.body.project.description, 'updated');
+  });
+
+  test('PATCH /api/projects/:id — nonexistent returns 404', async () => {
+    const r = await authed('/api/projects/nonexistent-proj-xyz', 'PATCH', { description: 'x' });
+    assert.equal(r.status, 404);
+  });
+
+  test('DELETE /api/projects/:id soft-deletes (sets status=archived)', async () => {
+    assert.ok(createdProjectId, 'need a created project');
+    const r = await authed(`/api/projects/${createdProjectId}`, 'DELETE');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.ok);
+    assert.equal(r.body.project.status, 'archived');
+  });
+
+  test('DELETE /api/projects/:id — nonexistent returns 404', async () => {
+    const r = await authed('/api/projects/nonexistent-proj-xyz', 'DELETE');
+    assert.equal(r.status, 404);
+  });
+});
+
+// ── Item DELETE ──────────────────────────────────────────────────────────────
+
+describe('Item DELETE', () => {
+  let itemId;
+
+  test('setup: create item to delete', async () => {
+    const r = await authed('/api/queue', 'POST', { title: 'item to delete' });
+    assert.equal(r.status, 201);
+    itemId = r.body.item.id;
+  });
+
+  test('DELETE /api/item/:id requires auth', async () => {
+    assert.ok(itemId, 'need an item');
+    const r = await req(`/api/item/${itemId}`, { method: 'DELETE' });
+    assert.equal(r.status, 401);
+  });
+
+  test('DELETE /api/item/:id tombstones item', async () => {
+    assert.ok(itemId, 'need an item');
+    const r = await authed(`/api/item/${itemId}`, 'DELETE');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.ok);
+    assert.equal(r.body.item.status, 'deleted');
+  });
+
+  test('DELETE /api/item/:id — nonexistent returns 404', async () => {
+    const r = await authed('/api/item/nonexistent-item-xyz', 'DELETE');
+    assert.equal(r.status, 404);
+  });
+});
+
+// ── Conversations CRUD ───────────────────────────────────────────────────────
+
+describe('Conversations CRUD', () => {
+  let convId;
+
+  test('GET /api/conversations requires auth', async () => {
+    const r = await req('/api/conversations');
+    assert.equal(r.status, 401);
+  });
+
+  test('POST /api/conversations creates conversation', async () => {
+    const r = await authed('/api/conversations', 'POST', {
+      participants: ['jkh', 'rocky'],
+      channel: 'slack',
+      tags: ['test'],
+    });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.ok);
+    assert.ok(r.body.conversation.id);
+    convId = r.body.conversation.id;
+  });
+
+  test('GET /api/conversations returns list', async () => {
+    const r = await authed('/api/conversations');
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.body));
+    assert.ok(r.body.length > 0);
+  });
+
+  test('GET /api/conversations?channel=slack filters by channel', async () => {
+    const r = await authed('/api/conversations?channel=slack');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.every(c => c.channel === 'slack'));
+  });
+
+  test('GET /api/conversations/:id returns single conversation', async () => {
+    assert.ok(convId, 'need a conversation');
+    const r = await authed(`/api/conversations/${convId}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.id, convId);
+  });
+
+  test('GET /api/conversations/:id — nonexistent returns 404', async () => {
+    const r = await authed('/api/conversations/nonexistent-conv-xyz');
+    assert.equal(r.status, 404);
+  });
+
+  test('POST /api/conversations/:id/messages appends message', async () => {
+    assert.ok(convId, 'need a conversation');
+    const r = await authed(`/api/conversations/${convId}/messages`, 'POST', {
+      author: 'jkh',
+      text: 'hello from test',
+    });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.ok);
+    assert.equal(r.body.message.author, 'jkh');
+    assert.equal(r.body.message.text, 'hello from test');
+  });
+
+  test('POST /api/conversations/:id/messages requires author and text', async () => {
+    assert.ok(convId, 'need a conversation');
+    const r = await authed(`/api/conversations/${convId}/messages`, 'POST', { author: 'jkh' });
+    assert.equal(r.status, 400);
+  });
+});
+
+// ── Users CRUD ───────────────────────────────────────────────────────────────
+
+describe('Users CRUD', () => {
+  let userId;
+
+  test('GET /api/users is public (no auth required)', async () => {
+    const r = await req('/api/users');
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.body));
+  });
+
+  test('POST /api/users requires auth', async () => {
+    const r = await req('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle: 'unauthed-user' }),
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test('POST /api/users requires handle', async () => {
+    const r = await authed('/api/users', 'POST', { name: 'No Handle' });
+    assert.equal(r.status, 400);
+  });
+
+  test('POST /api/users creates user', async () => {
+    const r = await authed('/api/users', 'POST', {
+      name: 'Test User',
+      handle: 'testuser',
+      role: 'human',
+      channels: { slack: 'U12345' },
+    });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.ok);
+    assert.ok(r.body.user.id);
+    assert.equal(r.body.user.handle, 'testuser');
+    userId = r.body.user.id;
+  });
+
+  test('POST /api/users — duplicate handle returns 409', async () => {
+    const r = await authed('/api/users', 'POST', { handle: 'testuser' });
+    assert.equal(r.status, 409);
+  });
+
+  test('PATCH /api/users/:id updates user', async () => {
+    assert.ok(userId, 'need a user');
+    const r = await authed(`/api/users/${userId}`, 'PATCH', { name: 'Updated Name' });
+    assert.equal(r.status, 200);
+    assert.ok(r.body.ok);
+    assert.equal(r.body.user.name, 'Updated Name');
+  });
+
+  test('PATCH /api/users/:id — nonexistent returns 404', async () => {
+    const r = await authed('/api/users/nonexistent-user-xyz', 'PATCH', { name: 'x' });
+    assert.equal(r.status, 404);
+  });
+});
+
+// ── Agent events & history ───────────────────────────────────────────────────
+
+describe('Agent events and history', () => {
+  test('POST /api/agents/:name/events requires auth', async () => {
+    const r = await req('/api/agents/test-agent/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'boot' }),
+    });
+    assert.equal(r.status, 401);
+  });
+
+  test('POST /api/agents/:name/events requires event field', async () => {
+    const r = await authed('/api/agents/test-agent/events', 'POST', { detail: 'no event key' });
+    assert.equal(r.status, 400);
+  });
+
+  test('POST /api/agents/:name/events records event', async () => {
+    const r = await authed('/api/agents/test-agent/events', 'POST', {
+      event: 'boot',
+      detail: 'agent started',
+      pullRev: 'abc1234',
+    });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.ok);
+    assert.equal(r.body.event.event, 'boot');
+    assert.equal(r.body.event.agent, 'test-agent');
+    assert.equal(r.body.event.pullRev, 'abc1234');
+  });
+
+  test('GET /api/agents/:name/history requires auth', async () => {
+    const r = await req('/api/agents/test-agent/history');
+    assert.equal(r.status, 401);
+  });
+
+  test('GET /api/agents/:name/history returns entries array', async () => {
+    const r = await authed('/api/agents/test-agent/history');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.ok);
+    assert.ok(Array.isArray(r.body.entries));
+    assert.ok(r.body.entries.length > 0, 'should have the event we just posted');
+    assert.equal(r.body.entries[0].event, 'boot');
   });
 });
