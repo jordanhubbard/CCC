@@ -8,11 +8,21 @@
  *   - SquirrelChat messages
  *
  * All failures are logged but never thrown — ingest is best-effort.
+ *
+ * Backend selection:
+ *   EMBED_BACKEND=local  → uses ollama nomic-embed-text (768-dim) on sparky
+ *                          memory files go to rcc_memory_sparky collection
+ *   EMBED_BACKEND=remote → uses NVIDIA NIM text-embedding-3-large (3072-dim) [default]
+ *                          memory files go to rcc_memory collection
  */
 
 import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import { vectorUpsert, ensureCollections } from './index.mjs';
+
+// When EMBED_BACKEND=local, route memory ingest to the sparky-local collection
+const EMBED_BACKEND = process.env.EMBED_BACKEND || 'remote';
+const MEMORY_COLLECTION = EMBED_BACKEND === 'local' ? 'rcc_memory_sparky' : 'rcc_memory';
 
 let collectionsReady = false;
 
@@ -45,7 +55,9 @@ function chunkMarkdown(content, filePath) {
 }
 
 /**
- * Ingest a markdown memory file into rcc_memory collection.
+ * Ingest a markdown memory file into the active memory collection.
+ * Uses rcc_memory_sparky (768-dim local) when EMBED_BACKEND=local,
+ * or rcc_memory (3072-dim remote) otherwise.
  */
 export async function ingestMemoryFile(filePath) {
   try {
@@ -54,10 +66,10 @@ export async function ingestMemoryFile(filePath) {
     const chunks = chunkMarkdown(content, filePath);
     let count = 0;
     for (const chunk of chunks) {
-      await vectorUpsert('rcc_memory', chunk.id, chunk.text, chunk.metadata).catch(() => {});
+      await vectorUpsert(MEMORY_COLLECTION, chunk.id, chunk.text, chunk.metadata).catch(() => {});
       count++;
     }
-    console.log(`[ingest] ${filePath} → ${count}/${chunks.length} chunks`);
+    console.log(`[ingest] ${filePath} → ${count}/${chunks.length} chunks (${MEMORY_COLLECTION}, backend=${EMBED_BACKEND})`);
   } catch (err) {
     console.warn(`[ingest] Failed to ingest ${filePath}:`, err.message);
   }
@@ -98,7 +110,8 @@ export async function ingestLesson(lesson) {
 }
 
 /**
- * Ingest a SquirrelChat message into rcc_memory collection.
+ * Ingest a SquirrelChat message into the active memory collection.
+ * Routes to rcc_memory_sparky (768-dim) when EMBED_BACKEND=local.
  */
 export async function ingestMessage(msg) {
   try {
@@ -106,7 +119,7 @@ export async function ingestMessage(msg) {
     const text = msg.text || '';
     if (!text || text.length < 5) return;
     const id = createHash('md5').update(`squirrelchat:${msg.id}:${msg.ts}`).digest('hex');
-    await vectorUpsert('rcc_memory', id, text.slice(0, 1000), {
+    await vectorUpsert(MEMORY_COLLECTION, id, text.slice(0, 1000), {
       source: `squirrelchat:${msg.id}`,
       type: 'squirrelchat',
       from_agent: msg.from_agent || 'unknown',

@@ -33,6 +33,21 @@ const EMBED_DIM       = parseInt(process.env.EMBED_DIM || '3072', 10);
 // Note: azure/openai/text-embedding-3-large via NVIDIA gateway = 3072-dim vectors
 const AGENT_NAME      = process.env.AGENT_NAME || 'rocky';
 
+// ── Local embedding backend (ollama) ───────────────────────────────────────
+// Set EMBED_BACKEND=local to use ollama nomic-embed-text (768-dim) on sparky.
+// This avoids network latency for high-volume local memory ingest.
+// Cross-agent queries should still use the default Azure 3072-dim backend.
+const EMBED_BACKEND       = process.env.EMBED_BACKEND || 'remote';  // 'local' | 'remote'
+const OLLAMA_BASE_URL     = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+const OLLAMA_EMBED_MODEL  = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+const LOCAL_EMBED_DIM     = parseInt(process.env.LOCAL_EMBED_DIM || '768', 10);
+
+// The effective embedding dimension depends on backend
+const effectiveDim = EMBED_BACKEND === 'local' ? LOCAL_EMBED_DIM : EMBED_DIM;
+
+// Sparky-local collection: uses 768-dim nomic-embed-text vectors
+const LOCAL_COLLECTION = 'rcc_memory_sparky';
+
 // NV-Embed-v2 outputs 4096-dim. If using text-embedding-3-large, set dim=1536.
 // Default to nv-embed-v2 for NVIDIA infra.
 const COLLECTION_CONFIGS = {
@@ -64,10 +79,24 @@ const COLLECTION_CONFIGS = {
     ],
   },
   rcc_memory: {
-    description: 'Agent memory snippets — semantic recall',
+    description: 'Agent memory snippets — semantic recall (3072-dim, cross-agent)',
     fields: [
       { name: 'id',      data_type: DataType.VarChar, is_primary_key: true, max_length: 128 },
       { name: 'vector',  data_type: DataType.FloatVector, dim: EMBED_DIM },
+      { name: 'agent',   data_type: DataType.VarChar, max_length: 32 },
+      { name: 'content', data_type: DataType.VarChar, max_length: 4096 },
+      { name: 'source',  data_type: DataType.VarChar, max_length: 256 },
+      { name: 'ts',      data_type: DataType.VarChar, max_length: 32 },
+    ],
+  },
+  // Sparky-local: uses 768-dim nomic-embed-text via ollama for zero-latency GPU ingest.
+  // High-volume writes: daily memory files, SquirrelBus messages, queue items.
+  // NOT for cross-agent queries — use rcc_memory for those.
+  rcc_memory_sparky: {
+    description: 'Sparky-local memory (768-dim, nomic-embed-text, GPU-accelerated)',
+    fields: [
+      { name: 'id',      data_type: DataType.VarChar, is_primary_key: true, max_length: 128 },
+      { name: 'vector',  data_type: DataType.FloatVector, dim: LOCAL_EMBED_DIM },
       { name: 'agent',   data_type: DataType.VarChar, max_length: 32 },
       { name: 'content', data_type: DataType.VarChar, max_length: 4096 },
       { name: 'source',  data_type: DataType.VarChar, max_length: 256 },
@@ -89,10 +118,40 @@ function getClient() {
 // ── Embedding ───────────────────────────────────────────────────────────────
 
 /**
+ * Get a single embedding via ollama (nomic-embed-text, 768-dim).
+ * Used when EMBED_BACKEND=local or for rcc_memory_sparky collection.
+ */
+async function embedLocal(text) {
+  const resp = await fetch(`${OLLAMA_BASE_URL}/api/embed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, input: text.slice(0, 8000) }),
+  });
+  if (!resp.ok) {
+    const err = await resp.text().catch(() => '');
+    throw new Error(`[vector] ollama embed error ${resp.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  return data.embeddings[0];
+}
+
+/**
+ * Batch embed via ollama. ollama /api/embed accepts a single input string or array.
+ */
+async function embedBatchLocal(texts) {
+  // ollama processes one at a time (no true batch API), but calls are fast on GPU
+  const results = [];
+  for (const text of texts) {
+    results.push(await embedLocal(text));
+  }
+  return results;
+}
+
+/**
  * Get embeddings from NVIDIA NIM or compatible OpenAI endpoint.
  * Returns float[] of length EMBED_DIM.
  */
-export async function embed(text) {
+async function embedRemote(text) {
   if (!EMBED_API_KEY) {
     throw new Error('[vector] NVIDIA_API_KEY not set — cannot generate embeddings');
   }
@@ -120,10 +179,11 @@ export async function embed(text) {
 }
 
 /**
- * Batch embed multiple texts. Returns array of float[] vectors.
+ * Batch embed multiple texts via remote API. Returns array of float[] vectors.
  * Respects NIM batch limits (chunks of 16).
  */
-export async function embedBatch(texts, batchSize = 16) {
+async function embedBatchRemote(texts, batchSize = 16) {
+  if (!EMBED_API_KEY) throw new Error('[vector] NVIDIA_API_KEY not set');
   const results = [];
   for (let i = 0; i < texts.length; i += batchSize) {
     const chunk = texts.slice(i, i + batchSize);
@@ -144,6 +204,31 @@ export async function embedBatch(texts, batchSize = 16) {
     results.push(...data.data.map(d => d.embedding));
   }
   return results;
+}
+
+/**
+ * Embed text using the configured backend (local=ollama, remote=NVIDIA NIM).
+ * Returns float[] of appropriate dimension (768 local, 3072 remote).
+ */
+export async function embed(text, backend = EMBED_BACKEND) {
+  return backend === 'local' ? embedLocal(text) : embedRemote(text);
+}
+
+/**
+ * Batch embed multiple texts. Routes to local (ollama) or remote (NIM) backend.
+ */
+export async function embedBatch(texts, batchSize = 16) {
+  return EMBED_BACKEND === 'local'
+    ? embedBatchLocal(texts)
+    : embedBatchRemote(texts, batchSize);
+}
+
+/**
+ * Embed for a specific collection — auto-selects backend based on collection name.
+ * rcc_memory_sparky always uses local (768-dim); all others use the configured backend.
+ */
+async function embedForCollection(text, collection) {
+  return collection === LOCAL_COLLECTION ? embedLocal(text) : embed(text);
 }
 
 // ── Collection management ────────────────────────────────────────────────────
@@ -194,7 +279,7 @@ export async function ensureCollections() {
  */
 export async function vectorUpsert(collection, id, text, meta = {}) {
   const client = getClient();
-  const vector = await embed(text);
+  const vector = await embedForCollection(text, collection);
 
   // Milvus v2 SDK: upsert is insert with overwrite (or use delete+insert)
   try {
@@ -216,7 +301,10 @@ export async function vectorUpsertBatch(collection, items) {
   if (!items.length) return;
   const client = getClient();
   const texts = items.map(i => i.text);
-  const vectors = await embedBatch(texts);
+  // Route batch embedding to local (ollama) for sparky-local collection
+  const vectors = collection === LOCAL_COLLECTION
+    ? await embedBatchLocal(texts)
+    : await embedBatch(texts);
 
   // Delete existing ids
   const ids = items.map(i => `"${i.id}"`).join(', ');
@@ -247,7 +335,7 @@ export async function vectorUpsertBatch(collection, items) {
  */
 export async function vectorSearch(collection, query, limit = 5, filter = '') {
   const client = getClient();
-  const queryVec = await embed(query);
+  const queryVec = await embedForCollection(query, collection);
 
   const cfg = COLLECTION_CONFIGS[collection];
   if (!cfg) throw new Error(`[vector] Unknown collection: ${collection}`);
@@ -342,6 +430,7 @@ export async function searchQueue(query, limit = 5, filter = '') {
 
 /**
  * Store an agent memory snippet for later recall.
+ * Uses the cross-agent rcc_memory collection (3072-dim, remote embed).
  * id = hash of content (dedup by content).
  */
 export async function rememberSnippet(content, source = '', agent = AGENT_NAME) {
@@ -356,11 +445,37 @@ export async function rememberSnippet(content, source = '', agent = AGENT_NAME) 
 }
 
 /**
+ * Store a memory snippet into the Sparky-local collection (768-dim, GPU, no API key needed).
+ * Use for high-volume local ingest on sparky: daily notes, session context, etc.
+ * id = hash of content (dedup by content).
+ */
+export async function rememberSnippetLocal(content, source = '', agent = AGENT_NAME) {
+  const id = createHash('sha256').update(content).digest('hex').slice(0, 32);
+  await vectorUpsert(LOCAL_COLLECTION, id, content, {
+    agent:   agent.slice(0, 32),
+    content: content.slice(0, 4096),
+    source:  source.slice(0, 256),
+    ts:      new Date().toISOString().slice(0, 32),
+  });
+  return id;
+}
+
+/**
  * Recall relevant memory snippets for a query.
+ * Uses cross-agent rcc_memory (3072-dim).
  */
 export async function recallMemory(query, limit = 5, agentFilter = '') {
   const filter = agentFilter ? `agent == "${agentFilter}"` : '';
   return vectorSearch('rcc_memory', query, limit, filter);
+}
+
+/**
+ * Recall from Sparky-local memory (768-dim, GPU embed, no API key).
+ * Suitable for local-only recall on sparky.
+ */
+export async function recallMemoryLocal(query, limit = 5, agentFilter = '') {
+  const filter = agentFilter ? `agent == "${agentFilter}"` : '';
+  return vectorSearch(LOCAL_COLLECTION, query, limit, filter);
 }
 
 // ── Health check ──────────────────────────────────────────────────────────────
@@ -369,7 +484,31 @@ export async function vectorHealth() {
   try {
     const client = getClient();
     const health = await client.checkHealth();
-    return { ok: health.isHealthy, address: MILVUS_ADDRESS, model: EMBED_MODEL, dim: EMBED_DIM };
+
+    // Check ollama local embed health
+    let localOk = false;
+    let localModel = null;
+    try {
+      const ollamaResp = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
+      if (ollamaResp.ok) {
+        const tags = await ollamaResp.json();
+        localModel = (tags.models || []).find(m => m.name.startsWith(OLLAMA_EMBED_MODEL));
+        localOk = !!localModel;
+      }
+    } catch { /* ollama not running */ }
+
+    return {
+      ok: health.isHealthy,
+      address: MILVUS_ADDRESS,
+      remote: { model: EMBED_MODEL, dim: EMBED_DIM },
+      local: {
+        ok: localOk,
+        backend: EMBED_BACKEND,
+        model: OLLAMA_EMBED_MODEL,
+        dim: LOCAL_EMBED_DIM,
+        url: OLLAMA_BASE_URL,
+      },
+    };
   } catch (err) {
     return { ok: false, error: err.message };
   }
