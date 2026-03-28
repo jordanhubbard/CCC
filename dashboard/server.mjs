@@ -699,6 +699,8 @@ app.post('/api/crash-report', requireAuth, async (req, res) => {
 // --- Unified Dashboard HTML ---
 
 function renderUnifiedPage() {
+  const _operatorHandle = process.env.OPERATOR_HANDLE || 'operator';
+  const _githubOwner = process.env.GITHUB_OWNER || '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -956,7 +958,7 @@ function renderUnifiedPage() {
       if (h < 24) return h + 'h ago';
       return Math.floor(h / 24) + 'd ago';
     }
-    const OPERATOR_HANDLE = process.env.OPERATOR_HANDLE || 'operator';
+    const OPERATOR_HANDLE = '${_operatorHandle}';
     const EMOJIS = { rocky: '🐿️', bullwinkle: '🫎', natasha: '🕵️‍♀️', boris: '🕵️‍♂️', [OPERATOR_HANDLE]: '👤' };
     const TYPE_COLORS = { text: '#58a6ff', memo: '#3fb950', blob: '#a371f7', heartbeat: '#8b949e', queue_sync: '#d29922', ping: '#3fb950', pong: '#3fb950', event: '#f85149', handoff: '#f0883e' };
 
@@ -1250,7 +1252,7 @@ function renderUnifiedPage() {
       const resp = await fetch('/api/item/' + modalItemId + '/comment', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, author: process.env.OPERATOR_HANDLE || 'operator' })
+        body: JSON.stringify({ text, author: '${_operatorHandle}' })
       });
       const data = await resp.json();
       if (data.ok) { input.value = ''; showToast('Comment added!'); openItemModal(modalItemId); loadQueue(); }
@@ -2432,7 +2434,7 @@ app.get('/api/activity', async (req, res) => {
     const peopleMap = new Map();
 
     // jkh is always present
-    const op = process.env.OPERATOR_HANDLE || 'operator'; const jkhItems = allItems.filter(i => i.assignee === op);
+    const op = '${_operatorHandle}'; const jkhItems = allItems.filter(i => i.assignee === op);
     const jkhLastAct = jkhItems.sort((a,b) =>
       new Date(b.completedAt||b.created||0) - new Date(a.completedAt||a.created||0))[0];
     const jkhScore = recencyScore(jkhLastAct?.completedAt || jkhLastAct?.created);
@@ -2453,7 +2455,7 @@ app.get('/api/activity', async (req, res) => {
       for (const c of contribs) {
         const login = typeof c === 'string' ? c : c.github;
         const commits = typeof c === 'object' ? c.commits : 0;
-        if (login === (process.env.GITHUB_OWNER || '')) continue; // skip repo owner
+        if (login === '${_githubOwner}') continue; // skip repo owner
         if (!peopleMap.has(login)) {
           peopleMap.set(login, {
             id: `person:${login}`,

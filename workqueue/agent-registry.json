@@ -1,0 +1,29 @@
+{
+  "rocky": {
+    "agent": "rocky",
+    "ts": "2026-03-28T01:04:09.568Z",
+    "status": "offline",
+    "host": "do-host1",
+    "offlineSince": "2026-03-28T01:04:09.568Z",
+    "detectedOfflineAt": "2026-03-28T02:05:21.038Z"
+  },
+  "natasha": {
+    "agent": "natasha",
+    "ts": "2026-03-27T19:37:00Z",
+    "status": "offline",
+    "host": "sparky",
+    "model": "claude-sonnet-4-6",
+    "capabilities": [
+      "claude_cli",
+      "gpu",
+      "milvus",
+      "squirrelbus",
+      "tts"
+    ],
+    "pullRev": "latest",
+    "queueDepth": 11,
+    "pendingOwned": 0,
+    "offlineSince": "2026-03-27T19:37:00Z",
+    "detectedOfflineAt": "2026-03-27T20:40:20.984Z"
+  }
+}

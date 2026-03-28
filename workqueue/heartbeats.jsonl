@@ -1,0 +1,7 @@
+{"agent":"rocky","ts":"2026-03-27T16:03:00.000Z","status":"online","host":"do-host1"}
+{"agent":"natasha","ts":"2026-03-27T19:07:00Z","status":"active","host":"sparky","model":"claude-sonnet-4-6","capabilities":["claude_cli","gpu","milvus","squirrelbus","tts"],"pullRev":"latest"}
+{"agent":"rocky","ts":"2026-03-27T19:08:13.582Z","status":"online","host":"do-host1","offlineSince":null,"detectedOfflineAt":null}
+{"agent":"natasha","ts":"2026-03-27T19:37:00Z","status":"active","host":"sparky","model":"claude-sonnet-4-6","capabilities":["claude_cli","gpu","milvus","squirrelbus","tts"],"pullRev":"latest","queueDepth":11,"pendingOwned":0}
+{"agent":"rocky","ts":"2026-03-27T23:03:42.963Z","status":"online","host":"do-host1","offlineSince":null,"detectedOfflineAt":null}
+{"agent":"rocky","ts":"2026-03-28T00:04:51.152Z","status":"online","host":"do-host1"}
+{"agent":"rocky","ts":"2026-03-28T01:04:09.568Z","status":"online","host":"do-host1"}
