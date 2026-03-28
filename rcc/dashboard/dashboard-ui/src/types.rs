@@ -52,6 +52,26 @@ pub struct BusMessage {
     pub msg_type: Option<String>,
 }
 
+// ── Git Commits ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitCommit {
+    pub sha: Option<String>,
+    pub commit: Option<GitCommitDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitCommitDetail {
+    pub message: Option<String>,
+    pub author: Option<GitCommitAuthor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitCommitAuthor {
+    pub name: Option<String>,
+    pub date: Option<String>,
+}
+
 // ── Metrics ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
