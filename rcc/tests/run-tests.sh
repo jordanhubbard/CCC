@@ -34,6 +34,7 @@ cd "$REPO_ROOT"
 
 run_test "api.test.mjs (local server)"      "rcc/tests/api.test.mjs"
 run_test "ui.test.mjs (live UI)"            "rcc/tests/ui.test.mjs"
+run_test "dashboard-regressions.test.mjs"   "rcc/tests/dashboard-regressions.test.mjs"
 run_test "integration.test.mjs (live e2e)" "rcc/tests/integration.test.mjs"
 
 echo ""

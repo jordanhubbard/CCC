@@ -205,3 +205,23 @@ curl -X POST http://localhost:8789/api/item/<id>/incubate \
 If you can't point to something concrete in the project (an issue, a README section, a failing
 test, observed user behavior), the idea isn't ready. Add a comment with your evidence first,
 then promote.
+
+## Branch Lifecycle & Definition of Done (2026-03-28)
+
+A task that involves code changes is **not complete** until:
+1. Changes are committed to a branch
+2. Branch is **merged to main** (or a PR is opened and linked)
+3. `/api/item/:id/complete` is called **after** the merge, not before
+
+### Branch naming convention
+- Feature work: `feature/<item-id>-<short-desc>`
+- Fixes: `fix/<item-id>-<short-desc>`
+- Agent-specific: `<agent-name>/<description>`
+
+### Orphaned branch policy
+Rocky runs `scripts/branch-audit.mjs` daily at 09:00 PT:
+- Fully-merged branches (0 commits ahead of main): **auto-deleted**
+- Branches >72h unmerged with no active queue item: **queue item filed** (needsHuman)
+- Branches >7d unmerged with no activity: **Slack escalation to #rockyandfriends**
+
+Do not leave branches dangling after completing a task.
