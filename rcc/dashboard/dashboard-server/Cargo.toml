@@ -11,7 +11,7 @@ path = "src/main.rs"
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.5", features = ["fs", "trace"] }
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
 bytes = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -20,3 +20,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 httpmock = "0.7"
 axum-test = "15"
 serde_json = "1"
+tower = { version = "0.4", features = ["util"] }
