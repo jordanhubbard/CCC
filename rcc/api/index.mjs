@@ -850,6 +850,29 @@ async function handleRequest(req, res) {
       return json(res, 200, { ok: true, agents: result });
     }
 
+    // ── GET /api/agents/:name/tunnel-port — return assigned tunnel port ──────
+    // Called by onboard script to get the SSH reverse tunnel port for this agent.
+    // If no tunnel is registered yet, auto-allocates one (without a pubkey — worker
+    // will call POST /api/tunnel/register once it has generated its key).
+    {
+      const tpm = path.match(/^\/api\/agents\/([^/]+)\/tunnel-port$/);
+      if (method === 'GET' && tpm) {
+        const agentName = decodeURIComponent(tpm[1]);
+        const tunnelState = await readJsonFile(TUNNEL_STATE_PATH, { nextPort: TUNNEL_PORT_START, tunnels: {} });
+        let assigned = tunnelState.tunnels[agentName];
+        if (!assigned) {
+          // Pre-allocate a port without pubkey — will be completed when worker registers key
+          const port = tunnelState.nextPort;
+          tunnelState.nextPort = port + 1;
+          assigned = { agent: agentName, port, pubkey: null, preallocatedAt: new Date().toISOString() };
+          tunnelState.tunnels[agentName] = assigned;
+          await writeJsonFile(TUNNEL_STATE_PATH, tunnelState);
+        }
+        const publicHost = RCC_PUBLIC_URL.replace(/^https?:\/\//, '').split(':')[0];
+        return json(res, 200, { ok: true, port: assigned.port, host: publicHost, agent: agentName });
+      }
+    }
+
     if (method === 'GET' && path === '/api/heartbeats') {
       // Return all known agents (including offline/decommissioned) with computed online status
       const agents = await readAgents().catch(() => ({}));
@@ -1026,6 +1049,7 @@ async function handleRequest(req, res) {
 
     // ── GET /api/onboard — public; returns a self-contained bootstrap shell script ─
     // Usage: curl http://<rcc>/api/onboard?token=<bootstrap-token> | bash
+    // Roles: agent (default), vllm-worker
     if (method === 'GET' && path === '/api/onboard') {
       const token = url.searchParams.get('token');
       if (!token) {
@@ -1035,17 +1059,18 @@ async function handleRequest(req, res) {
       const entry = bootstrapTokens.get(token);
       if (!entry) {
         res.writeHead(401, { 'Content-Type': 'text/plain' });
-        return res.end('# Error: Invalid or expired bootstrap token\n# Generate a new one: POST /api/bootstrap/token {"agent":"<name>"}\n');
+        return res.end('# Error: Invalid or expired bootstrap token\n# Generate a new one: POST /api/bootstrap/token {"agent":"<name>","role":"vllm-worker"}\n');
       }
       if (Date.now() > entry.expiresAt) {
         res.writeHead(401, { 'Content-Type': 'text/plain' });
-        return res.end('# Error: Bootstrap token expired\n# Generate a new one: POST /api/bootstrap/token {"agent":"<name>"}\n');
+        return res.end('# Error: Bootstrap token expired\n# Generate a new one: POST /api/bootstrap/token {"agent":"<name>","role":"vllm-worker"}\n');
       }
       if (entry.used) {
         res.writeHead(401, { 'Content-Type': 'text/plain' });
         return res.end('# Error: Bootstrap token already used\n');
       }
       entry.used = true;
+      const agentRole = entry.role || 'agent';
 
       // Load agent token (reuse existing if resurrection)
       const agents = await readAgents();
@@ -1093,25 +1118,338 @@ SSHCFG
       }
 
       // Build env block from secrets
-      const envLines = [`RCC_AGENT_TOKEN=${agentToken}`, `RCC_URL=${RCC_PUBLIC_URL}`, `AGENT_NAME=${entry.agent}`];
+      const envLines = [`RCC_AGENT_TOKEN=${agentToken}`, `RCC_URL=${RCC_PUBLIC_URL}`, `AGENT_NAME=${entry.agent}`, `AGENT_ROLE=${agentRole}`];
       const skipKeys = new Set(['deployKey', 'repoUrl']);
       for (const [k, v] of Object.entries(secrets)) {
         if (!skipKeys.has(k) && v) envLines.push(`${k}=${v}`);
       }
       const envBlock = envLines.join('\n');
 
+      // ── vLLM-worker extra blocks ────────────────────────────────────────
+      // Model: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8 (~128 GB FP8)
+      // Distribution strategy: aria2c BitTorrent / HTTP from seeder peers (no repeated HF pulls)
+      // Seeder peers are queried from RCC /api/agents (agents with vllm=true and online)
+      const vllmBlock = agentRole === 'vllm-worker' ? `
+
+# ════════════════════════════════════════════════════════════════════
+#  vLLM WORKER SETUP
+# ════════════════════════════════════════════════════════════════════
+
+VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+VLLM_MODEL_DIR="/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+VLLM_PORT=8080
+VLLM_SERVED_MODEL_NAME="nemotron"
+RCC_TUNNEL_HOST="${RCC_PUBLIC_URL.replace(/^https?:\/\//, '').split(':')[0]}"
+RCC_TUNNEL_PORT="${TUNNEL_PORT_START}"  # base; RCC will assign unique port per worker
+
+echo ""
+echo "┌─────────────────────────────────────────────────────┐"
+echo "│  vLLM Worker Setup                                  │"
+echo "│  Model: NVIDIA-Nemotron-3-Super-120B-A12B-FP8       │"
+echo "└─────────────────────────────────────────────────────┘"
+
+# ── 1. System deps ────────────────────────────────────────────────────────
+echo "→ Installing system deps..."
+export DEBIAN_FRONTEND=noninteractive
+sudo apt-get update -q
+sudo apt-get install -y -q aria2 rsync python3-pip python3-venv tmux curl wget git openssh-client
+
+# ── 2. CUDA check ─────────────────────────────────────────────────────────
+echo "→ Checking CUDA..."
+if ! command -v nvidia-smi &>/dev/null; then
+  echo "  ⚠️  nvidia-smi not found — make sure CUDA drivers are installed"
+  echo "     vLLM will be installed but may not start without GPUs"
+else
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | awk '{print "  GPU: "$0}'
+fi
+
+CUDA_VER=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \\K[0-9.]+' || echo "unknown")
+echo "  CUDA version: $CUDA_VER"
+
+# ── 3. Python venv + vLLM ────────────────────────────────────────────────
+echo "→ Setting up Python venv and installing vLLM..."
+VLLM_VENV="$HOME/.vllm-venv"
+python3 -m venv "$VLLM_VENV"
+source "$VLLM_VENV/bin/activate"
+
+# Install vLLM with CUDA support
+pip install --upgrade pip --quiet
+pip install vllm --quiet || pip install vllm --quiet --extra-index-url https://download.pytorch.org/whl/cu121
+
+# huggingface_hub for model downloads
+pip install huggingface_hub --quiet
+deactivate
+
+echo "  ✅ vLLM installed in $VLLM_VENV"
+
+# ── 4. Model acquisition (aria2 peer-to-peer, HuggingFace fallback) ───────
+echo "→ Acquiring model: $VLLM_MODEL_ID (~128 GB FP8)"
+mkdir -p "$VLLM_MODEL_DIR"
+
+if [ -f "$VLLM_MODEL_DIR/config.json" ]; then
+  echo "  ✅ Model already present — skipping download"
+else
+  # Query RCC for online vLLM peers that can serve as seeders
+  echo "  → Querying RCC for model seeders..."
+  PEERS_JSON=$(curl -sf "\${RCC_URL}/api/agents" 2>/dev/null || echo '[]')
+  # Extract seeder IPs/ports (agents with vllm=true that are online and not us)
+  SEEDER_HOSTS=$(echo "$PEERS_JSON" | python3 -c "
+import json,sys,os
+agents=json.load(sys.stdin)
+me=os.environ.get('AGENT_NAME','')
+seeders=[]
+for a in agents:
+  caps=a.get('capabilities',{})
+  llm=a.get('llm',{})
+  if caps.get('vllm') and a.get('onlineStatus')=='online' and a.get('name')!=me:
+    # Use llm.baseUrl if available; extract host
+    base=llm.get('baseUrl','')
+    if base:
+      import re
+      m=re.match(r'https?://([^:/]+)',base)
+      if m: seeders.append(m.group(1))
+print(' '.join(seeders))
+" 2>/dev/null || true)
+
+  echo "  → Seeder peers: \${SEEDER_HOSTS:-none found}"
+
+  # Try rsync from first available seeder (fast, resumes partial transfers)
+  MODEL_ACQUIRED=false
+  if [ -n "\$SEEDER_HOSTS" ]; then
+    for SEEDER_HOST in \$SEEDER_HOSTS; do
+      echo "  → Attempting rsync from \$SEEDER_HOST..."
+      # Try rsync via SSH — seeder must have rcc-worker user or key-based access
+      if rsync -av --progress --partial \\
+          -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/rcc-worker-key" \\
+          "rcc-worker@\${SEEDER_HOST}:\${VLLM_MODEL_DIR}/" \\
+          "\${VLLM_MODEL_DIR}/" 2>/dev/null; then
+        echo "  ✅ Model synced from \$SEEDER_HOST"
+        MODEL_ACQUIRED=true
+        break
+      else
+        echo "  ⚠️  rsync from \$SEEDER_HOST failed — trying next peer"
+      fi
+    done
+  fi
+
+  # aria2c BitTorrent / HTTP fallback from seeder's built-in HTTP fileserver
+  if [ "\$MODEL_ACQUIRED" = "false" ] && [ -n "\$SEEDER_HOSTS" ]; then
+    for SEEDER_HOST in \$SEEDER_HOSTS; do
+      echo "  → Attempting aria2c HTTP from \$SEEDER_HOST:18081..."
+      # Seeder exposes model dir on port 18081 via nginx/python http.server
+      if curl -sf --connect-timeout 5 "http://\${SEEDER_HOST}:18081/filelist.txt" > /tmp/model-filelist.txt 2>/dev/null; then
+        echo "  → Downloading via aria2c (parallel, resumable)..."
+        aria2c \\
+          --dir="\${VLLM_MODEL_DIR}" \\
+          --input-file=/tmp/model-filelist.txt \\
+          --continue=true \\
+          --max-concurrent-downloads=8 \\
+          --split=4 \\
+          --min-split-size=50M \\
+          --max-connection-per-server=4 \\
+          --file-allocation=none \\
+          --auto-file-renaming=false \\
+          --log-level=notice && MODEL_ACQUIRED=true && break || true
+      fi
+    done
+  fi
+
+  # Final fallback: HuggingFace direct download
+  if [ "\$MODEL_ACQUIRED" = "false" ]; then
+    echo "  → No peers available — downloading from HuggingFace (this will take a while for 128 GB)..."
+    source "$VLLM_VENV/bin/activate"
+    python3 -c "
+from huggingface_hub import snapshot_download
+import os
+snapshot_download(
+  repo_id='nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8',
+  local_dir=os.environ['VLLM_MODEL_DIR'],
+  local_dir_use_symlinks=False,
+  resume_download=True,
+)
+print('Download complete')
+"
+    deactivate
+    MODEL_ACQUIRED=true
+  fi
+fi
+
+echo "  ✅ Model ready at \$VLLM_MODEL_DIR"
+
+# ── 5. Model HTTP seeder (aria2c / nginx) — lets this node seed to future workers ──
+echo "→ Setting up model HTTP fileserver (port 18081) for peer seeding..."
+SEEDER_SCRIPT="$HOME/.rcc/model-seeder.sh"
+cat > "\$SEEDER_SCRIPT" << 'SEEDEOF'
+#!/usr/bin/env bash
+# model-seeder.sh — Serve model files over HTTP for peer workers to download
+MODEL_DIR="/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+PORT=18081
+PID_FILE="$HOME/.rcc/model-seeder.pid"
+
+if [ -f "\$PID_FILE" ] && kill -0 "\$(cat \$PID_FILE)" 2>/dev/null; then
+  echo "Seeder already running (pid \$(cat \$PID_FILE))"
+  exit 0
+fi
+
+# Generate filelist for aria2c
+find "\$MODEL_DIR" -type f | while read f; do
+  rel="\${f#\$MODEL_DIR/}"
+  echo "http://\$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print \$1}'):18081/\$rel"
+done > "\$MODEL_DIR/filelist.txt"
+echo "Generated filelist.txt (\$(wc -l < \$MODEL_DIR/filelist.txt) files)"
+
+# Start python HTTP server from model parent dir
+cd "\$(dirname \$MODEL_DIR)"
+nohup python3 -m http.server \$PORT --directory "\$(dirname \$MODEL_DIR)" > "$HOME/.rcc/logs/model-seeder.log" 2>&1 &
+echo \$! > "\$PID_FILE"
+echo "Model seeder started (pid \$(cat \$PID_FILE), port \$PORT)"
+SEEDEOF
+chmod +x "\$SEEDER_SCRIPT"
+
+# Start the seeder now
+mkdir -p "$HOME/.rcc/logs"
+bash "\$SEEDER_SCRIPT" || echo "  ⚠️  Seeder start failed — run manually: bash \$SEEDER_SCRIPT"
+
+# ── 6. SSH key for peer-to-peer rsync ────────────────────────────────────
+echo "→ Setting up rcc-worker SSH key for peer rsync..."
+WORKER_KEY="$HOME/.ssh/rcc-worker-key"
+if [ ! -f "\$WORKER_KEY" ]; then
+  ssh-keygen -t ed25519 -f "\$WORKER_KEY" -N "" -C "rcc-worker-\$(hostname)"
+  echo "  Generated: \$WORKER_KEY"
+  echo "  Public key (register with peer workers):"
+  cat "\${WORKER_KEY}.pub"
+fi
+
+# Register our public key with RCC so peers can pull it
+WORKER_PUBKEY=\$(cat "\${WORKER_KEY}.pub")
+curl -sf -X POST "\${RCC_URL}/api/heartbeat/\${AGENT_NAME}" \\
+  -H "Authorization: Bearer \${RCC_AGENT_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"agent\\":\\"\${AGENT_NAME}\\",\\"workerPubkey\\":\\"\${WORKER_PUBKEY}\\"}" >/dev/null 2>&1 || true
+
+# ── 7. Reverse SSH tunnel to RCC ─────────────────────────────────────────
+echo "→ Setting up reverse SSH tunnel to RCC (\$RCC_TUNNEL_HOST)..."
+TUNNEL_KEY="$HOME/.ssh/rcc-tunnel-key"
+if [ ! -f "\$TUNNEL_KEY" ]; then
+  ssh-keygen -t ed25519 -f "\$TUNNEL_KEY" -N "" -C "\${AGENT_NAME}-vllm-tunnel"
+  echo "  Generated tunnel key: \$TUNNEL_KEY"
+  echo ""
+  echo "  ⚠️  MANUAL STEP REQUIRED:"
+  echo "  Add this public key to the 'tunnel' user on RCC (\$RCC_TUNNEL_HOST):"
+  echo "  ──────────────────────────────────────────────────────"
+  cat "\${TUNNEL_KEY}.pub"
+  echo "  ──────────────────────────────────────────────────────"
+  echo "  Run on RCC: echo '\$(cat \${TUNNEL_KEY}.pub)' >> /home/tunnel/.ssh/authorized_keys"
+  echo ""
+fi
+
+# Write tunnel systemd service
+TUNNEL_PORT=\$(curl -sf "\${RCC_URL}/api/agents/\${AGENT_NAME}/tunnel-port" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('port',18082))" 2>/dev/null || echo "18082")
+cat > "\$HOME/.config/systemd/user/rcc-vllm-tunnel.service" << TUNNELEOF
+[Unit]
+Description=RCC vLLM Reverse SSH Tunnel for \${AGENT_NAME}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh \\\\
+  -N \\\\
+  -R \${TUNNEL_PORT}:localhost:8080 \\\\
+  -i \$HOME/.ssh/rcc-tunnel-key \\\\
+  -o StrictHostKeyChecking=no \\\\
+  -o ServerAliveInterval=30 \\\\
+  -o ServerAliveCountMax=3 \\\\
+  -o ExitOnForwardFailure=yes \\\\
+  tunnel@\$RCC_TUNNEL_HOST
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+TUNNELEOF
+mkdir -p "\$HOME/.config/systemd/user"
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable --now rcc-vllm-tunnel.service 2>/dev/null || \\
+  echo "  ⚠️  systemd user not available — start tunnel manually:"
+echo "      ssh -N -R \${TUNNEL_PORT}:localhost:8080 -i \$HOME/.ssh/rcc-tunnel-key tunnel@\$RCC_TUNNEL_HOST"
+
+# ── 8. vLLM systemd service ───────────────────────────────────────────────
+echo "→ Installing vLLM systemd service..."
+mkdir -p "\$HOME/.config/systemd/user"
+cat > "\$HOME/.config/systemd/user/vllm-worker.service" << VLLMEOF
+[Unit]
+Description=vLLM Worker — \${AGENT_NAME}
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/tmp
+Environment="HOME=\$HOME"
+Environment="PATH=\$VLLM_VENV/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=\$VLLM_VENV/bin/python3 -m vllm.entrypoints.openai.api_server \\\\
+  --model \$VLLM_MODEL_DIR \\\\
+  --served-model-name \$VLLM_SERVED_MODEL_NAME \\\\
+  --port \$VLLM_PORT \\\\
+  --tensor-parallel-size \$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 1) \\\\
+  --max-model-len 262144 \\\\
+  --enforce-eager \\\\
+  --trust-remote-code
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target
+VLLMEOF
+
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable --now vllm-worker.service 2>/dev/null && \\
+  echo "  ✅ vLLM service started" || \\
+  echo "  ⚠️  systemd user not available — start vLLM manually:"
+echo "      \$VLLM_VENV/bin/python3 -m vllm.entrypoints.openai.api_server --model \$VLLM_MODEL_DIR --served-model-name nemotron --port 8080 --tensor-parallel-size \$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 1) --max-model-len 262144 --trust-remote-code"
+
+# ── 9. Register vLLM capabilities with RCC ───────────────────────────────
+echo "→ Registering vLLM capabilities with RCC..."
+GPU_COUNT=\$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 0)
+GPU_MODEL=\$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "unknown")
+GPU_VRAM=\$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{sum+=\$1} END {printf "%d", sum/1024}' || echo 0)
+curl -sf -X POST "\${RCC_URL}/api/agents/register" \\
+  -H "Authorization: Bearer \${RCC_AGENT_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d "{
+    \\"name\\": \\"\${AGENT_NAME}\\",
+    \\"host\\": \\"\$(hostname)\\",
+    \\"type\\": \\"full\\",
+    \\"capabilities\\": {
+      \\"vllm\\": true,
+      \\"vllm_port\\": 8080,
+      \\"vllm_model\\": \\"nemotron-3-super-120b\\",
+      \\"gpu\\": true,
+      \\"gpu_count\\": \$GPU_COUNT,
+      \\"gpu_model\\": \\"\$GPU_MODEL\\",
+      \\"gpu_vram_gb\\": \$GPU_VRAM,
+      \\"model_seeder\\": true,
+      \\"model_seeder_port\\": 18081,
+      \\"inference_provider\\": \\"vllm\\"
+    }
+  }" > /dev/null && echo "  ✅ Registered with RCC" || echo "  ⚠️  Registration failed (retry after tunnel is up)"
+
+` : '';
+
       const script = `#!/usr/bin/env bash
-# RCC Agent Onboard — ${entry.agent} @ ${new Date().toISOString()}
+# RCC Agent Onboard — ${entry.agent} (role: ${agentRole}) @ ${new Date().toISOString()}
 # Generated by Rocky Command Center
 # Usage: curl "${RCC_PUBLIC_URL}/api/onboard?token=<token>" | bash
 set -euo pipefail
 
 AGENT_NAME="${entry.agent}"
+AGENT_ROLE="${agentRole}"
 RCC_URL="${RCC_PUBLIC_URL}"
 REPO_URL="${repoUrl}"
 WORKSPACE="$HOME/Src/rockyandfriends"
 
-echo "🐿️  RCC Onboard — $AGENT_NAME"
+echo "🐿️  RCC Onboard — $AGENT_NAME (role: $AGENT_ROLE)"
 echo "    RCC: $RCC_URL"
 echo ""
 ${deployKeyBlock}
@@ -1148,20 +1486,28 @@ else
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw gateway start
 fi
-
+${vllmBlock}
 # ── Heartbeat ────────────────────────────────────────────────────────────────
 echo "→ Posting heartbeat..."
 sleep 3
 curl -s -X POST "$RCC_URL/api/heartbeat/$AGENT_NAME" \\
   -H "Authorization: Bearer ${agentToken}" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"agent\\":\\"$AGENT_NAME\\",\\"host\\":\\"$(hostname)\\",\\"status\\":\\"online\\",\\"pullRev\\":\\"$PULL_REV\\"}" | grep -q '"ok":true' && echo "   ✅ heartbeat posted" || echo "   ⚠️  heartbeat failed (agent may still be starting)"
+  -d "{\\"agent\\":\\"$AGENT_NAME\\",\\"role\\":\\"$AGENT_ROLE\\",\\"host\\":\\"$(hostname)\\",\\"status\\":\\"online\\",\\"pullRev\\":\\"$PULL_REV\\"}" | grep -q '"ok":true' && echo "   ✅ heartbeat posted" || echo "   ⚠️  heartbeat failed (agent may still be starting)"
 
 echo ""
-echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
+echo "✅ $AGENT_NAME is online."
+echo "   Role:  $AGENT_ROLE"
+echo "   Token: ${agentToken}"
+${agentRole === 'vllm-worker' ? `echo ""
+echo "   vLLM checklist:"
+echo "   1. Verify tunnel key added to RCC tunnel user"
+echo "   2. Check vLLM: curl http://localhost:8080/v1/models"
+echo "   3. Check seeder: curl http://localhost:18081/filelist.txt | head"
+echo "   4. Check tunnel: systemctl --user status rcc-vllm-tunnel"` : ''}
 `;
 
-      console.log(`[rcc-api] Onboard script generated for ${entry.agent} from ${req.socket?.remoteAddress}`);
+      console.log(`[rcc-api] Onboard script generated for ${entry.agent} (role: ${agentRole}) from ${req.socket?.remoteAddress}`);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end(script);
     }
@@ -2891,10 +3237,12 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       const body = await readBody(req);
       if (!body.agent) return json(res, 400, { error: 'agent required' });
       const ttl = body.ttlSeconds || 3600;
+      const role = body.role || 'agent'; // 'agent' | 'vllm-worker'
       const token = `rcc-bootstrap-${body.agent}-${randomUUID().slice(0, 8)}`;
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
-      bootstrapTokens.set(token, { agent: body.agent, expiresAt: Date.now() + ttl * 1000, used: false });
-      return json(res, 200, { ok: true, bootstrapToken: token, agent: body.agent, expiresAt });
+      bootstrapTokens.set(token, { agent: body.agent, role, expiresAt: Date.now() + ttl * 1000, used: false });
+      return json(res, 200, { ok: true, bootstrapToken: token, agent: body.agent, role, expiresAt,
+        onboardCmd: `curl -fsSL "${RCC_PUBLIC_URL}/api/onboard?token=${token}" | bash` });
     }
 
     // ── GET /api/bootstrap — consume bootstrap token, return provisioning data
