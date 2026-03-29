@@ -1539,8 +1539,14 @@ if command -v openclaw &>/dev/null; then
       try {
         const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
         if (cfg.channels && cfg.channels.mattermost) {
-          delete cfg.channels.mattermost.chatmode;
-          delete cfg.channels.mattermost.groupPolicy;
+          const mm = cfg.channels.mattermost;
+          // Only keep properties allowed by current openclaw schema
+          cfg.channels.mattermost = {
+            ...(mm.enabled !== undefined ? { enabled: mm.enabled } : {}),
+            ...(mm.botToken ? { botToken: mm.botToken } : {}),
+            ...(mm.baseUrl ? { baseUrl: mm.baseUrl } : {}),
+            ...(mm.accounts ? { accounts: mm.accounts } : {}),
+          };
         }
         fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
         console.log('  ✅ openclaw.json patched');
