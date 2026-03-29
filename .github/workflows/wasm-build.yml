@@ -22,9 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # No Tailscale needed — sparky.tail407856.ts.net has a stable Tailscale IP (100.87.229.125)
-      # and SPARKY_SSH_KEY is sufficient for direct SSH over Tailscale mesh.
-      # If the Tailscale IP ever changes, update SPARKY_HOST secret accordingly.
+      # Join the tailnet so we can reach sparky at its Tailscale IP (100.87.229.125).
+      # TS_AUTHKEY must be a pre-auth key from https://login.tailscale.com/admin/settings/keys
+      # (ephemeral, reusable, no tags required — just a plain auth key).
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          args: "--ephemeral --accept-routes"
 
       - name: Run build on sparky via SSH
         uses: appleboy/ssh-action@v1
