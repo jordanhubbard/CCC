@@ -9,7 +9,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::models::{ServerFrame, ReactionEventData, PresenceData, MessageEditData, MessageDeleteData};
+use crate::models::{ServerFrame, Reaction, MessageWire};
 use crate::SharedState;
 use crate::ws;
 
@@ -89,7 +89,7 @@ async fn create_channel(
     let created_by = body.created_by.as_deref().unwrap_or("rocky");
     state.db.insert_channel(&body.id, &body.name, &body.channel_type, created_by, body.description.as_deref())?;
     if let Some(ch) = state.db.get_channel(&body.id)? {
-        state.hub.broadcast(&ServerFrame::ChannelCreate { data: ch });
+        state.hub.broadcast(&ServerFrame::Channel { action: "created".into(), channel: ch });
     }
     Ok(Json(json!({ "ok": true, "id": body.id })))
 }
@@ -124,7 +124,7 @@ async fn list_messages(
 ) -> R<Json<serde_json::Value>> {
     let channel = q.channel.as_deref().unwrap_or("general");
     let limit = q.limit.unwrap_or(50).min(200);
-    let msgs = state.db.get_messages(channel, limit, q.since)?;
+    let msgs: Vec<MessageWire> = state.db.get_messages(channel, limit, q.since)?.into_iter().map(MessageWire::from).collect();
     Ok(Json(json!(msgs)))
 }
 
@@ -144,8 +144,9 @@ async fn post_message(
     let mentions = body.mentions.unwrap_or_default();
     let id = state.db.insert_message(&body.from, &body.text, channel, &mentions, None)?;
     let msg = state.db.get_message(id)?.ok_or_else(|| anyhow::anyhow!("insert failed"))?;
-    state.hub.broadcast(&ServerFrame::Message { data: msg.clone() });
-    Ok(Json(json!({ "ok": true, "message": msg, "botReply": null })))
+    state.hub.broadcast(&ServerFrame::Message { message: MessageWire::from(msg.clone()) });
+    let wire = MessageWire::from(msg);
+    Ok(Json(json!({ "ok": true, "message": wire, "botReply": null })))
 }
 
 #[derive(Deserialize)]
@@ -161,10 +162,8 @@ async fn edit_message(
     let ok = state.db.update_message(id, &body.text)?;
     if ok {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let edited_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-        state.hub.broadcast(&ServerFrame::MessageEdit { data: MessageEditData {
-            id: id.to_string(), text: body.text, edited_at,
-        }});
+        let _edited_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        // MessageEdit broadcast removed — not in ScWsFrame
     }
     Ok(Json(json!({ "ok": ok })))
 }
@@ -175,7 +174,7 @@ async fn del_message(
 ) -> R<Json<serde_json::Value>> {
     let ok = state.db.delete_message(id)?;
     if ok {
-        state.hub.broadcast(&ServerFrame::MessageDelete { data: MessageDeleteData { id: id.to_string() }});
+        // MessageDelete broadcast removed — not in ScWsFrame
     }
     Ok(Json(json!({ "ok": ok })))
 }
@@ -193,7 +192,7 @@ async fn get_thread(
     Query(q): Query<ThreadQuery>,
 ) -> R<Json<serde_json::Value>> {
     let limit = q.limit.unwrap_or(50).min(200);
-    let msgs = state.db.get_thread(id, limit)?;
+    let msgs: Vec<MessageWire> = state.db.get_thread(id, limit)?.into_iter().map(MessageWire::from).collect();
     Ok(Json(json!(msgs)))
 }
 
@@ -215,8 +214,9 @@ async fn reply_message(
     let mentions = body.mentions.unwrap_or_default();
     let id = state.db.insert_message(&body.from, &body.text, &parent.channel, &mentions, Some(parent_id))?;
     let msg = state.db.get_message(id)?.ok_or_else(|| anyhow::anyhow!("insert failed"))?;
-    state.hub.broadcast(&ServerFrame::Message { data: msg.clone() });
-    Ok(Json(json!({ "ok": true, "message": msg })))
+    state.hub.broadcast(&ServerFrame::Message { message: MessageWire::from(msg.clone()) });
+    let wire = MessageWire::from(msg);
+    Ok(Json(json!({ "ok": true, "message": wire })))
 }
 
 // ── Reactions ─────────────────────────────────────────────────────────────────
@@ -233,10 +233,7 @@ async fn add_reaction(
     Json(body): Json<ReactBody>,
 ) -> R<Json<serde_json::Value>> {
     let map = state.db.add_reaction(msg_id, &body.from, &body.emoji)?;
-    state.hub.broadcast(&ServerFrame::Reaction { data: ReactionEventData {
-        message_id: msg_id.to_string(),
-        reactions: map.clone(),
-    }});
+    state.hub.broadcast(&ServerFrame::Reaction { message_id: msg_id, reactions: Reaction::from_map(&map) });
     Ok(Json(json!({ "ok": true, "reactions": map })))
 }
 
@@ -246,10 +243,7 @@ async fn del_reaction(
     Json(body): Json<ReactBody>,
 ) -> R<Json<serde_json::Value>> {
     let map = state.db.remove_reaction(msg_id, &body.from, &body.emoji)?;
-    state.hub.broadcast(&ServerFrame::Reaction { data: ReactionEventData {
-        message_id: msg_id.to_string(),
-        reactions: map.clone(),
-    }});
+    state.hub.broadcast(&ServerFrame::Reaction { message_id: msg_id, reactions: Reaction::from_map(&map) });
     Ok(Json(json!({ "ok": true, "reactions": map })))
 }
 
@@ -271,7 +265,7 @@ async fn agent_heartbeat(
     Json(body): Json<HeartbeatBody>,
 ) -> R<Json<serde_json::Value>> {
     state.db.upsert_heartbeat(&agent_id, &body.status)?;
-    state.hub.broadcast(&ServerFrame::Presence { data: PresenceData { user: agent_id, status: body.status } });
+    state.hub.broadcast(&ServerFrame::Presence { agent: agent_id, online: body.status != "offline" });
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -13,9 +13,61 @@ pub struct Message {
     pub mentions: Vec<String>,
     pub thread_id: Option<i64>,
     pub reply_count: i64,
-    /// HashMap<emoji, Vec<agent_id>>
-    pub reactions: HashMap<String, Vec<String>>,
+    /// Wire format: HashMap<emoji, Vec<agent_id>> stored; aggregated to Vec<Reaction> in WS frames
+    #[serde(skip)]
+    pub reactions_map: HashMap<String, Vec<String>>,
     pub slash_result: Option<String>,
+}
+
+// ── Reaction (wire type for WS frames and REST responses) ────────────────────
+
+/// `{emoji, count, agents}` — matches ScReaction in sc_types.rs exactly.
+#[derive(Debug, Clone, Serialize)]
+pub struct Reaction {
+    pub emoji: String,
+    pub count: usize,
+    pub agents: Vec<String>,
+}
+
+impl Reaction {
+    pub fn from_map(map: &HashMap<String, Vec<String>>) -> Vec<Reaction> {
+        let mut out: Vec<Reaction> = map
+            .iter()
+            .map(|(emoji, agents)| Reaction {
+                emoji: emoji.clone(),
+                count: agents.len(),
+                agents: agents.clone(),
+            })
+            .collect();
+        out.sort_by(|a, b| b.count.cmp(&a.count).then(a.emoji.cmp(&b.emoji)));
+        out
+    }
+}
+
+/// Message with reactions aggregated for wire (REST + WS responses).
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageWire {
+    pub id: i64,
+    pub ts: i64,
+    pub from_agent: String,
+    pub text: String,
+    pub channel: String,
+    pub mentions: Vec<String>,
+    pub thread_id: Option<i64>,
+    pub reply_count: i64,
+    pub reactions: Vec<Reaction>,
+    pub slash_result: Option<String>,
+}
+
+impl From<Message> for MessageWire {
+    fn from(m: Message) -> Self {
+        let reactions = Reaction::from_map(&m.reactions_map);
+        MessageWire {
+            id: m.id, ts: m.ts, from_agent: m.from_agent, text: m.text,
+            channel: m.channel, mentions: m.mentions, thread_id: m.thread_id,
+            reply_count: m.reply_count, reactions, slash_result: m.slash_result,
+        }
+    }
 }
 
 // ── Channel ───────────────────────────────────────────────────────────────────
@@ -70,43 +122,21 @@ pub struct FileInfo {
 }
 
 // ── WS frames (server → client) ───────────────────────────────────────────────
-
-/// Reaction event carrying the full updated reactions map.
-/// Matches ScReactionEvent in sc_types.rs: { message_id, reactions: HashMap<emoji, Vec<user_id>> }
-#[derive(Debug, Clone, Serialize)]
-pub struct ReactionEventData {
-    pub message_id: String,
-    pub reactions: HashMap<String, Vec<String>>,
-}
+// These match ScWsFrame in sc_types.rs exactly.
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerFrame {
-    Message { data: Message },
-    MessageEdit { data: MessageEditData },
-    MessageDelete { data: MessageDeleteData },
-    Reaction { data: ReactionEventData },
-    Presence { data: PresenceData },
-    ChannelCreate { data: Channel },
+    /// New message
+    Message { message: MessageWire },
+    /// Reaction updated — full aggregated list for the message
+    Reaction { message_id: i64, reactions: Vec<Reaction> },
+    /// Agent presence change
+    Presence { agent: String, online: bool },
+    /// Channel created
+    Channel { action: String, channel: Channel },
+    /// Connection confirmed
     Connected { session_id: String },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct MessageEditData {
-    pub id: String,
-    pub text: String,
-    pub edited_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct MessageDeleteData {
-    pub id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PresenceData {
-    pub user: String,
-    pub status: String,
 }
 
 // ── WS frames (client → server) ───────────────────────────────────────────────
