@@ -631,3 +631,204 @@
 .sc-btn-cancel:hover {
   color: var(--text);
 }
+
+/* ─── Emoji Picker (Bullwinkle) ────────────────────────────────────────────── */
+
+.sc-emoji-picker {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  position: absolute;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  margin-top: 2px;
+}
+
+.sc-emoji-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  transition: background 0.1s, transform 0.1s;
+  line-height: 1;
+}
+
+.sc-emoji-btn:hover {
+  background: var(--border);
+  transform: scale(1.2);
+}
+
+/* ─── Reactions Bar (Bullwinkle) ───────────────────────────────────────────── */
+
+.sc-reactions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
+.sc-reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s, border-color 0.1s;
+  line-height: 1.3;
+}
+
+.sc-reaction-pill:hover {
+  background: var(--border);
+}
+
+.sc-reaction-mine {
+  border-color: var(--blue-dim, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.sc-reaction-mine:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.sc-reaction-emoji {
+  font-size: 13px;
+}
+
+.sc-reaction-count {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ─── Thread Panel (Bullwinkle) ────────────────────────────────────────────── */
+
+.sc-thread-panel {
+  width: 340px;
+  min-width: 280px;
+  max-width: 400px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sc-thread-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sc-thread-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sc-thread-parent {
+  padding: 12px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.sc-thread-reply-count {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.sc-thread-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.sc-thread-replies {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px;
+}
+
+.sc-thread-msg {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.sc-thread-msg:last-child {
+  border-bottom: none;
+}
+
+.sc-thread-input {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sc-thread-textarea {
+  flex: 1;
+  min-height: 36px;
+  max-height: 80px;
+  resize: vertical;
+}
+
+.sc-thread-send {
+  align-self: flex-end;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* ─── Thread Button (Bullwinkle) ───────────────────────────────────────────── */
+
+.sc-thread-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  opacity: 0.7;
+  transition: opacity 0.1s, background 0.1s;
+  color: var(--text-dim);
+}
+
+.sc-thread-btn:hover {
+  opacity: 1;
+  background: var(--surface);
+}
+
+/* ─── Channel Modal (Bullwinkle) ───────────────────────────────────────────── */
+
+.sc-modal-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  margin-top: 10px;
+}
+
+.sc-modal-slug {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  font-family: var(--font-mono, monospace);
+}
+
+/* ─── Message position: relative for picker ────────────────────────────────── */
+
+.sc-msg {
+  position: relative;
+}

@@ -9,6 +9,9 @@ use crate::components::sc_types::{
     ScChannel, ScFile, ScIdentity, ScMessage, ScProject, ScUser, ScWsFrame,
     DEFAULT_CHANNELS, FALLBACK_AGENT_NAMES,
 };
+use crate::components::sc_reactions::{EmojiPicker, ReactionsBar};
+use crate::components::sc_thread::ThreadPanel;
+use crate::components::sc_channel_modal::CreateChannelModal;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -281,6 +284,13 @@ pub fn SquirrelChat() -> impl IntoView {
     let (show_new_project, set_show_new_project) = create_signal(false);
     let (new_proj_name, set_new_proj_name) = create_signal(String::new());
     let (new_proj_desc, set_new_proj_desc) = create_signal(String::new());
+    // Thread panel state
+    let (thread_parent, set_thread_parent) = create_signal(Option::<ScMessage>::None);
+    let (thread_replies, set_thread_replies) = create_signal(Vec::<ScMessage>::new());
+    // Emoji picker state (per-message: store the message id that has picker open)
+    let (picker_msg_id, set_picker_msg_id) = create_signal(Option::<i64>::None);
+    // Channel create modal
+    let (show_new_channel, set_show_new_channel) = create_signal(false);
 
     let chat_ref = create_node_ref::<leptos::html::Div>();
 
@@ -455,7 +465,13 @@ pub fn SquirrelChat() -> impl IntoView {
             <aside class="sc-sidebar">
                 // Channels
                 <div class="sc-sidebar-section">
-                    <div class="sc-section-header">"Channels"</div>
+                    <div class="sc-section-header">
+                        "Channels"
+                        <button
+                            class="sc-mini-btn"
+                            on:click=move |_| set_show_new_channel.set(true)
+                        >"+"</button>
+                    </div>
                     {move || channels.get().into_iter().map(|ch| {
                         let ch_id = ch.id.clone();
                         let ch_id2 = ch.id.clone();
@@ -731,14 +747,69 @@ pub fn SquirrelChat() -> impl IntoView {
                                             let from = msg.from_agent.clone()
                                                 .unwrap_or_else(|| "?".to_string());
                                             let text = msg.text.clone().unwrap_or_default();
+                                            let msg_id = msg.id.unwrap_or(0);
+                                            let reactions = msg.reactions.clone();
+                                            let reply_count = msg.reply_count;
+                                            let current_user = identity.get_untracked().id.clone();
+                                            let msg_for_thread = msg.clone();
+
+                                            // Per-message picker visibility
+                                            let picker_visible = create_memo(move |_| {
+                                                picker_msg_id.get() == Some(msg_id)
+                                            });
+                                            let (picker_vis_read, _) = create_signal(false);
+
                                             view! {
                                                 <div class="sc-msg">
                                                     <div class="sc-msg-header">
                                                         <span class="sc-msg-from">{from}</span>
                                                         <span class="sc-msg-ts">{ts}</span>
                                                         <div class="sc-msg-actions">
-                                                            <button class="sc-react-btn" on:click=move |_| {}>"👍"</button>
+                                                            // React button — toggles emoji picker
+                                                            <button class="sc-react-btn" on:click=move |_| {
+                                                                set_picker_msg_id.update(|current| {
+                                                                    if *current == Some(msg_id) {
+                                                                        *current = None;
+                                                                    } else {
+                                                                        *current = Some(msg_id);
+                                                                    }
+                                                                });
+                                                            }>"😀"</button>
+                                                            // Thread button (only if top-level)
+                                                            <button class="sc-thread-btn" on:click={
+                                                                let msg_clone = msg_for_thread.clone();
+                                                                move |_| {
+                                                                    let m = msg_clone.clone();
+                                                                    let mid = m.id.unwrap_or(0);
+                                                                    set_thread_parent.set(Some(m));
+                                                                    // Fetch thread replies
+                                                                    spawn_local(async move {
+                                                                        let url = format!("/sc/api/messages/{}/thread?limit=100", mid);
+                                                                        let resp = gloo_net::http::Request::get(&url)
+                                                                            .send().await;
+                                                                        if let Ok(resp) = resp {
+                                                                            let replies = resp.json::<Vec<ScMessage>>().await
+                                                                                .unwrap_or_default();
+                                                                            set_thread_replies.set(replies);
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }>{
+                                                                if reply_count > 0 {
+                                                                    format!("💬 {}", reply_count)
+                                                                } else {
+                                                                    "💬".to_string()
+                                                                }
+                                                            }</button>
+                                                            // Delete button
                                                             <button class="sc-del-btn" on:click=move |_| {
+                                                                let mid = msg_id;
+                                                                spawn_local(async move {
+                                                                    let url = format!("/sc/api/messages/{}", mid);
+                                                                    if let Ok(req) = gloo_net::http::Request::delete(&url).build() {
+                                                                        let _ = req.send().await;
+                                                                    }
+                                                                });
                                                                 set_messages.update(|msgs| {
                                                                     if i < msgs.len() { msgs.remove(i); }
                                                                 });
@@ -748,6 +819,88 @@ pub fn SquirrelChat() -> impl IntoView {
                                                     <div class="sc-msg-content">
                                                         {render_text_with_mentions(&text)}
                                                     </div>
+                                                    // Emoji picker (shown when this msg's react btn is clicked)
+                                                    {move || {
+                                                        if picker_msg_id.get() == Some(msg_id) {
+                                                            let (vis, _) = create_signal(true);
+                                                            view! {
+                                                                <EmojiPicker
+                                                                    visible=vis
+                                                                    on_pick=Callback::new(move |emoji: String| {
+                                                                        set_picker_msg_id.set(None);
+                                                                        let mid = msg_id;
+                                                                        let user = identity.get_untracked().id.clone();
+                                                                        // POST reaction to server
+                                                                        spawn_local(async move {
+                                                                            let url = format!("/sc/api/messages/{}/react", mid);
+                                                                            let payload = serde_json::json!({
+                                                                                "from": user,
+                                                                                "emoji": emoji,
+                                                                            });
+                                                                            if let Ok(req) = gloo_net::http::Request::post(&url).json(&payload) {
+                                                                                let _ = req.send().await;
+                                                                            }
+                                                                        });
+                                                                        // Optimistic update
+                                                                        set_messages.update(|msgs| {
+                                                                            if let Some(m) = msgs.iter_mut().find(|m| m.id == Some(mid)) {
+                                                                                let user_id = identity.get_untracked().id;
+                                                                                let users = m.reactions.entry(emoji.clone()).or_default();
+                                                                                if let Some(pos) = users.iter().position(|u| u == &user_id) {
+                                                                                    users.remove(pos);
+                                                                                    if users.is_empty() {
+                                                                                        m.reactions.remove(&emoji);
+                                                                                    }
+                                                                                } else {
+                                                                                    users.push(user_id);
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                    })
+                                                                    on_close=Callback::new(move |_| {
+                                                                        set_picker_msg_id.set(None);
+                                                                    })
+                                                                />
+                                                            }.into_view()
+                                                        } else {
+                                                            ().into_view()
+                                                        }
+                                                    }}
+                                                    // Reactions bar
+                                                    <ReactionsBar
+                                                        reactions=reactions.clone()
+                                                        current_user=current_user.clone()
+                                                        message_id=msg_id
+                                                        on_toggle=Callback::new(move |(mid, emoji): (i64, String)| {
+                                                            let user = identity.get_untracked().id.clone();
+                                                            // POST toggle reaction
+                                                            spawn_local(async move {
+                                                                let url = format!("/sc/api/messages/{}/react", mid);
+                                                                let payload = serde_json::json!({
+                                                                    "from": user,
+                                                                    "emoji": emoji,
+                                                                });
+                                                                if let Ok(req) = gloo_net::http::Request::post(&url).json(&payload) {
+                                                                    let _ = req.send().await;
+                                                                }
+                                                            });
+                                                            // Optimistic update
+                                                            set_messages.update(|msgs| {
+                                                                if let Some(m) = msgs.iter_mut().find(|m| m.id == Some(mid)) {
+                                                                    let user_id = identity.get_untracked().id;
+                                                                    let users = m.reactions.entry(emoji.clone()).or_default();
+                                                                    if let Some(pos) = users.iter().position(|u| u == &user_id) {
+                                                                        users.remove(pos);
+                                                                        if users.is_empty() {
+                                                                            m.reactions.remove(&emoji);
+                                                                        }
+                                                                    } else {
+                                                                        users.push(user_id);
+                                                                    }
+                                                                }
+                                                            });
+                                                        })
+                                                    />
                                                 </div>
                                             }
                                         }).collect::<Vec<_>>().into_view()
@@ -893,6 +1046,85 @@ pub fn SquirrelChat() -> impl IntoView {
                             </div>
                         </div>
                     </div>
+                }.into_view()
+            }}
+
+            // ── Thread panel (right side) ─────────────────────────────────────
+            {move || {
+                if let Some(parent) = thread_parent.get() {
+                    view! {
+                        <ThreadPanel
+                            parent=parent
+                            replies=thread_replies
+                            on_close=Callback::new(move |_| set_thread_parent.set(None))
+                            on_reply=Callback::new(move |(parent_id, text): (i64, String)| {
+                                let sender = identity.get_untracked().id.clone();
+                                let token = identity.get_untracked().token.clone();
+                                spawn_local(async move {
+                                    let url = format!("/sc/api/messages/{}/reply", parent_id);
+                                    let payload = serde_json::json!({
+                                        "from": sender,
+                                        "text": text,
+                                    });
+                                    let req_builder = gloo_net::http::Request::post(&url);
+                                    let req_builder = if let Some(tok) = &token {
+                                        req_builder.header("Authorization", &format!("Bearer {}", tok))
+                                    } else {
+                                        req_builder
+                                    };
+                                    if let Ok(req) = req_builder.json(&payload) {
+                                        let _ = req.send().await;
+                                    }
+                                    // Re-fetch thread
+                                    let thread_url = format!("/sc/api/messages/{}/thread?limit=100", parent_id);
+                                    if let Ok(resp) = gloo_net::http::Request::get(&thread_url).send().await {
+                                        let replies = resp.json::<Vec<ScMessage>>().await.unwrap_or_default();
+                                        set_thread_replies.set(replies);
+                                    }
+                                });
+                            })
+                        />
+                    }.into_view()
+                } else {
+                    ().into_view()
+                }
+            }}
+
+            // ── Channel create modal ──────────────────────────────────────────
+            {move || {
+                if !show_new_channel.get() {
+                    return ().into_view();
+                }
+                view! {
+                    <CreateChannelModal
+                        on_create=Callback::new(move |(slug, name, desc): (String, String, String)| {
+                            set_show_new_channel.set(false);
+                            let token = identity.get_untracked().token.clone();
+                            spawn_local(async move {
+                                let payload = serde_json::json!({
+                                    "id": slug,
+                                    "name": name,
+                                    "description": desc,
+                                    "type": "public",
+                                });
+                                let req_builder = gloo_net::http::Request::post("/sc/api/channels");
+                                let req_builder = if let Some(tok) = &token {
+                                    req_builder.header("Authorization", &format!("Bearer {}", tok))
+                                } else {
+                                    req_builder
+                                };
+                                if let Ok(req) = req_builder.json(&payload) {
+                                    let _ = req.send().await;
+                                }
+                                // Re-fetch channels
+                                let ch = fetch_sc_channels().await;
+                                if !ch.is_empty() {
+                                    set_channels.set(ch);
+                                }
+                            });
+                        })
+                        on_close=Callback::new(move |_| set_show_new_channel.set(false))
+                    />
                 }.into_view()
             }}
         </div>
