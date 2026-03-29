@@ -9,6 +9,33 @@ use crate::components::sc_types::{
     ScAttachment, ScChannel, ScFile, ScIdentity, ScMessage, ScProject, ScUser, ScWsFrame,
     DEFAULT_CHANNELS, FALLBACK_AGENT_NAMES,
 };
+
+// ─── Browser notification helper ─────────────────────────────────────────────
+
+fn request_notification_permission() {
+    use web_sys::Notification;
+    if Notification::permission() == web_sys::NotificationPermission::Default {
+        let _ = Notification::request_permission();
+    }
+}
+
+fn maybe_notify(title: &str, body: &str) {
+    use web_sys::Notification;
+    // Only fire if tab is not focused
+    let focused = web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.has_focus().unwrap_or(false))
+        .unwrap_or(true);
+    if focused {
+        return;
+    }
+    if Notification::permission() != web_sys::NotificationPermission::Granted {
+        return;
+    }
+    let opts = web_sys::NotificationOptions::new();
+    opts.set_body(body);
+    let _ = Notification::new_with_options(title, &opts);
+}
 use crate::components::sc_reactions::{EmojiPicker, ReactionsBar};
 use crate::components::sc_thread::ThreadPanel;
 use crate::components::sc_channel_modal::CreateChannelModal;
@@ -40,6 +67,146 @@ fn toggle_reaction(reactions: &mut Vec<ScReaction>, emoji: &str, user_id: &str) 
             agents: vec![user_id.to_string()],
         });
     }
+}
+
+/// Render text with basic markdown: **bold**, *italic*, `code`, ```blocks```, [links](url), @mentions.
+fn render_markdown(text: &str) -> impl IntoView {
+    // Handle fenced code blocks first (``` ... ```)
+    let parts: Vec<View> = if text.contains("```") {
+        let mut views: Vec<View> = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find("```") {
+            // Push text before the code block
+            let before = &rest[..start];
+            if !before.is_empty() {
+                views.push(render_inline_markdown(before).into_view());
+            }
+            let after_open = &rest[start + 3..];
+            // Find language hint (first line) and content
+            let (lang, content_start) = if let Some(nl) = after_open.find('\n') {
+                (&after_open[..nl], &after_open[nl + 1..])
+            } else {
+                ("", after_open)
+            };
+            if let Some(end) = content_start.find("```") {
+                let code = &content_start[..end];
+                let lang_str = lang.trim().to_string();
+                let code_str = code.to_string();
+                views.push(view! {
+                    <pre class="sc-code-block">
+                        {if !lang_str.is_empty() { view! { <span class="sc-code-lang">{lang_str}</span> }.into_view() } else { ().into_view() }}
+                        <code>{code_str}</code>
+                    </pre>
+                }.into_view());
+                rest = &content_start[end + 3..];
+            } else {
+                // Unclosed code block — treat rest as code
+                views.push(view! { <pre class="sc-code-block"><code>{content_start.to_string()}</code></pre> }.into_view());
+                rest = "";
+                break;
+            }
+        }
+        if !rest.is_empty() {
+            views.push(render_inline_markdown(rest).into_view());
+        }
+        views
+    } else {
+        vec![render_inline_markdown(text).into_view()]
+    };
+    view! { <span class="sc-md">{parts}</span> }
+}
+
+/// Render inline markdown (bold, italic, code, links, @mentions). No block elements.
+fn render_inline_markdown(text: &str) -> impl IntoView {
+    // Split on newlines to handle line breaks
+    let lines: Vec<&str> = text.split('\n').collect();
+    let line_count = lines.len();
+    let rendered: Vec<View> = lines.into_iter().enumerate().map(|(i, line)| {
+        let mut parts: Vec<View> = Vec::new();
+        let mut chars = line.char_indices().peekable();
+        let bytes = line.as_bytes();
+        let len = line.len();
+        let mut pos = 0usize;
+
+        while pos < len {
+            // Check for **bold**
+            if pos + 1 < len && bytes[pos] == b'*' && bytes[pos + 1] == b'*' {
+                if let Some(end) = line[pos + 2..].find("**") {
+                    let inner = &line[pos + 2..pos + 2 + end];
+                    parts.push(view! { <strong>{inner.to_string()}</strong> }.into_view());
+                    pos += 2 + end + 2;
+                    continue;
+                }
+            }
+            // Check for *italic* (single asterisk, not followed by another)
+            if bytes[pos] == b'*' && (pos + 1 >= len || bytes[pos + 1] != b'*') {
+                if let Some(end) = line[pos + 1..].find('*') {
+                    let inner = &line[pos + 1..pos + 1 + end];
+                    if !inner.is_empty() && !inner.contains(' ') {
+                        parts.push(view! { <em>{inner.to_string()}</em> }.into_view());
+                        pos += 1 + end + 1;
+                        continue;
+                    }
+                }
+            }
+            // Check for `inline code`
+            if bytes[pos] == b'`' {
+                if let Some(end) = line[pos + 1..].find('`') {
+                    let inner = &line[pos + 1..pos + 1 + end];
+                    parts.push(view! { <code class="sc-inline-code">{inner.to_string()}</code> }.into_view());
+                    pos += 1 + end + 1;
+                    continue;
+                }
+            }
+            // Check for [link](url)
+            if bytes[pos] == b'[' {
+                if let Some(bracket_end) = line[pos..].find("](") {
+                    let label = &line[pos + 1..pos + bracket_end];
+                    let after = &line[pos + bracket_end + 2..];
+                    if let Some(paren_end) = after.find(')') {
+                        let url = &after[..paren_end];
+                        let label_str = label.to_string();
+                        let url_str = url.to_string();
+                        parts.push(view! {
+                            <a href=url_str target="_blank" rel="noopener" class="sc-md-link">{label_str}</a>
+                        }.into_view());
+                        pos += bracket_end + 2 + paren_end + 1;
+                        continue;
+                    }
+                }
+            }
+            // Check for @mention
+            if bytes[pos] == b'@' {
+                let word_end = line[pos..].find(|c: char| !c.is_alphanumeric() && c != '_' && c != '-').unwrap_or(line.len() - pos);
+                if word_end > 1 {
+                    let word = &line[pos..pos + word_end];
+                    let word_str = word.to_string();
+                    parts.push(view! { <span class="sc-mention">{word_str}</span> }.into_view());
+                    pos += word_end;
+                    continue;
+                }
+            }
+            // Plain character — accumulate
+            let char_end = line[pos..].char_indices().nth(1).map(|(i, _)| pos + i).unwrap_or(len);
+            // Peek ahead for a run of plain chars
+            let mut plain_end = char_end;
+            while plain_end < len {
+                let b = bytes[plain_end];
+                if b == b'*' || b == b'`' || b == b'@' || b == b'[' { break; }
+                plain_end += line[plain_end..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+            }
+            let plain = &line[pos..plain_end];
+            parts.push(view! { <span>{plain.to_string()}</span> }.into_view());
+            pos = plain_end;
+        }
+
+        let mut line_view: Vec<View> = parts;
+        if i + 1 < line_count {
+            line_view.push(view! { <br/> }.into_view());
+        }
+        view! { <span>{line_view}</span> }.into_view()
+    }).collect();
+    view! { <span>{rendered}</span> }
 }
 
 fn render_text_with_mentions(text: &str) -> impl IntoView {
@@ -339,6 +506,14 @@ pub fn SquirrelChat() -> impl IntoView {
         }
     });
 
+    // Request notification permission on mount
+    request_notification_permission();
+
+    // ── Keyboard shortcuts ────────────────────────────────────────────────────
+    let (show_channel_switcher, set_show_channel_switcher) = create_signal(false);
+    let (show_help, set_show_help) = create_signal(false);
+    let (switcher_query, set_switcher_query) = create_signal(String::new());
+
     // ── Bootstrap identity + channels on load ─────────────────────────────────
     spawn_local(async move {
         let id = fetch_sc_identity().await;
@@ -426,16 +601,27 @@ pub fn SquirrelChat() -> impl IntoView {
                                     || m == &format!("@{}", my_name)
                             }) || msg_text.contains(&format!("@{}", my_id))
                               || msg_text.contains(&format!("@{}", my_name));
+                            // DM notification regardless of mention
+                            let is_dm = ch.starts_with("dm-");
                             if ch == cur || ch.is_empty() {
                                 set_messages.update(|msgs| msgs.push(message));
                             } else {
                                 set_unread.update(|u| {
                                     *u.entry(ch.clone()).or_insert(0) += 1;
                                 });
+                                if is_dm && !is_mention {
+                                    let from = message.from_agent.as_deref().unwrap_or("someone");
+                                    let dm_text = msg_text.to_string();
+                                    maybe_notify(&format!("DM from {}", from), &dm_text);
+                                }
                                 if is_mention {
                                     set_mentions_unread.update(|u| {
-                                        *u.entry(ch).or_insert(0) += 1;
+                                        *u.entry(ch.clone()).or_insert(0) += 1;
                                     });
+                                    // Browser notification when tab not focused
+                                    let notif_title = format!("@mention in #{}", ch);
+                                    let notif_body = msg_text.to_string();
+                                    maybe_notify(&notif_title, &notif_body);
                                 }
                             }
                         }
@@ -480,6 +666,34 @@ pub fn SquirrelChat() -> impl IntoView {
                 let _ = ws_cleanup.close();
             });
         }
+    }
+
+    // ── Global keyboard shortcuts ─────────────────────────────────────────────
+    // Cmd+K / Ctrl+K → channel switcher, Cmd+/ / Ctrl+/ → help
+    {
+        use wasm_bindgen::closure::Closure;
+        use wasm_bindgen::JsCast;
+        let handler = Closure::<dyn Fn(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            let meta = ev.meta_key() || ev.ctrl_key();
+            if meta && ev.key() == "k" {
+                ev.prevent_default();
+                set_show_channel_switcher.update(|v| *v = !*v);
+                set_switcher_query.set(String::new());
+            } else if meta && ev.key() == "/" {
+                ev.prevent_default();
+                set_show_help.update(|v| *v = !*v);
+            } else if ev.key() == "Escape" {
+                set_show_channel_switcher.set(false);
+                set_show_help.set(false);
+            }
+        });
+        if let Some(win) = web_sys::window() {
+            let _ = win.add_event_listener_with_callback(
+                "keydown",
+                handler.as_ref().unchecked_ref(),
+            );
+        }
+        handler.forget(); // leak intentionally — lives for app lifetime
     }
 
     // ── Auto-scroll to bottom on new messages ─────────────────────────────────
@@ -1027,7 +1241,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                         </div>
                                                     </div>
                                                     <div class="sc-msg-content">
-                                                        {render_text_with_mentions(&text)}
+                                                        {render_markdown(&text)}
                                                     </div>
                                                     // Inline attachments
                                                     {if !attachments.is_empty() {
@@ -1443,6 +1657,86 @@ pub fn SquirrelChat() -> impl IntoView {
                     />
                 }.into_view()
             }}
+
+            // ── Cmd+K Channel switcher ────────────────────────────────────────
+            {move || if show_channel_switcher.get() {
+                let all_channels = channels.get();
+                let all_dms = dm_channels.get();
+                let q = switcher_query.get().to_lowercase();
+                let filtered: Vec<_> = all_channels.iter().chain(all_dms.iter())
+                    .filter(|c| q.is_empty() || c.name.to_lowercase().contains(&q) || c.id.to_lowercase().contains(&q))
+                    .cloned()
+                    .collect();
+                view! {
+                    <div class="sc-switcher-overlay" on:click=move |_| set_show_channel_switcher.set(false)>
+                        <div class="sc-switcher" on:click=|ev| ev.stop_propagation()>
+                            <div class="sc-switcher-header">"⌘K — Switch Channel"</div>
+                            <input
+                                type="text"
+                                class="sc-switcher-input"
+                                placeholder="Type to filter channels..."
+                                autofocus=true
+                                prop:value=move || switcher_query.get()
+                                on:input=move |ev| set_switcher_query.set(event_target_value(&ev))
+                            />
+                            <div class="sc-switcher-list">
+                                {filtered.iter().map(|ch| {
+                                    let ch_id = ch.id.clone();
+                                    let ch_id2 = ch.id.clone();
+                                    let is_dm = ch.channel_type.as_deref() == Some("dm");
+                                    let prefix = if is_dm { "💬 " } else { "# " };
+                                    let name = ch.name.clone();
+                                    view! {
+                                        <div class="sc-switcher-item"
+                                            class:sc-switcher-active=move || selected_channel.get() == ch_id
+                                            on:click=move |_| {
+                                                set_selected_channel.set(ch_id2.clone());
+                                                set_unread.update(|u| { u.remove(&ch_id2.clone()); });
+                                                set_mentions_unread.update(|u| { u.remove(&ch_id2.clone()); });
+                                                set_selected_project.set(None);
+                                                set_show_channel_switcher.set(false);
+                                            }
+                                        >
+                                            {prefix} {name}
+                                        </div>
+                                    }
+                                }).collect::<Vec<_>>()}
+                                {if filtered.is_empty() {
+                                    view! { <div class="sc-switcher-empty">"No channels match"</div> }.into_view()
+                                } else { ().into_view() }}
+                            </div>
+                            <div class="sc-switcher-footer">"↑↓ navigate  ↵ select  Esc close"</div>
+                        </div>
+                    </div>
+                }.into_view()
+            } else { ().into_view() }}
+
+            // ── Cmd+/ Help modal ──────────────────────────────────────────────
+            {move || if show_help.get() {
+                view! {
+                    <div class="sc-switcher-overlay" on:click=move |_| set_show_help.set(false)>
+                        <div class="sc-help-modal" on:click=|ev| ev.stop_propagation()>
+                            <div class="sc-switcher-header">"⌘/ — Keyboard Shortcuts"</div>
+                            <div class="sc-help-grid">
+                                <div class="sc-help-row"><kbd>"⌘K"</kbd><span>"Switch channel"</span></div>
+                                <div class="sc-help-row"><kbd>"⌘/"</kbd><span>"Show this help"</span></div>
+                                <div class="sc-help-row"><kbd>"Ctrl+Enter"</kbd><span>"Send message"</span></div>
+                                <div class="sc-help-row"><kbd>"Esc"</kbd><span>"Close modal / clear search"</span></div>
+                            </div>
+                            <div class="sc-help-grid sc-help-md">
+                                <div class="sc-switcher-header">"Markdown Formatting"</div>
+                                <div class="sc-help-row"><kbd>"**text**"</kbd><span><strong>"bold"</strong></span></div>
+                                <div class="sc-help-row"><kbd>"*text*"</kbd><span><em>"italic"</em></span></div>
+                                <div class="sc-help-row"><kbd>"`code`"</kbd><span><code class="sc-inline-code">"inline code"</code></span></div>
+                                <div class="sc-help-row"><kbd>"```lang\\ncode\\n```"</kbd><span>"code block"</span></div>
+                                <div class="sc-help-row"><kbd>"[label](url)"</kbd><span>"link"</span></div>
+                                <div class="sc-help-row"><kbd>"@name"</kbd><span>"mention"</span></div>
+                            </div>
+                            <button class="sc-help-close" on:click=move |_| set_show_help.set(false)>"Close"</button>
+                        </div>
+                    </div>
+                }.into_view()
+            } else { ().into_view() }}
         </div>
     }
 }

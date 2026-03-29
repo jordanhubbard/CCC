@@ -1053,3 +1053,186 @@
   font-size: 11px;
   flex-shrink: 0;
 }
+
+/* ── Phase 4: Notifications, Markdown, Keyboard shortcuts ──────────────────── */
+
+/* Markdown rendering */
+.sc-md { display: contents; }
+
+.sc-md strong { font-weight: 700; color: var(--text); }
+.sc-md em { font-style: italic; color: var(--subtext1); }
+
+.sc-inline-code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: var(--surface2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.88em;
+  color: var(--green);
+}
+
+.sc-code-block {
+  background: var(--crust);
+  border: 1px solid var(--surface2);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.sc-code-lang {
+  display: block;
+  font-size: 10px;
+  color: var(--overlay0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.sc-md-link {
+  color: var(--blue);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.1s;
+}
+
+.sc-md-link:hover {
+  text-decoration-color: var(--blue);
+}
+
+/* Channel switcher (Cmd+K) */
+.sc-switcher-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+}
+
+.sc-switcher {
+  background: var(--mantle);
+  border: 1px solid var(--surface2);
+  border-radius: 10px;
+  width: 480px;
+  max-height: 440px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.sc-switcher-header {
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--subtext0);
+  border-bottom: 1px solid var(--surface2);
+}
+
+.sc-switcher-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--surface2);
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 15px;
+  outline: none;
+}
+
+.sc-switcher-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sc-switcher-item {
+  padding: 9px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  border-left: 3px solid transparent;
+  transition: background 0.1s;
+}
+
+.sc-switcher-item:hover, .sc-switcher-item.sc-switcher-active {
+  background: var(--surface1);
+  border-left-color: var(--blue);
+}
+
+.sc-switcher-empty {
+  padding: 16px 14px;
+  color: var(--subtext0);
+  font-size: 13px;
+  text-align: center;
+}
+
+.sc-switcher-footer {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--overlay0);
+  border-top: 1px solid var(--surface2);
+  text-align: center;
+}
+
+/* Help modal */
+.sc-help-modal {
+  background: var(--mantle);
+  border: 1px solid var(--surface2);
+  border-radius: 10px;
+  width: 400px;
+  padding: 0 0 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.sc-help-grid {
+  padding: 8px 0;
+}
+
+.sc-help-md {
+  border-top: 1px solid var(--surface2);
+  margin-top: 4px;
+}
+
+.sc-help-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 14px;
+  font-size: 13px;
+}
+
+.sc-help-row kbd {
+  background: var(--surface2);
+  border: 1px solid var(--overlay0);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text);
+  min-width: 100px;
+  text-align: center;
+}
+
+.sc-help-close {
+  display: block;
+  margin: 8px 14px 0;
+  background: var(--surface2);
+  border: none;
+  color: var(--text);
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.sc-help-close:hover {
+  background: var(--surface3, var(--overlay0));
+}
