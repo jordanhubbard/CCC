@@ -38,23 +38,34 @@ pub fn Metrics() -> impl IntoView {
                 {move || {
                     let q = queue.get().unwrap_or_default();
                     let hb = heartbeats.get().unwrap_or_default();
-                    let total = q.items.len();
-                    let pending = q
-                        .items
-                        .iter()
-                        .filter(|i| i.status.as_deref() == Some("pending"))
+                    // Exclude ideas and completed/closed from "active" queue depth
+                    let active_items: Vec<_> = q.items.iter()
+                        .filter(|i| !matches!(
+                            i.status.as_deref(),
+                            Some("completed") | Some("done") | Some("closed") | Some("cancelled")
+                        ))
+                        .filter(|i| i.priority.as_deref() != Some("idea"))
+                        .collect();
+                    let total = active_items.len();
+                    let pending = active_items.iter()
+                        .filter(|i| matches!(
+                            i.status.as_deref(),
+                            Some("pending") | Some("incubating")
+                        ))
                         .count();
-                    let in_progress = q
-                        .items
-                        .iter()
-                        .filter(|i| {
-                            matches!(
-                                i.status.as_deref(),
-                                Some("in_progress") | Some("in-progress")
-                            )
-                        })
+                    let in_progress = active_items.iter()
+                        .filter(|i| matches!(
+                            i.status.as_deref(),
+                            Some("in_progress") | Some("in-progress") | Some("claimed")
+                        ))
                         .count();
-                    let done_count = q.completed.as_ref().map(|c| c.len()).unwrap_or(0);
+                    let done_count = q.items.iter()
+                        .filter(|i| matches!(
+                            i.status.as_deref(),
+                            Some("completed") | Some("done") | Some("closed")
+                        ))
+                        .count()
+                        + q.completed.as_ref().map(|c| c.len()).unwrap_or(0);
                     let online_agents = hb
                         .values()
                         .filter(|h| h.online.unwrap_or(false))

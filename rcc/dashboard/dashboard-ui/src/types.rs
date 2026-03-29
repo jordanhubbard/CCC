@@ -89,6 +89,8 @@ pub struct QueueItem {
     pub priority: Option<String>,
     pub assignee: Option<String>,
     pub status: Option<String>,
+    /// RCC API sends "created" (not "createdAt") — accept both
+    #[serde(alias = "created")]
     pub created_at: Option<String>,
     /// Also accept "description" or "notes" as body fallback
     #[serde(alias = "description", alias = "notes")]
@@ -97,6 +99,8 @@ pub struct QueueItem {
     pub tags: Option<Vec<String>>,
     pub claimed_by: Option<String>,
     pub resolution: Option<String>,
+    /// Completion result text (some items use "result" instead of "resolution")
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
