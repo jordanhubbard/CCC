@@ -9,7 +9,10 @@ async fn fetch_ideas() -> Vec<QueueItem> {
     let q = resp.json::<QueueResponse>().await.unwrap_or_default();
     q.items
         .into_iter()
-        .filter(|i| i.priority.as_deref() == Some("idea"))
+        .filter(|i| {
+            i.priority.as_deref() == Some("idea")
+                || i.status.as_deref() == Some("incubating")
+        })
         .collect()
 }
 
