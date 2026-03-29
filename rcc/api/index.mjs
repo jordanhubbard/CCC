@@ -1500,6 +1500,9 @@ curl -sf -X POST "\${RCC_URL}/api/agents/register" \\
 # Usage: curl "${RCC_PUBLIC_URL}/api/onboard?token=<token>" | bash
 set -euo pipefail
 
+# Ensure user-local bin is in PATH (needed for openclaw after user-prefix npm install)
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+
 AGENT_NAME="${entry.agent}"
 AGENT_ROLE="${agentRole}"
 RCC_URL="${RCC_PUBLIC_URL}"
@@ -1562,9 +1565,13 @@ else
   if ! command -v npm &>/dev/null; then
     echo "  npm not found — installing..."
     sudo apt-get install -y -q npm 2>/dev/null || \
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs
+      (curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs)
   fi
-  npm install -g openclaw || { echo "ERROR: npm install failed"; exit 1; }
+  # Install to user-local prefix to avoid needing sudo
+  export NPM_CONFIG_PREFIX="$HOME/.local"
+  mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/node_modules"
+  npm install -g openclaw --prefix "$HOME/.local" || { echo "ERROR: npm install failed"; exit 1; }
+  export PATH="$HOME/.local/bin:$PATH"
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw gateway start
 fi
