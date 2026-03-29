@@ -43,7 +43,7 @@ const LLM_REGISTRY_PATH  = process.env.LLM_REGISTRY_PATH  || './data/llm-registr
 const PROVIDERS_PATH     = process.env.PROVIDERS_PATH     || './data/providers.json';
 const TUNNEL_STATE_PATH  = process.env.TUNNEL_STATE_PATH  || './data/tunnel-state.json';
 const TUNNEL_USER        = process.env.TUNNEL_USER        || 'jkh';
-const TUNNEL_AUTH_KEYS   = process.env.TUNNEL_AUTH_KEYS   || (process.env.HOME + '/.ssh/authorized_keys');
+const TUNNEL_AUTH_KEYS   = process.env.TUNNEL_AUTH_KEYS   || '/home/tunnel/.ssh/authorized_keys';
 const TUNNEL_PORT_START  = parseInt(process.env.TUNNEL_PORT_START || '18080', 10);
 
 // ── SquirrelBus paths ──────────────────────────────────────────────────────
@@ -1398,19 +1398,22 @@ echo "→ Setting up reverse SSH tunnel to RCC (\$RCC_TUNNEL_HOST)..."
 TUNNEL_KEY="$HOME/.ssh/rcc-tunnel-key"
 if [ ! -f "\$TUNNEL_KEY" ]; then
   ssh-keygen -t ed25519 -f "\$TUNNEL_KEY" -N "" -C "\${AGENT_NAME}-vllm-tunnel"
-  echo "  Generated tunnel key: \$TUNNEL_KEY"
-  echo ""
-  echo "  ⚠️  MANUAL STEP REQUIRED:"
-  echo "  Add this public key to the 'tunnel' user on RCC (\$RCC_TUNNEL_HOST):"
-  echo "  ──────────────────────────────────────────────────────"
-  cat "\${TUNNEL_KEY}.pub"
-  echo "  ──────────────────────────────────────────────────────"
-  echo "  Run on RCC: echo '\$(cat \${TUNNEL_KEY}.pub)' >> /home/tunnel/.ssh/authorized_keys"
-  echo ""
+  echo "  Generated: \$TUNNEL_KEY"
 fi
 
+# Auto-register tunnel key with RCC (no manual step required)
+echo "→ Registering tunnel key with RCC..."
+TUNNEL_PUBKEY=\$(cat "\${TUNNEL_KEY}.pub")
+TUNNEL_RESP=\$(curl -sf -X POST "\${RCC_URL}/api/tunnel/request" \
+  -H "Authorization: Bearer \${RCC_AGENT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"pubkey\":\"\${TUNNEL_PUBKEY}\",\"agent\":\"\${AGENT_NAME}\",\"label\":\"\${AGENT_NAME}-vllm-tunnel\"}" 2>/dev/null)
+TUNNEL_PORT=\$(echo "\$TUNNEL_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('port',18082))" 2>/dev/null || echo "18082")
+echo "  ✅ Tunnel registered on port \$TUNNEL_PORT"
+
 # Write tunnel systemd service
-TUNNEL_PORT=\$(curl -sf "\${RCC_URL}/api/agents/\${AGENT_NAME}/tunnel-port" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('port',18082))" 2>/dev/null || echo "18082")
+# (TUNNEL_PORT already set above from /api/tunnel/request)
+mkdir -p "\$HOME/.config/systemd/user"
 cat > "\$HOME/.config/systemd/user/rcc-vllm-tunnel.service" << TUNNELEOF
 [Unit]
 Description=RCC vLLM Reverse SSH Tunnel for \${AGENT_NAME}
