@@ -184,6 +184,53 @@ Any node can join the network:
 
 ---
 
+## Remote Exec (SquirrelBus RCE)
+
+Agents can be commanded remotely via SquirrelBus exec — no inbound SSH required. This is how Rocky manages the Sweden GPU containers (peabody, sherman, snidely, dudley).
+
+**Run the agent-listener daemon** on any node you want to be commandable:
+
+```bash
+# Quick start (manual):
+SQUIRRELBUS_TOKEN=<shared-secret> \
+SQUIRRELBUS_URL=http://100.89.199.14:8788 \
+RCC_URL=http://146.190.134.110:8789 \
+RCC_AUTH_TOKEN=<agent-token> \
+AGENT_NAME=mynode \
+ALLOW_SHELL_EXEC=true \
+node /opt/rcc/rcc/exec/agent-listener.mjs
+
+# Or as a systemd service (see rcc/deploy/systemd/agent-listener.service)
+```
+
+**Send a command from Rocky/Natasha:**
+
+```bash
+# JS mode (default — sandboxed vm):
+curl -s -X POST http://146.190.134.110:8789/api/exec \
+  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"targets":["mynode"],"code":"Object.keys(process.env).length"}'
+
+# Shell mode (pre-approved commands only):
+curl -s -X POST http://146.190.134.110:8789/api/exec \
+  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"targets":["mynode"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'
+```
+
+**Poll for results:**
+
+```bash
+EXEC_ID=$(curl -s ... | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+curl -s "http://146.190.134.110:8789/api/exec/$EXEC_ID" \
+  -H "Authorization: Bearer $RCC_AUTH_TOKEN" | python3 -m json.tool
+```
+
+See [`rcc/docs/remote-exec.md`](docs/remote-exec.md) for full details, security model, and shell allowlist configuration.
+
+---
+
 ## Connecting SquirrelBus
 
 SquirrelBus is the inter-agent message bus. It runs on the hub node (default port 8788).

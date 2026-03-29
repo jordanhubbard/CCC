@@ -8,13 +8,51 @@
 
 ## Overview
 
-Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets to any or all agents via SquirrelBus. Each agent:
+Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets **or shell commands** to any or all agents via SquirrelBus. Each agent:
 
 1. Receives the message over the bus (`type: "rcc.exec"`)
 2. Verifies the HMAC-SHA256 signature using `SQUIRRELBUS_TOKEN`
-3. Executes the code in an isolated `vm.runInNewContext()` sandbox with a 10-second timeout
+3. Executes the code/command in a sandboxed environment (see Execution Modes)
 4. POSTs the result back to the RCC API (`POST /api/exec/:id/result`)
 5. Appends an audit log entry to `~/.rcc/logs/remote-exec.jsonl`
+
+## Execution Modes
+
+Set `mode` in the exec payload to control how code runs:
+
+| Mode | Description | Timeout | Auth required |
+|------|-------------|---------|---------------|
+| `js` (default) | `vm.runInNewContext()` sandbox | 10s | SQUIRRELBUS_TOKEN |
+| `shell` | `/bin/sh -c` via allowlist | 30s | SQUIRRELBUS_TOKEN + `ALLOW_SHELL_EXEC=true` |
+
+### Shell Mode
+
+Shell mode lets Rocky or admins run pre-approved commands on remote nodes without needing inbound network access. This is the primary mechanism for administering Sweden containers (peabody, sherman, snidely, dudley) which have no inbound SSH.
+
+**Enable on the target node:**
+```bash
+export ALLOW_SHELL_EXEC=true
+export SHELL_ALLOWLIST="systemctl status,journalctl,df,free,uptime,nvidia-smi,git status,ls,cat,echo,ps aux,curl -s"
+```
+
+**Send a shell exec:**
+```bash
+curl -s -X POST http://146.190.134.110:8789/api/exec \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -d '{
+    "targets": ["peabody"],
+    "mode": "shell",
+    "code": "nvidia-smi --query-gpu=name,memory.used,memory.free --format=csv,noheader",
+    "timeout_ms": 15000
+  }'
+```
+
+**Security constraints:**
+- Commands must start with an allowed prefix from `SHELL_ALLOWLIST`
+- No pipes to `sh`, no interactive shells, no token injection
+- `eval()` is never used — `/bin/sh -c` via `execFile` (not `exec`)
+- All attempts logged regardless of pass/fail
 
 ---
 
@@ -166,3 +204,52 @@ EXEC_ID=exec-<uuid>
 curl -s http://localhost:8789/api/exec/$EXEC_ID \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" | jq .results
 ```
+
+---
+
+## Deployment: Sweden GPU Nodes (peabody / sherman / snidely / dudley)
+
+These nodes have no inbound network access. SquirrelBus exec is the **only** mechanism for remote administration from Rocky or other agents.
+
+### Install agent-listener as a systemd service
+
+```bash
+# On the target node (run once during onboarding):
+curl -sO https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/rcc/deploy/systemd/agent-listener.service
+sudo cp agent-listener.service /etc/systemd/system/
+sudo mkdir -p /etc/rcc
+
+# Write credentials (get these from Rocky or jkh):
+sudo tee /etc/rcc/env << 'ENVEOF'
+SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+SQUIRRELBUS_URL=http://100.89.199.14:8788
+RCC_URL=http://146.190.134.110:8789
+RCC_AUTH_TOKEN=<agent-specific-token>
+AGENT_NAME=peabody
+ALLOW_SHELL_EXEC=true
+SHELL_ALLOWLIST=systemctl status,journalctl,df,free,uptime,nvidia-smi,git status,ls,cat,echo,ps aux,curl -s
+ENVEOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now agent-listener
+sudo systemctl status agent-listener
+```
+
+### Verify from Rocky
+
+```bash
+# Check peabody GPU status
+curl -s -X POST http://146.190.134.110:8789/api/exec \
+  -H "Authorization: Bearer $RCC_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"targets":["peabody"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'
+```
+
+### Node names
+
+| Container | AGENT_NAME | GPU | Purpose |
+|-----------|-----------|-----|---------|
+| peabody | `peabody` | L40 48GB | Primary vLLM serving |
+| sherman | `sherman` | L40 48GB | Secondary vLLM serving |
+| snidely | `snidely` | L40 48GB | Inference overflow |
+| dudley | `dudley` | L40 48GB | Experiments / Boris alt |
