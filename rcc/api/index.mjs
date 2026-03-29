@@ -20,6 +20,7 @@ import { Pump } from '../scout/pump.mjs';
 import * as llmRegistry from '../llm/registry.mjs';
 import { learnLesson, queryLessons, queryAllLessons, formatLessonsForContext, getTrendingLessons, formatTrendingForHeartbeat, getHeartbeatContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
 import { generateIdea } from '../ideation/ideation.mjs';
+import * as issuesModule from '../issues/index.mjs';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT            = parseInt(process.env.RCC_PORT || '8789', 10);
@@ -176,7 +177,21 @@ const heartbeatHistory = {};
 const cronStatus = {};
 const providerHealth = {};
 const geekSseClients = new Set();
-const bootstrapTokens = new Map();
+const BOOTSTRAP_TOKENS_PATH = process.env.BOOTSTRAP_TOKENS_PATH || './data/bootstrap-tokens.json';
+const bootstrapTokens = (() => {
+  const m = new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(BOOTSTRAP_TOKENS_PATH, 'utf8'));
+    const now = Date.now();
+    for (const [k, v] of Object.entries(raw)) {
+      if (v.expiresAt > now && !v.used) m.set(k, v);
+    }
+  } catch { /* file missing on first run */ }
+  return m;
+})();
+function saveBootstrapTokens() {
+  try { fs.writeFileSync(BOOTSTRAP_TOKENS_PATH, JSON.stringify(Object.fromEntries(bootstrapTokens), null, 2)); } catch { }
+}
 
 // ── Disappearance detection config ────────────────────────────────────────
 const OFFLINE_THRESHOLD_MS = parseInt(process.env.OFFLINE_THRESHOLD_MS || String(60 * 60 * 1000), 10); // 1h
@@ -1047,6 +1062,7 @@ async function handleRequest(req, res) {
       if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
       if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
       entry.used = true;
+      saveBootstrapTokens();
 
       const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
       if (!existsSync(keyPath)) return json(res, 500, { error: 'Deploy key not configured' });
@@ -1104,6 +1120,7 @@ async function handleRequest(req, res) {
         return res.end('# Error: Bootstrap token already used\n');
       }
       entry.used = true;
+      saveBootstrapTokens();
       const agentRole = entry.role || 'agent';
 
       // Load agent token (reuse existing if resurrection)
@@ -3287,6 +3304,7 @@ echo "   4. Check tunnel: systemctl --user status rcc-vllm-tunnel"` : ''}
       const token = `rcc-bootstrap-${body.agent}-${randomUUID().slice(0, 8)}`;
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
       bootstrapTokens.set(token, { agent: body.agent, role, expiresAt: Date.now() + ttl * 1000, used: false });
+      saveBootstrapTokens();
       return json(res, 200, { ok: true, bootstrapToken: token, agent: body.agent, role, expiresAt,
         onboardCmd: `curl -fsSL "${RCC_PUBLIC_URL}/api/onboard?token=${token}" | bash` });
     }
@@ -3300,6 +3318,7 @@ echo "   4. Check tunnel: systemctl --user status rcc-vllm-tunnel"` : ''}
       if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
       if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
       entry.used = true;
+      saveBootstrapTokens();
 
       const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
       if (!existsSync(keyPath)) return json(res, 500, { error: 'Deploy key not configured' });
@@ -4164,6 +4183,97 @@ echo "   4. Check tunnel: systemctl --user status rcc-vllm-tunnel"` : ''}
       return json(res, 200, { ts: new Date().toISOString(), nodes: [...agentNodes, ...projectNodes, ...personNodes], edges });
     }
 
+    // ── GET /api/issues — list cached GH issues ────────────────────────────
+    if (method === 'GET' && path === '/api/issues') {
+      const repo  = url.searchParams.get('repo')   || undefined;
+      const state = url.searchParams.get('state')  || 'open';
+      const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+      const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+      try {
+        const issues = issuesModule.getIssues({ repo, state: state === 'all' ? undefined : state, limit, offset });
+        const lastSync = repo ? issuesModule.getLastSync(repo) : null;
+        return json(res, 200, { ok: true, issues, count: issues.length, lastSync });
+      } catch (err) {
+        return json(res, 500, { error: err.message });
+      }
+    }
+
+    // ── GET /api/issues/:id — single issue ────────────────────────────────
+    const issueGetMatch = path.match(/^\/api\/issues\/(\d+)$/);
+    if (method === 'GET' && issueGetMatch) {
+      const id   = parseInt(issueGetMatch[1], 10);
+      const repo = qs.get('repo') || undefined;
+      try {
+        const issue = issuesModule.getIssue(id, repo);
+        if (!issue) return json(res, 404, { error: 'Issue not found' });
+        return json(res, 200, { ok: true, issue });
+      } catch (err) {
+        return json(res, 500, { error: err.message });
+      }
+    }
+
+    // ── POST /api/issues/sync — trigger sync (auth required) ─────────────
+    if (method === 'POST' && path === '/api/issues/sync') {
+      const body = await readBody(req);
+      const repo = body.repo || null;
+      try {
+        const result = repo
+          ? await issuesModule.syncIssues(repo, { state: body.state || 'all' })
+          : await issuesModule.syncAllProjects({ state: body.state || 'all' });
+        return json(res, 200, { ok: true, result });
+      } catch (err) {
+        return json(res, 500, { error: err.message });
+      }
+    }
+
+    // ── POST /api/issues/:id/link — link issue to WQ item ─────────────────
+    const issueLinkMatch = path.match(/^\/api\/issues\/(\d+)\/link$/);
+    if (method === 'POST' && issueLinkMatch) {
+      const id   = parseInt(issueLinkMatch[1], 10);
+      const body = await readBody(req);
+      const repo  = body.repo;
+      const wqId  = body.wq_id;
+      if (!repo || !wqId) return json(res, 400, { error: 'repo and wq_id required' });
+      try {
+        const result = issuesModule.linkIssue(id, repo, wqId);
+        return json(res, 200, result);
+      } catch (err) {
+        return json(res, 500, { error: err.message });
+      }
+    }
+
+    // ── POST /api/issues/create-from-wq — create GH issue from WQ item ───
+    if (method === 'POST' && path === '/api/issues/create-from-wq') {
+      const body = await readBody(req);
+      const wqId = body.wq_id;
+      const repo = body.repo;
+      if (!wqId || !repo) return json(res, 400, { error: 'wq_id and repo required' });
+      try {
+        const q = await readQueue();
+        const item = [...(q.items || []), ...(q.completed || [])].find(i => i.id === wqId);
+        if (!item) return json(res, 404, { error: `WQ item ${wqId} not found` });
+        const result = await issuesModule.createIssueFromWQ(item, repo);
+        return json(res, 201, result);
+      } catch (err) {
+        return json(res, 500, { error: err.message });
+      }
+    }
+
+    // ── GET /api/queue/claimed — list in-progress items with agent info ───
+    if (method === 'GET' && path === '/api/queue/claimed') {
+      const q = await readQueue();
+      const claimed = (q.items || []).filter(i => i.status === 'in-progress');
+      return json(res, 200, {
+        ok: true,
+        count: claimed.length,
+        items: claimed.map(i => ({
+          id: i.id, title: i.title, assignee: i.assignee,
+          claimedBy: i.claimedBy, claimedAt: i.claimedAt,
+          keepaliveAt: i.keepaliveAt, attempts: i.attempts,
+        })),
+      });
+    }
+
     return json(res, 404, { error: 'Not found' });
 
   } catch (err) {
@@ -4207,10 +4317,45 @@ async function initLLMRegistry() {
   console.log('[rcc-api] LLM registry initialized');
 }
 
+// ── Stale claim auto-expiry ────────────────────────────────────────────────
+// Run every 5 minutes to reset abandoned in-progress items back to pending.
+setInterval(async () => {
+  try {
+    await withQueueLock(async () => {
+      const q = await readQueue();
+      const now = Date.now();
+      let reset = 0;
+      for (const item of (q.items || [])) {
+        if (item.status !== 'in-progress' || !item.claimedAt) continue;
+        const threshold = STALE_THRESHOLDS[item.preferred_executor] || STALE_THRESHOLDS.default;
+        if ((now - new Date(item.claimedAt).getTime()) > threshold) {
+          const prev = item.claimedBy;
+          item.claimedBy = null;
+          item.claimedAt = null;
+          item.status = 'pending';
+          if (!item.journal) item.journal = [];
+          item.journal.push({ ts: new Date().toISOString(), author: 'rcc', type: 'stale-reset', text: `Auto-reset stale claim (was ${prev})` });
+          reset++;
+        }
+      }
+      if (reset > 0) {
+        await writeQueue(q);
+        console.log(`[rcc-api] Auto-expired ${reset} stale claim(s)`);
+      }
+    });
+  } catch (e) {
+    console.error('[rcc-api] Stale expiry error:', e.message);
+  }
+}, 5 * 60 * 1000).unref();
+
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   reloadAgentTokens()
     .then(() => initLLMRegistry())
-    .then(() => startServer());
+    .then(() => {
+      startServer();
+      // Start periodic GitHub issues sync (every 15 min)
+      issuesModule.startPeriodicSync(15 * 60 * 1000);
+    });
   process.on('SIGTERM', () => process.exit(0));
   process.on('SIGINT',  () => process.exit(0));
 }
