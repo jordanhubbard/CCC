@@ -1,20 +1,7 @@
 use leptos::*;
 
+use crate::context::DashboardContext;
 use crate::types::{AgentInfo, AgentList, HeartbeatData, HeartbeatMap};
-
-async fn fetch_heartbeats() -> HeartbeatMap {
-    let Ok(resp) = gloo_net::http::Request::get("/api/heartbeats").send().await else {
-        return HeartbeatMap::default();
-    };
-    resp.json::<HeartbeatMap>().await.unwrap_or_default()
-}
-
-async fn fetch_agents() -> AgentList {
-    let Ok(resp) = gloo_net::http::Request::get("/api/agents").send().await else {
-        return vec![];
-    };
-    resp.json::<AgentList>().await.unwrap_or_default()
-}
 
 /// Returns "X min ago", "Xh ago", "Xd ago", or "just now" from an ISO-8601 string.
 /// Falls back to showing just the time if parsing fails.
@@ -76,18 +63,9 @@ fn days_since_epoch(y: u64, m: u64, d: u64) -> u64 {
 
 #[component]
 pub fn AgentCards() -> impl IntoView {
-    let (tick, set_tick) = create_signal(0u32);
-
-    // Poll every 30 seconds
-    leptos::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(30_000).await;
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        }
-    });
-
-    let heartbeats = create_resource(move || tick.get(), |_| fetch_heartbeats());
-    let agents = create_resource(move || tick.get(), |_| fetch_agents());
+    let ctx = use_context::<DashboardContext>().expect("DashboardContext missing");
+    let heartbeats = ctx.heartbeats;
+    let agents = ctx.agents;
 
     view! {
         <section class="section section-agents">

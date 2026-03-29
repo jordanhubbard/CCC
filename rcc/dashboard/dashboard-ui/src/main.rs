@@ -1,5 +1,6 @@
 mod app;
 mod components;
+mod context;
 mod types;
 
 fn main() {

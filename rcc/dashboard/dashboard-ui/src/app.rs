@@ -1,5 +1,6 @@
 use leptos::*;
 
+use crate::context::DashboardContext;
 use crate::components::{
     activity_feed::ActivityFeed,
     agent_cards::AgentCards,
@@ -20,6 +21,9 @@ use crate::components::{
 
 #[component]
 pub fn App() -> impl IntoView {
+    // Shared data context — eliminates per-component fetch races / FOUC
+    provide_context(DashboardContext::new());
+
     // 0=Dashboard 1=GeekView 2=Kanban 3=SquirrelChat 4=Agents 5=Issues 6=Providers
     let (tab, set_tab) = create_signal(0u8);
 

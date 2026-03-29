@@ -1,24 +1,10 @@
 /// Health roll-up banner — surfaces "needs attention" items at a glance.
 ///
-/// Fetches queue + heartbeats, computes issues, renders a compact
-/// dismissable bar at the top of the dashboard.
+/// Uses the shared DashboardContext (no independent fetch) to eliminate
+/// the FOUC / layout-shift race during mount.
 use leptos::*;
 
-use crate::types::{HeartbeatMap, QueueResponse};
-
-async fn fetch_heartbeats() -> HeartbeatMap {
-    let Ok(resp) = gloo_net::http::Request::get("/api/heartbeats").send().await else {
-        return HeartbeatMap::default();
-    };
-    resp.json::<HeartbeatMap>().await.unwrap_or_default()
-}
-
-async fn fetch_queue() -> QueueResponse {
-    let Ok(resp) = gloo_net::http::Request::get("/api/queue").send().await else {
-        return QueueResponse::default();
-    };
-    resp.json::<QueueResponse>().await.unwrap_or_default()
-}
+use crate::context::DashboardContext;
 
 fn parse_ts_sec(ts: &str) -> Option<u64> {
     let (date_part, time_part) = ts.split_once('T')?;
@@ -66,18 +52,10 @@ struct Alert {
 
 #[component]
 pub fn HealthBanner() -> impl IntoView {
-    let (tick, set_tick) = create_signal(0u32);
+    let ctx = use_context::<DashboardContext>().expect("DashboardContext missing");
     let (dismissed, set_dismissed) = create_signal(false);
-
-    leptos::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(60_000).await;
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        }
-    });
-
-    let heartbeats = create_resource(move || tick.get(), |_| fetch_heartbeats());
-    let queue = create_resource(move || tick.get(), |_| fetch_queue());
+    let heartbeats = ctx.heartbeats;
+    let queue = ctx.queue;
 
     let alerts = move || -> Vec<Alert> {
         if dismissed.get() { return vec![]; }

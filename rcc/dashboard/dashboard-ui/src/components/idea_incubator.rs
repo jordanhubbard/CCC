@@ -1,20 +1,7 @@
 use leptos::*;
 
-use crate::types::{QueueItem, QueueResponse};
-
-async fn fetch_ideas() -> Vec<QueueItem> {
-    let Ok(resp) = gloo_net::http::Request::get("/api/queue").send().await else {
-        return vec![];
-    };
-    let q = resp.json::<QueueResponse>().await.unwrap_or_default();
-    q.items
-        .into_iter()
-        .filter(|i| {
-            i.priority.as_deref() == Some("idea")
-                || i.status.as_deref() == Some("incubating")
-        })
-        .collect()
-}
+use crate::context::DashboardContext;
+use crate::types::QueueItem;
 
 async fn upvote(id: String) -> bool {
     let Ok(resp) = gloo_net::http::Request::post(&format!("/api/upvote/{id}"))
@@ -31,17 +18,19 @@ async fn upvote(id: String) -> bool {
 
 #[component]
 pub fn IdeaIncubator() -> impl IntoView {
-    let (tick, set_tick) = create_signal(0u32);
-
-    // Poll every 60 seconds — ideas don't change often
-    leptos::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(60_000).await;
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        }
-    });
-
-    let ideas = create_resource(move || tick.get(), |_| fetch_ideas());
+    let ctx = use_context::<DashboardContext>().expect("DashboardContext missing");
+    let queue = ctx.queue;
+    // Derive ideas from the shared queue resource
+    let ideas = move || {
+        queue.get().map(|q| {
+            q.items.into_iter()
+                .filter(|i| {
+                    i.priority.as_deref() == Some("idea")
+                        || i.status.as_deref() == Some("incubating")
+                })
+                .collect::<Vec<_>>()
+        }).unwrap_or_default()
+    };
 
     view! {
         <section class="section section-ideas">
@@ -51,19 +40,18 @@ pub fn IdeaIncubator() -> impl IntoView {
                     "Idea Incubator"
                 </h2>
                 {move || {
-                    let n = ideas.get().map(|i| i.len()).unwrap_or(0);
+                    let n = ideas().len();
                     view! { <span class="badge">{n}</span> }
                 }}
             </div>
 
             <div class="ideas-list">
-                {move || match ideas.get() {
-                    None => view! { <p class="loading">"Loading ideas..."</p> }.into_view(),
-                    Some(items) if items.is_empty() => {
-                        view! { <p class="empty">"No ideas incubating"</p> }.into_view()
+                {move || {
+                    let items = ideas();
+                    if items.is_empty() {
+                        return view! { <p class="empty">"No ideas incubating"</p> }.into_view();
                     }
-                    Some(items) => {
-                        items
+                    items
                             .into_iter()
                             .map(|idea| {
                                 let id = idea.id.clone();
@@ -127,7 +115,6 @@ pub fn IdeaIncubator() -> impl IntoView {
                             })
                             .collect::<Vec<_>>()
                             .into_view()
-                    }
                 }}
             </div>
         </section>

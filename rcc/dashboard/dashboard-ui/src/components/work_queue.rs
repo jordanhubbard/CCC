@@ -1,13 +1,7 @@
 use leptos::*;
 
-use crate::types::{QueueItem, QueueResponse};
-
-async fn fetch_queue() -> QueueResponse {
-    let Ok(resp) = gloo_net::http::Request::get("/api/queue").send().await else {
-        return QueueResponse::default();
-    };
-    resp.json::<QueueResponse>().await.unwrap_or_default()
-}
+use crate::context::DashboardContext;
+use crate::types::QueueItem;
 
 fn priority_class(p: &str) -> &'static str {
     match p {
@@ -77,20 +71,11 @@ fn age_display(created_at: &str) -> String {
 
 #[component]
 pub fn WorkQueue() -> impl IntoView {
-    let (tick, set_tick) = create_signal(0u32);
+    let ctx = use_context::<DashboardContext>().expect("DashboardContext missing");
+    let queue = ctx.queue;
     let (filter, set_filter) = create_signal(String::new());
     let (expanded_id, set_expanded_id) = create_signal(Option::<String>::None);
     let (show_completed, set_show_completed) = create_signal(false);
-
-    // Poll every 15 seconds
-    leptos::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(15_000).await;
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        }
-    });
-
-    let queue = create_resource(move || tick.get(), |_| fetch_queue());
 
     fn priority_rank(p: &str) -> u8 {
         match p {

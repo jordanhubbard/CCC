@@ -1,32 +1,12 @@
 use leptos::*;
 
-use crate::types::{HeartbeatMap, QueueResponse};
+use crate::context::DashboardContext;
 
 #[component]
 pub fn Metrics() -> impl IntoView {
-    let (tick, set_tick) = create_signal(0u32);
-
-    // Poll every 20 seconds
-    leptos::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(20_000).await;
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        }
-    });
-
-    let queue = create_resource(move || tick.get(), |_| async move {
-        let Ok(resp) = gloo_net::http::Request::get("/api/queue").send().await else {
-            return QueueResponse::default();
-        };
-        resp.json::<QueueResponse>().await.unwrap_or_default()
-    });
-
-    let heartbeats = create_resource(move || tick.get(), |_| async move {
-        let Ok(resp) = gloo_net::http::Request::get("/api/heartbeats").send().await else {
-            return HeartbeatMap::default();
-        };
-        resp.json::<HeartbeatMap>().await.unwrap_or_default()
-    });
+    let ctx = use_context::<DashboardContext>().expect("DashboardContext missing");
+    let queue = ctx.queue;
+    let heartbeats = ctx.heartbeats;
 
     view! {
         <section class="section section-metrics">
