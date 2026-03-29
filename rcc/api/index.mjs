@@ -177,7 +177,7 @@ const heartbeatHistory = {};
 const cronStatus = {};
 const providerHealth = {};
 const geekSseClients = new Set();
-const BOOTSTRAP_TOKENS_PATH = process.env.BOOTSTRAP_TOKENS_PATH || './data/bootstrap-tokens.json';
+const BOOTSTRAP_TOKENS_PATH = process.env.BOOTSTRAP_TOKENS_PATH || '/home/jkh/.openclaw/workspace/rcc/data/bootstrap-tokens.json';
 const bootstrapTokens = (() => {
   const m = new Map();
   try {
