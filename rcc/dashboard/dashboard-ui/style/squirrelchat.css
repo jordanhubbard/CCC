@@ -1236,3 +1236,253 @@
 .sc-help-close:hover {
   background: var(--surface3, var(--overlay0));
 }
+
+/* ─── Phase 5.1: Mobile-responsive layout ──────────────────────────────────── */
+
+.sc-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 6px 10px;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .sc-layout {
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .sc-sidebar {
+    width: 100% !important;
+    height: auto;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+    border-right: none;
+    border-bottom: 1px solid var(--surface2);
+  }
+
+  .sc-sidebar.sc-sidebar-open {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  .sc-main {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sc-hamburger {
+    display: flex;
+  }
+
+  .sc-channel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sc-msg-actions {
+    opacity: 1 !important; /* always visible on touch */
+  }
+
+  .sc-msg-actions button,
+  .sc-channel-item,
+  .sc-project-item,
+  .sc-dm-item,
+  .sc-mini-btn,
+  .sc-new-btn,
+  .sc-send-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .sc-input-row {
+    padding: 8px;
+  }
+
+  .sc-msg-input {
+    font-size: 16px; /* prevent iOS zoom */
+  }
+}
+
+/* ─── Phase 5.3: Keyboard navigation focus styles ──────────────────────────── */
+
+.sc-channel-item:focus,
+.sc-dm-item:focus,
+.sc-project-item:focus {
+  outline: 2px solid var(--blue, #89b4fa);
+  outline-offset: -2px;
+  background: var(--surface2);
+}
+
+.sc-sidebar-section:focus-within .sc-section-header {
+  color: var(--blue, #89b4fa);
+}
+
+/* ─── Phase 5.4: Edit message ───────────────────────────────────────────────── */
+
+.sc-edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--subtext0, #a6adc8);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.sc-msg:hover .sc-edit-btn {
+  opacity: 1;
+}
+
+.sc-edit-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.sc-edit-input {
+  width: 100%;
+  background: var(--surface1, #313244);
+  border: 1px solid var(--blue, #89b4fa);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  padding: 6px 10px;
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.sc-edit-hint {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  margin-top: 3px;
+}
+
+/* ─── Phase 5.5: Pinned messages ───────────────────────────────────────────── */
+
+.sc-pin-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--subtext0, #a6adc8);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.sc-msg:hover .sc-pin-btn {
+  opacity: 1;
+}
+
+.sc-pin-btn:hover,
+.sc-pin-btn.sc-pin-active {
+  background: var(--surface2);
+  color: var(--yellow, #f9e2af);
+}
+
+.sc-pins-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--subtext0, #a6adc8);
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-height: 32px;
+}
+
+.sc-pins-btn:hover {
+  background: var(--surface2);
+  color: var(--yellow, #f9e2af);
+}
+
+.sc-pins-panel {
+  position: absolute;
+  top: 50px;
+  right: 12px;
+  width: 360px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--surface0, #1e1e2e);
+  border: 1px solid var(--surface2);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  z-index: 200;
+  padding: 12px;
+}
+
+.sc-pins-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+.sc-pins-close {
+  background: none;
+  border: none;
+  color: var(--subtext0);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0 4px;
+}
+
+.sc-pins-empty {
+  color: var(--subtext0);
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
+}
+
+.sc-pinned-msg {
+  background: var(--surface1, #313244);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.sc-pinned-msg-from {
+  font-weight: 600;
+  color: var(--blue, #89b4fa);
+  margin-bottom: 3px;
+}
+
+.sc-pinned-msg-text {
+  color: var(--text);
+  word-break: break-word;
+}
+
+.sc-pinned-msg-unpin {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--subtext0);
+  font-size: 12px;
+  float: right;
+  padding: 0 4px;
+}
+
+.sc-pinned-msg-unpin:hover {
+  color: var(--red, #f38ba8);
+}
