@@ -31,7 +31,11 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { tmpdir } from 'os';
 import { writeFile, unlink, readFile } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { DecisionJournal } from '../../../rcc/decision-journal/index.mjs';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const _dj = new DecisionJournal({ agent: 'natasha', silent: true });
 import {
   S3Client,
   PutObjectCommand,
@@ -277,6 +281,14 @@ async function handleUpload(req, res) {
 
   // AOT compile (also validates structurally via wasmtime)
   const compiled = await aotCompile(buf);
+  // Log AOT/JIT routing decision to DecisionJournal
+  _dj.log({
+    principle_used: 'agentfs-aot-routing',
+    confidence: 0.95,
+    was_conflict: false,
+    outcome: compiled.ok ? (compiled.aot ? 'aot_compile' : 'jit_fallback') : 'validation_failed',
+    context: { size_bytes: buf.length, aot_ms: compiled.aot_ms ?? null, reason: compiled.reason ?? null },
+  }).catch(() => {});
   if (!compiled.ok) return json(res, 400, { error: `WASM validation failed: ${compiled.reason}` });
 
   const hash = sha256(buf);
