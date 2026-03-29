@@ -1,7 +1,7 @@
 use axum::{
     Router,
-    routing::{get, put, delete},
-    extract::{State, Request, Path},
+    routing::{get, put},
+    extract::{State, Request},
     response::Response,
     http::{StatusCode, HeaderMap, Method},
     body::Body,
@@ -16,9 +16,6 @@ use tracing_subscriber::prelude::*;
 struct AppState {
     rcc_url: String,
     sc_url: String,
-    minio_url: String,
-    minio_key: String,
-    minio_secret: String,
     agent_token: String,
     client: reqwest::Client,
     stream_client: reqwest::Client,
@@ -307,6 +304,35 @@ async fn sc_delete(
     proxy_to_sc(&state, reqwest::Method::DELETE, sc_path, &headers, None).await
 }
 
+// --- /s3/* handlers (MinIO S3 proxy via RCC) ---
+async fn s3_get(
+    State(state): State<Arc<AppState>>,
+    uri: axum::http::Uri,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
+    proxy_to_rcc(&state, reqwest::Method::GET, path, &headers, None).await
+}
+
+async fn s3_put(
+    State(state): State<Arc<AppState>>,
+    uri: axum::http::Uri,
+    headers: HeaderMap,
+    body: bytes::Bytes,
+) -> Response<Body> {
+    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
+    proxy_to_rcc(&state, reqwest::Method::PUT, path, &headers, Some(body)).await
+}
+
+async fn s3_delete(
+    State(state): State<Arc<AppState>>,
+    uri: axum::http::Uri,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
+    proxy_to_rcc(&state, reqwest::Method::DELETE, path, &headers, None).await
+}
+
 // --- /health ---
 async fn health(State(state): State<Arc<AppState>>) -> Response<Body> {
     let uptime_secs = state.start_time.elapsed().as_secs();
@@ -330,8 +356,8 @@ async fn health(State(state): State<Arc<AppState>>) -> Response<Body> {
         .unwrap_or(false);
 
     let body = format!(
-        r#"{{"ok":true,"uptime_seconds":{},"rcc_ok":{},"sc_ok":{},"version":"2.0.0"}}"#,
-        uptime_secs, rcc_ok, sc_ok
+        r#"{{"ok":true,"uptime_secs":{},"rcc_ok":{},"version":"2.0.0"}}"#,
+        uptime_secs, rcc_ok
     );
     let _ = sc_ok; // checked but not exposed in the spec response
 
@@ -343,148 +369,22 @@ async fn health(State(state): State<Arc<AppState>>) -> Response<Body> {
         .unwrap()
 }
 
-// --- /activity — D3 force-directed activity map ---
-async fn activity_page() -> Response<Body> {
-    Response::builder()
-        .status(200)
-        .header("Content-Type", "text/html; charset=utf-8")
-        .body(Body::from(include_str!("static/activity.html")))
-        .unwrap()
-}
-
-// --- /s3/* — MinIO proxy ---
-async fn s3_list(
-    State(state): State<Arc<AppState>>,
-    Path(bucket): Path<String>,
-) -> Response<Body> {
-    let url = format!("{}/{}/", state.minio_url, bucket);
-    match state.client
-        .get(&url)
-        .basic_auth(&state.minio_key, Some(&state.minio_secret))
-        .send().await
-    {
-        Ok(r) => {
-            let status = r.status().as_u16();
-            let body = r.bytes().await.unwrap_or_default();
-            Response::builder()
-                .status(status)
-                .header("Content-Type", "application/xml")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Body::from(body))
-                .unwrap()
-        }
-        Err(e) => json_error(StatusCode::BAD_GATEWAY, &e.to_string()),
-    }
-}
-
-async fn s3_get_object(
-    State(state): State<Arc<AppState>>,
-    Path((bucket, key)): Path<(String, String)>,
-) -> Response<Body> {
-    let url = format!("{}/{}/{}", state.minio_url, bucket, key);
-    match state.client
-        .get(&url)
-        .basic_auth(&state.minio_key, Some(&state.minio_secret))
-        .send().await
-    {
-        Ok(r) => {
-            let status = r.status().as_u16();
-            let ct = r.headers().get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("application/octet-stream")
-                .to_string();
-            let body = r.bytes().await.unwrap_or_default();
-            Response::builder()
-                .status(status)
-                .header("Content-Type", ct)
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Body::from(body))
-                .unwrap()
-        }
-        Err(e) => json_error(StatusCode::BAD_GATEWAY, &e.to_string()),
-    }
-}
-
-async fn s3_put_object(
-    State(state): State<Arc<AppState>>,
-    Path((bucket, key)): Path<(String, String)>,
-    headers: HeaderMap,
-    body: Body,
-) -> Response<Body> {
-    let url = format!("{}/{}/{}", state.minio_url, bucket, key);
-    let ct = headers.get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let bytes = axum::body::to_bytes(body, 64 * 1024 * 1024).await.unwrap_or_default();
-    match state.client
-        .put(&url)
-        .basic_auth(&state.minio_key, Some(&state.minio_secret))
-        .header("Content-Type", ct)
-        .body(bytes)
-        .send().await
-    {
-        Ok(r) => {
-            let status = r.status().as_u16();
-            Response::builder()
-                .status(status)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Body::from(r#"{"ok":true}"#))
-                .unwrap()
-        }
-        Err(e) => json_error(StatusCode::BAD_GATEWAY, &e.to_string()),
-    }
-}
-
-async fn s3_delete_object(
-    State(state): State<Arc<AppState>>,
-    Path((bucket, key)): Path<(String, String)>,
-) -> Response<Body> {
-    let url = format!("{}/{}/{}", state.minio_url, bucket, key);
-    match state.client
-        .delete(&url)
-        .basic_auth(&state.minio_key, Some(&state.minio_secret))
-        .send().await
-    {
-        Ok(r) => {
-            let status = r.status().as_u16();
-            Response::builder()
-                .status(status)
-                .header("Content-Type", "application/json")
-                .header("Access-Control-Allow-Origin", "*")
-                .body(Body::from(r#"{"ok":true}"#))
-                .unwrap()
-        }
-        Err(e) => json_error(StatusCode::BAD_GATEWAY, &e.to_string()),
-    }
-}
-
 /// Build the Axum router with the given state (extracted for testability).
 pub fn build_app(state: Arc<AppState>, dist: &str) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/activity", get(activity_page))
         .route("/bus/stream", get(bus_stream))
         .route("/api/*path", get(api_get).post(api_post).patch(api_patch).delete(api_delete))
         .route("/bus/*path", get(bus_get).post(bus_post))
+        .route("/s3/*path", get(s3_get).put(s3_put).delete(s3_delete))
         .route("/sc/*path", get(sc_get).post(sc_post).patch(sc_patch).delete(sc_delete))
-        .route("/s3/:bucket", get(s3_list))
-        .route("/s3/:bucket/*key", get(s3_get_object).put(s3_put_object).delete(s3_delete_object))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state)
         .fallback_service(ServeDir::new(dist).append_index_html_on_directories(true))
 }
 
 /// Build AppState from environment / explicit values (used in tests and main).
-pub fn build_state(
-    rcc_url: String,
-    sc_url: String,
-    minio_url: String,
-    minio_key: String,
-    minio_secret: String,
-    agent_token: String,
-) -> Arc<AppState> {
+pub fn build_state(rcc_url: String, sc_url: String, agent_token: String) -> Arc<AppState> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -495,9 +395,6 @@ pub fn build_state(
     Arc::new(AppState {
         rcc_url,
         sc_url,
-        minio_url,
-        minio_key,
-        minio_secret,
         agent_token,
         client,
         stream_client,
@@ -527,15 +424,28 @@ async fn main() {
     let agent_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or_default();
     let operator = std::env::var("OPERATOR_HANDLE").unwrap_or_else(|_| "jkh".to_string());
     let dist = std::env::var("DASHBOARD_DIST").unwrap_or_else(|_| "dist".to_string());
-    let minio_url = std::env::var("MINIO_URL")
-        .unwrap_or_else(|_| "http://100.89.199.14:9000".to_string());
-    let minio_key = std::env::var("MINIO_KEY")
-        .unwrap_or_else(|_| "rocky2197fb96dde4618aa17f".to_string());
-    let minio_secret = std::env::var("MINIO_SECRET")
-        .unwrap_or_else(|_| "e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1".to_string());
 
-    let state = build_state(rcc_url.clone(), sc_url.clone(), minio_url, minio_key, minio_secret, agent_token);
-    let app = build_app(state, &dist);
+    let state = build_state(rcc_url.clone(), sc_url.clone(), agent_token);
+
+    // Route priority (axum picks most-specific first):
+    //   /health      →  health check (no auth)
+    //   /bus/stream  →  SSE passthrough (no timeout)
+    //   /api/*       →  JSON proxy to RCC (GET open, POST/PATCH/DELETE require auth)
+    //   /bus/*       →  bus proxy to RCC (GET open, POST requires auth)
+    //   /s3/*        →  MinIO S3 proxy via RCC (all methods require auth)
+    //   /sc/*        →  squirrelchat proxy (GET open, mutations require auth)
+    //   fallback     →  serve dist/ static files (SPA)
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/bus/stream", get(bus_stream))
+        .route("/api/*path", get(api_get).post(api_post).patch(api_patch).delete(api_delete))
+        .route("/bus/*path", get(bus_get).post(bus_post))
+        .route("/s3/*path", get(s3_get).put(s3_put).delete(s3_delete))
+        .route("/sc/api/stream", get(sc_stream))
+        .route("/sc/*path", get(sc_get).post(sc_post).patch(sc_patch).delete(sc_delete))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .with_state(state)
+        .fallback_service(ServeDir::new(&dist).append_index_html_on_directories(true));
 
     tracing::info!(port, rcc_url, sc_url, operator, "RCC Dashboard v2 starting");
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
@@ -557,9 +467,6 @@ mod tests {
         let state = build_state(
             mock_rcc.base_url(),
             mock_sc.base_url(),
-            "http://localhost:9000".to_string(),
-            "testkey".to_string(),
-            "testsecret".to_string(),
             token.to_string(),
         );
         let app = build_app(state, "/tmp"); // dist path irrelevant for API tests
@@ -768,6 +675,57 @@ mod tests {
         let sc  = MockServer::start();
         let srv = make_server(&rcc, &sc, "tok");
         srv.delete("/sc/messages/1").await
+            .assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    // ── /s3/* MinIO S3 proxy ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn s3_get_proxies_to_rcc() {
+        let rcc = MockServer::start();
+        let sc  = MockServer::start();
+        rcc.mock(|when, then| {
+            when.method(GET).path("/s3/agents");
+            then.status(200).json_body(json!({"bucket": "agents", "objects": []}));
+        });
+        let srv = make_server(&rcc, &sc, "");
+        let body: Value = srv.get("/s3/agents").await.json();
+        assert_eq!(body["bucket"], "agents");
+    }
+
+    #[tokio::test]
+    async fn s3_put_without_token_returns_401() {
+        let rcc = MockServer::start();
+        let sc  = MockServer::start();
+        let srv = make_server(&rcc, &sc, "secret");
+        let resp = srv.put("/s3/agents/test.json").await;
+        resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn s3_put_with_token_proxies_to_rcc() {
+        let rcc = MockServer::start();
+        let sc  = MockServer::start();
+        rcc.mock(|when, then| {
+            when.method(PUT).path("/s3/agents/test.json");
+            then.status(200).json_body(json!({"ok": true, "bucket": "agents", "key": "test.json"}));
+        });
+        let srv = make_server(&rcc, &sc, "tok");
+        let body: Value = srv
+            .put("/s3/agents/test.json")
+            .add_header("Authorization", "Bearer tok")
+            .json(&json!({"data": "test"}))
+            .await
+            .json();
+        assert_eq!(body["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn s3_delete_without_token_returns_401() {
+        let rcc = MockServer::start();
+        let sc  = MockServer::start();
+        let srv = make_server(&rcc, &sc, "tok");
+        srv.delete("/s3/agents/test.json").await
             .assert_status(axum::http::StatusCode::UNAUTHORIZED);
     }
 
