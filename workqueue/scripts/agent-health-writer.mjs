@@ -19,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE  = join(__dirname, '../../');
 const MC         = process.env.MC_BIN || 'mc';
 const MINIO_PATH = (process.env.MINIO_ALIAS || 'local') + '/agents/shared/agent-health-' + (process.env.AGENT_NAME || 'agent') + '.json';
-const AGENT_NAME = 'rocky';
+const AGENT_NAME = process.env.AGENT_NAME || 'rocky';
 
 function readJson(filePath) {
   if (!existsSync(filePath)) return null;
