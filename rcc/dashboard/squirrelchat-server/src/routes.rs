@@ -58,6 +58,8 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/channels/:id/pins/:msg_id", post(pin_message).delete(unpin_message))
         // Direct Messages
         .route("/api/dms", get(list_dms).post(open_dm))
+        // Presence
+        .route("/api/presence", get(get_presence))
         // Agents / Presence
         .route("/api/agents", get(list_agents))
         .route("/api/agents/:id/heartbeat", post(agent_heartbeat))
@@ -375,6 +377,52 @@ async fn get_project_file(
         ).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "not found").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ── Presence ──────────────────────────────────────────────────────────────────
+
+async fn get_presence(
+    Extension(state): Extension<SharedState>,
+) -> R<Json<serde_json::Value>> {
+    // Proxy to RCC /api/presence (which caches for 30s)
+    let rcc_url = std::env::var("RCC_URL").unwrap_or_else(|_| "http://localhost:8789".into());
+    let rcc_token = std::env::var("RCC_AUTH_TOKEN").unwrap_or_default();
+    let url = format!("{}/api/presence", rcc_url);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    match client.get(&url)
+        .header("Authorization", format!("Bearer {}", rcc_token))
+        .send().await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            let data: serde_json::Value = resp.json().await.unwrap_or(json!({}));
+            Ok(Json(data))
+        }
+        _ => {
+            // Fallback: build presence from local user/agent heartbeats
+            let users = state.db.get_users().unwrap_or_default();
+            let now = chrono::Utc::now().timestamp_millis();
+            let mut presence = serde_json::Map::new();
+            for user in &users {
+                let gap_ms = user.last_seen.map(|ls| now - ls).unwrap_or(i64::MAX);
+                let status = if gap_ms <= 3 * 60 * 1000 { "online" }
+                    else if gap_ms <= 15 * 60 * 1000 { "away" }
+                    else { "offline" };
+                presence.insert(user.name.clone(), json!({
+                    "status": status,
+                    "statusText": status,
+                    "since": user.last_seen,
+                    "host": null,
+                    "gpu": null,
+                }));
+            }
+            Ok(Json(json!({ "ok": true, "agents": presence, "fallback": true })))
+        }
     }
 }
 

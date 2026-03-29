@@ -961,6 +961,60 @@ async function handleRequest(req, res) {
       return json(res, 200, result);
     }
 
+    // ── GET /api/presence — SquirrelChat presence map (no auth, 30s cache) ──
+    // Returns {ok, agents: {name: {status, statusText, since, host, gpu}}}
+    // status: "online" | "away" | "offline" | "unknown"
+    if (method === 'GET' && path === '/api/presence') {
+      const PRESENCE_ONLINE_MS  =  3 * 60 * 1000;   // seen within 3 min → online
+      const PRESENCE_AWAY_MS    = 15 * 60 * 1000;   // seen within 15 min → away
+      const PRESENCE_CACHE_TTL  = 30 * 1000;
+      if (!global._presenceCache) global._presenceCache = { data: null, ts: 0 };
+      const pc = global._presenceCache;
+      if (pc.data && (Date.now() - pc.ts) < PRESENCE_CACHE_TTL) {
+        return json(res, 200, pc.data);
+      }
+      const agents = await readAgents().catch(() => ({}));
+      const now = Date.now();
+      const presence = {};
+      // Include all known heartbeat senders even if not in registry
+      const allNames = new Set([...Object.keys(agents), ...Object.keys(heartbeats)]);
+      for (const name of allNames) {
+        const hb = heartbeats[name] || null;
+        const agent = agents[name] || {};
+        if (agent.decommissioned) continue;
+        const lastSeen = hb?.ts || agent.lastSeen || null;
+        const gapMs = lastSeen ? now - new Date(lastSeen).getTime() : null;
+        let status = 'unknown';
+        if (gapMs !== null) {
+          if (gapMs <= PRESENCE_ONLINE_MS)      status = 'online';
+          else if (gapMs <= PRESENCE_AWAY_MS)   status = 'away';
+          else                                   status = 'offline';
+        }
+        // Build status text from capabilities or task load
+        const caps = agent.capabilities || {};
+        const gpu = caps.gpu || hb?.gpu || null;
+        const task = hb?.currentTask || agent.currentTask || null;
+        let statusText = status === 'online'
+          ? (task ? `busy: ${String(task).slice(0, 40)}` : 'idle')
+          : status === 'away' ? 'away'
+          : status === 'offline' ? 'offline'
+          : 'unknown';
+        if (status === 'online' && gpu) statusText = `${statusText} · ${gpu}`;
+        presence[name] = {
+          status,
+          statusText,
+          since: lastSeen,
+          host: hb?.host || agent.host || null,
+          gpu,
+          gap_minutes: gapMs !== null ? Math.round(gapMs / 60000) : null,
+        };
+      }
+      const result = { ok: true, agents: presence, ts: new Date().toISOString() };
+      pc.data = result;
+      pc.ts = Date.now();
+      return json(res, 200, result);
+    }
+
     // ── GET /api/agents/best?task=X — capability-based routing ───────────
     if (method === 'GET' && path === '/api/agents/best') {
       const task = url.searchParams.get('task') || '';

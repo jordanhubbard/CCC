@@ -6,8 +6,8 @@ use wasm_bindgen::prelude::*;
 // All SC data structures live in sc_types.rs — import from there, not here.
 
 use crate::components::sc_types::{
-    ScAttachment, ScChannel, ScFile, ScIdentity, ScMessage, ScProject, ScUser, ScWsFrame,
-    DEFAULT_CHANNELS, FALLBACK_AGENT_NAMES,
+    ScAttachment, ScChannel, ScFile, ScIdentity, ScMessage, ScPresenceMap, ScProject, ScUser,
+    ScWsFrame, DEFAULT_CHANNELS, FALLBACK_AGENT_NAMES,
 };
 
 // ─── Browser notification helper ─────────────────────────────────────────────
@@ -501,6 +501,8 @@ pub fn SquirrelChat() -> impl IntoView {
     let (show_pins_panel, set_show_pins_panel) = create_signal(false);
     // Mobile sidebar toggle
     let (sidebar_open, set_sidebar_open) = create_signal(false);
+    // Presence map — polled every 30s
+    let (presence, set_presence) = create_signal(ScPresenceMap::default());
 
     let chat_ref = create_node_ref::<leptos::html::Div>();
 
@@ -693,6 +695,31 @@ pub fn SquirrelChat() -> impl IntoView {
         }
     }
 
+    // ── Presence polling (every 30s) ──────────────────────────────────────────
+    {
+        // Initial fetch
+        spawn_local(async move {
+            if let Ok(resp) = gloo_net::http::Request::get("/sc/api/presence").send().await {
+                if let Ok(data) = resp.json::<ScPresenceMap>().await {
+                    set_presence.set(data);
+                }
+            }
+        });
+        // Interval: poll every 30s
+        use gloo_timers::callback::Interval;
+        let _presence_interval = Interval::new(30_000, move || {
+            spawn_local(async move {
+                if let Ok(resp) = gloo_net::http::Request::get("/sc/api/presence").send().await {
+                    if let Ok(data) = resp.json::<ScPresenceMap>().await {
+                        set_presence.set(data);
+                    }
+                }
+            });
+        });
+        // Keep interval alive
+        _presence_interval.forget();
+    }
+
     // ── Global keyboard shortcuts ─────────────────────────────────────────────
     // Cmd+K / Ctrl+K → channel switcher, Cmd+/ / Ctrl+/ → help
     {
@@ -804,31 +831,44 @@ pub fn SquirrelChat() -> impl IntoView {
                     }).collect::<Vec<_>>()}
                 </div>
 
-                // Agents
+                // Agents — with live presence from /api/presence
                 <div class="sc-sidebar-section">
-                    <div class="sc-section-header">"Agents"</div>
+                    <div class="sc-section-header">
+                        "Agents"
+                        // Online count badge
+                        {move || {
+                            let p = presence.get();
+                            let online = p.agents.values().filter(|e| e.status == "online").count();
+                            if online > 0 {
+                                view! { <span class="sc-online-count" title="agents online">{online}" online"</span> }.into_view()
+                            } else { ().into_view() }
+                        }}
+                    </div>
                     {move || {
                         let ag_list = agents.get();
-                        if ag_list.is_empty() {
-                            FALLBACK_AGENT_NAMES.iter().map(|&name| {
-                                view! {
-                                    <div class="sc-agent-item">
-                                        <span class="sc-presence">"🔴"</span>
-                                        <span class="sc-agent-name">{name}</span>
-                                    </div>
-                                }
-                            }).collect::<Vec<_>>().into_view()
+                        let pmap = presence.get();
+                        // Merge: use live agent list if available, else fallbacks
+                        let names: Vec<String> = if ag_list.is_empty() {
+                            FALLBACK_AGENT_NAMES.iter().map(|s| s.to_string()).collect()
                         } else {
-                            ag_list.into_iter().map(|a| {
-                                let icon = a.presence_icon();
-                                view! {
-                                    <div class="sc-agent-item">
-                                        <span class="sc-presence">{icon}</span>
-                                        <span class="sc-agent-name">{a.name.clone()}</span>
-                                    </div>
-                                }
-                            }).collect::<Vec<_>>().into_view()
-                        }
+                            ag_list.iter().map(|a| a.name.clone()).collect()
+                        };
+                        names.into_iter().map(|name| {
+                            let p_entry = pmap.agents.get(&name).cloned();
+                            let (status_class, icon, tip) = if let Some(ref p) = p_entry {
+                                (p.dot_class(), p.icon(), p.status_text.clone())
+                            } else {
+                                // Unknown while presence hasn't loaded yet
+                                ("sc-presence-dot sc-presence-unknown", "⚫", "unknown".to_string())
+                            };
+                            let name_clone = name.clone();
+                            view! {
+                                <div class="sc-agent-item" title=tip>
+                                    <span class=status_class title=icon></span>
+                                    <span class="sc-agent-name">{name_clone}</span>
+                                </div>
+                            }
+                        }).collect::<Vec<_>>()
                     }}
                 </div>
 

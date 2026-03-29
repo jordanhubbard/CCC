@@ -136,6 +136,52 @@ impl ScUser {
 /// Legacy alias — kept until all callers migrate to ScUser
 pub type ScAgent = ScUser;
 
+// ─── Presence ─────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct ScPresenceEntry {
+    /// "online" | "away" | "offline" | "unknown"
+    pub status: String,
+    #[serde(rename = "statusText", default)]
+    pub status_text: String,
+    pub since: Option<i64>,
+    pub host: Option<String>,
+    pub gpu: Option<String>,
+    #[serde(default)]
+    pub gap_minutes: Option<i64>,
+}
+
+impl ScPresenceEntry {
+    /// CSS class name for status dot
+    pub fn dot_class(&self) -> &'static str {
+        match self.status.as_str() {
+            "online"  => "sc-presence-dot sc-presence-online",
+            "away"    => "sc-presence-dot sc-presence-away",
+            "offline" => "sc-presence-dot sc-presence-offline",
+            _         => "sc-presence-dot sc-presence-unknown",
+        }
+    }
+    /// Emoji fallback for non-CSS contexts
+    pub fn icon(&self) -> &'static str {
+        match self.status.as_str() {
+            "online"  => "🟢",
+            "away"    => "🟡",
+            "offline" => "🔴",
+            _         => "⚫",
+        }
+    }
+}
+
+/// The full presence map returned by /api/presence
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct ScPresenceMap {
+    #[serde(default)]
+    pub ok: bool,
+    /// agent_name → presence entry
+    pub agents: std::collections::HashMap<String, ScPresenceEntry>,
+    pub ts: Option<String>,
+}
+
 // ─── Identity (current user) ──────────────────────────────────────────────────
 
 /// Returned by GET /api/me, also stored in localStorage as "sc_identity"

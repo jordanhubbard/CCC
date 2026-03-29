@@ -1490,3 +1490,44 @@ button:focus-visible {
 .sc-channel-item {
   tabindex: 0;
 }
+
+/* ── Agent presence dots ────────────────────────────────────────────────────── */
+
+.sc-presence-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.sc-presence-online  { background: var(--green,  #a6e3a1); box-shadow: 0 0 4px var(--green, #a6e3a1); }
+.sc-presence-away    { background: var(--yellow, #f9e2af); }
+.sc-presence-offline { background: var(--red,    #f38ba8); opacity: 0.5; }
+.sc-presence-unknown { background: var(--overlay0, #6c7086); opacity: 0.4; }
+
+.sc-agent-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--subtext1);
+  cursor: default;
+}
+
+.sc-agent-item:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.sc-online-count {
+  font-size: 10px;
+  color: var(--green, #a6e3a1);
+  font-weight: 600;
+  margin-left: auto;
+  opacity: 0.85;
+}
