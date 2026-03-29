@@ -1555,6 +1555,10 @@ cat > ~/.rcc/.env << 'ENVEOF'
 ${envBlock}
 ENVEOF
 chmod 600 ~/.rcc/.env
+# Load env vars into current shell so subsequent steps can use them
+set +u  # allow unbound vars briefly while sourcing
+source ~/.rcc/.env
+set -u
 
 # ── OpenClaw ─────────────────────────────────────────────────────────────────
 if command -v openclaw &>/dev/null; then
