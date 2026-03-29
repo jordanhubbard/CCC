@@ -15,7 +15,10 @@ const RCC_BASE = 'http://localhost:8789';
 
 // DB setup
 const db = new Database('./squirrelchat.db');
+
+// Phase 1 schema — legacy tables + new SC tables (additive migration)
 db.exec(`
+  -- Legacy tables (kept for backward compat)
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER NOT NULL,
@@ -24,6 +27,8 @@ db.exec(`
     channel TEXT NOT NULL DEFAULT 'chat',
     mentions TEXT,
     slash_result TEXT,
+    thread_id INTEGER REFERENCES messages(id),
+    edited_at INTEGER,
     created_at INTEGER DEFAULT (strftime('%s','now') * 1000)
   );
   CREATE TABLE IF NOT EXISTS projects (
@@ -46,7 +51,91 @@ db.exec(`
     created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
     UNIQUE(project_id, filename)
   );
+
+  -- New SC tables (Phase 1)
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    avatar_url TEXT,
+    token_hash TEXT,
+    status TEXT DEFAULT 'offline',
+    last_seen INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s','now') * 1000)
+  );
+  CREATE TABLE IF NOT EXISTS channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    type TEXT NOT NULL DEFAULT 'channel',
+    participants TEXT,
+    created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+    last_message_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS reactions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+  CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    size INTEGER,
+    mime_type TEXT,
+    storage_key TEXT NOT NULL,
+    uploader TEXT NOT NULL,
+    channel TEXT,
+    created_at INTEGER DEFAULT (strftime('%s','now') * 1000)
+  );
 `);
+
+// Additive migrations for existing messages table (add thread_id, edited_at if missing)
+try { db.exec('ALTER TABLE messages ADD COLUMN thread_id INTEGER REFERENCES messages(id)'); } catch {}
+try { db.exec('ALTER TABLE messages ADD COLUMN edited_at INTEGER'); } catch {}
+
+// FTS5 for message search
+try {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(text, content=messages, content_rowid=id);
+    CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES('delete', old.id, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES('delete', old.id, old.text);
+      INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+    END;
+  `);
+} catch {}
+
+// Indexes
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel, ts)'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id) WHERE thread_id IS NOT NULL'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_files_channel ON files(channel)'); } catch {}
+
+// Seed default channels if the channels table is empty
+const channelCount = db.prepare('SELECT COUNT(*) as cnt FROM channels').get();
+if (channelCount.cnt === 0) {
+  const seedChannels = [
+    { id: 'general', name: 'General', description: 'General discussion' },
+    { id: 'agents', name: 'Agents', description: 'Agent coordination' },
+    { id: 'ops', name: 'Ops', description: 'Operations & infra' },
+    { id: 'random', name: 'Random', description: 'Off-topic' },
+  ];
+  const insertCh = db.prepare('INSERT OR IGNORE INTO channels (id, name, description) VALUES (?, ?, ?)');
+  for (const ch of seedChannels) insertCh.run(ch.id, ch.name, ch.description);
+  console.log('[squirrelchat] Seeded default channels');
+}
+
+// Seed default agent users
+const agentSeeds = ['rocky', 'bullwinkle', 'natasha', 'boris'];
+const insertUser = db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)');
+for (const a of agentSeeds) insertUser.run(a, a.charAt(0).toUpperCase() + a.slice(1), 'agent');
 
 // SSE clients
 const sseClients = new Set();
@@ -149,67 +238,144 @@ async function handleSlashCommand(text) {
 // Health
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// Channels (dynamic — will be DB-backed soon)
-const DEFAULT_CHANNELS = [
-  { id: 'general', name: 'general', description: 'General discussion' },
-  { id: 'agents', name: 'agents', description: 'Agent coordination' },
-  { id: 'ops', name: 'ops', description: 'Operations & infra' },
-  { id: 'random', name: 'random', description: 'Off-topic' },
-];
-
+// Channels (DB-backed)
 app.get('/api/channels', (req, res) => {
-  // TODO: Replace with DB-backed channels table
-  res.json(DEFAULT_CHANNELS);
+  const rows = db.prepare('SELECT * FROM channels ORDER BY created_at ASC').all();
+  const channels = rows.map(ch => ({
+    ...ch,
+    participants: ch.participants ? JSON.parse(ch.participants) : undefined,
+  }));
+  res.json(channels);
+});
+
+app.post('/api/channels', auth, (req, res) => {
+  const { id, name, description, type = 'channel', participants } = req.body;
+  if (!id || !name) return res.status(400).json({ error: 'id and name required' });
+  const slug = id.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  db.prepare('INSERT INTO channels (id, name, description, type, participants) VALUES (?, ?, ?, ?, ?)')
+    .run(slug, name, description || null, type, participants ? JSON.stringify(participants) : null);
+  const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(slug);
+  // Broadcast channel creation via SSE
+  const payload = JSON.stringify({ type: 'channel_create', data: channel });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  res.json({ ok: true, channel });
+});
+
+app.get('/api/channels/:id', (req, res) => {
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.params.id);
+  if (!ch) return res.status(404).json({ error: 'Not found' });
+  if (ch.participants) ch.participants = JSON.parse(ch.participants);
+  res.json(ch);
+});
+
+app.patch('/api/channels/:id', auth, (req, res) => {
+  const ch = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.params.id);
+  if (!ch) return res.status(404).json({ error: 'Not found' });
+  const { name, description } = req.body;
+  db.prepare('UPDATE channels SET name = COALESCE(?, name), description = COALESCE(?, description) WHERE id = ?')
+    .run(name || null, description || null, req.params.id);
+  res.json({ ok: true });
 });
 
 // Current user identity
 app.get('/api/me', (req, res) => {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
-  // TODO: Look up user from RCC-issued token
-  // For now, return a default identity based on token presence
+  // Admin token — return admin identity
   if (token === ADMIN_TOKEN) {
-    return res.json({ id: 'admin', name: 'admin', role: 'admin' });
+    return res.json({ id: 'admin', name: 'Admin', role: 'admin', needs_name: false });
   }
-  // No token or unknown token — return guest with hint to set name
+  // Check if token matches an agent/user token (format: sc-token-<user_id>)
+  const match = token.match(/^sc-token-(.+)$/);
+  if (match) {
+    const userId = match[1];
+    const user = db.prepare('SELECT id, name, role, avatar_url FROM users WHERE id = ?').get(userId);
+    if (user) {
+      return res.json({ ...user, needs_name: false });
+    }
+  }
+  // No token or unknown — guest with set-name hint
   const name = req.query.name || null;
-  res.json({ id: name || 'anonymous', name: name || null, role: 'user', needsName: !name });
+  res.json({ id: name || 'anonymous', name: name || 'anonymous', role: 'user', needs_name: !name });
 });
+
+// Helper: build reactions map for a message (emoji → [user_ids])
+function getReactionsMap(messageId) {
+  const rows = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ? ORDER BY created_at ASC').all(messageId);
+  const map = {};
+  for (const r of rows) {
+    if (!map[r.emoji]) map[r.emoji] = [];
+    map[r.emoji].push(r.user_id);
+  }
+  return map;
+}
+
+// Helper: get thread reply count for a message
+function getThreadCount(messageId) {
+  const row = db.prepare('SELECT COUNT(*) as cnt FROM messages WHERE thread_id = ?').get(messageId);
+  return row ? row.cnt : 0;
+}
+
+// Helper: format a message row for the wire
+function formatMessage(r) {
+  return {
+    id: r.id,
+    ts: r.ts,
+    from: r.from_agent,
+    from_name: null, // TODO: join with users table for display name
+    text: r.text,
+    channel: r.channel,
+    thread_id: r.thread_id || null,
+    thread_count: r.thread_id ? 0 : getThreadCount(r.id),
+    mentions: r.mentions ? JSON.parse(r.mentions) : [],
+    reactions: getReactionsMap(r.id),
+    edited_at: r.edited_at || null,
+    created_at: r.created_at,
+    slash_result: r.slash_result || null,
+  };
+}
 
 // Messages
 app.get('/api/messages', (req, res) => {
   const since = parseInt(req.query.since) || 0;
-  const channel = req.query.channel || 'chat';
+  const before = parseInt(req.query.before) || Infinity;
+  const channel = req.query.channel || 'general';
+  const threadId = req.query.thread_id || null;
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
 
   let query, params;
-  if (channel === 'all') {
-    query = 'SELECT * FROM messages WHERE ts > ? ORDER BY ts DESC LIMIT ?';
-    params = [since, limit];
+  if (threadId) {
+    // Thread replies
+    query = 'SELECT * FROM messages WHERE thread_id = ? ORDER BY ts ASC LIMIT ?';
+    params = [parseInt(threadId), limit];
+  } else if (channel === 'all') {
+    query = 'SELECT * FROM messages WHERE ts > ? AND ts < ? AND thread_id IS NULL ORDER BY ts DESC LIMIT ?';
+    params = [since, before === Infinity ? 9999999999999 : before, limit];
   } else {
-    query = 'SELECT * FROM messages WHERE ts > ? AND channel = ? ORDER BY ts DESC LIMIT ?';
-    params = [since, channel, limit];
+    query = 'SELECT * FROM messages WHERE ts > ? AND ts < ? AND channel = ? AND thread_id IS NULL ORDER BY ts DESC LIMIT ?';
+    params = [since, before === Infinity ? 9999999999999 : before, channel, limit];
   }
 
-  const rows = db.prepare(query).all(...params).reverse();
-  const messages = rows.map(r => ({
-    ...r,
-    mentions: r.mentions ? JSON.parse(r.mentions) : [],
-    slash_result: r.slash_result || null,
-  }));
+  const rows = db.prepare(query).all(...params);
+  // Reverse DESC results so they're chronological (thread queries are already ASC)
+  const ordered = threadId ? rows : rows.reverse();
+  const messages = ordered.map(formatMessage);
   res.json(messages);
 });
 
 app.post('/api/messages', auth, async (req, res) => {
-  const { from, text, channel = 'chat', mentions } = req.body;
+  const { from, text, channel = 'general', mentions, thread_id } = req.body;
   if (!from || !text) return res.status(400).json({ error: 'from and text required' });
 
   const ts = Date.now();
-  const stmt = db.prepare('INSERT INTO messages (ts, from_agent, text, channel, mentions) VALUES (?, ?, ?, ?, ?)');
-  const r = stmt.run(ts, from, text, channel, mentions ? JSON.stringify(mentions) : null);
-  const message = { id: r.lastInsertRowid, ts, from_agent: from, text, channel, mentions: mentions || [] };
+  const stmt = db.prepare('INSERT INTO messages (ts, from_agent, text, channel, mentions, thread_id) VALUES (?, ?, ?, ?, ?, ?)');
+  const r = stmt.run(ts, from, text, channel, mentions ? JSON.stringify(mentions) : null, thread_id || null);
+  const message = formatMessage({ id: r.lastInsertRowid, ts, from_agent: from, text, channel, mentions: mentions ? JSON.stringify(mentions) : null, thread_id: thread_id || null, edited_at: null, created_at: ts, slash_result: null });
+
+  // Update channel last_message_at
+  db.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(ts, channel);
 
   // Broadcast via SSE
-  const payload = JSON.stringify({ type: 'message', message });
+  const payload = JSON.stringify({ type: 'message', data: message });
   for (const client of sseClients) {
     client.write(`data: ${payload}\n\n`);
   }
@@ -224,12 +390,12 @@ app.post('/api/messages', auth, async (req, res) => {
       const br = db.prepare('INSERT INTO messages (ts, from_agent, text, channel, slash_result) VALUES (?, ?, ?, ?, ?)').run(
         bts, 'squirrelbot', slashResult, channel, trimmed
       );
-      botReply = { id: br.lastInsertRowid, ts: bts, from_agent: 'squirrelbot', text: slashResult, channel };
+      botReply = formatMessage({ id: br.lastInsertRowid, ts: bts, from_agent: 'squirrelbot', text: slashResult, channel, mentions: null, thread_id: null, edited_at: null, created_at: bts, slash_result: trimmed });
 
       // Update original message with slash_result
       db.prepare('UPDATE messages SET slash_result = ? WHERE id = ?').run(trimmed, r.lastInsertRowid);
 
-      const botPayload = JSON.stringify({ type: 'message', message: botReply });
+      const botPayload = JSON.stringify({ type: 'message', data: botReply });
       for (const client of sseClients) {
         client.write(`data: ${botPayload}\n\n`);
       }
@@ -242,6 +408,113 @@ app.post('/api/messages', auth, async (req, res) => {
   );
 
   res.json({ ok: true, message, botReply });
+});
+
+// Edit message
+app.patch('/api/messages/:id', auth, (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!msg) return res.status(404).json({ error: 'Not found' });
+  const editedAt = Date.now();
+  db.prepare('UPDATE messages SET text = ?, edited_at = ? WHERE id = ?').run(text, editedAt, req.params.id);
+  // Broadcast edit via SSE
+  const payload = JSON.stringify({ type: 'message_edit', data: { id: String(msg.id), text, edited_at: editedAt } });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  res.json({ ok: true });
+});
+
+// Delete message
+app.delete('/api/messages/:id', auth, (req, res) => {
+  const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(req.params.id);
+  if (!msg) return res.status(404).json({ error: 'Not found' });
+  db.prepare('DELETE FROM reactions WHERE message_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM messages WHERE id = ?').run(req.params.id);
+  // Broadcast delete via SSE
+  const payload = JSON.stringify({ type: 'message_delete', data: { id: String(msg.id) } });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  res.json({ ok: true });
+});
+
+// Reactions — toggle
+app.post('/api/messages/:id/react', auth, (req, res) => {
+  const { emoji, user_id } = req.body;
+  if (!emoji || !user_id) return res.status(400).json({ error: 'emoji and user_id required' });
+  const msgId = parseInt(req.params.id);
+  const msg = db.prepare('SELECT id FROM messages WHERE id = ?').get(msgId);
+  if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+  const existing = db.prepare('SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?').get(msgId, user_id, emoji);
+  let action;
+  if (existing) {
+    db.prepare('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?').run(msgId, user_id, emoji);
+    action = 'removed';
+  } else {
+    db.prepare('INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)').run(msgId, user_id, emoji);
+    action = 'added';
+  }
+
+  const reactions = getReactionsMap(msgId);
+  // Broadcast reaction event via SSE
+  const payload = JSON.stringify({ type: 'reaction', data: { message_id: String(msgId), emoji, user: user_id, action } });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  res.json({ ok: true, action, reactions });
+});
+
+// Get reactions for a message
+app.get('/api/messages/:id/reactions', (req, res) => {
+  const reactions = getReactionsMap(parseInt(req.params.id));
+  res.json({ reactions });
+});
+
+// Users
+app.get('/api/users', (req, res) => {
+  const users = db.prepare('SELECT id, name, role, avatar_url, status, last_seen FROM users ORDER BY name ASC').all();
+  res.json(users);
+});
+
+app.post('/api/users/register', auth, (req, res) => {
+  const { id, name, avatar_url, role = 'user' } = req.body;
+  if (!id || !name) return res.status(400).json({ error: 'id and name required' });
+  db.prepare('INSERT OR REPLACE INTO users (id, name, role, avatar_url) VALUES (?, ?, COALESCE(?, \'user\'), ?)').run(id, name, role, avatar_url || null);
+  res.json({ ok: true });
+});
+
+app.post('/api/users/presence', auth, (req, res) => {
+  const { user_id, status = 'online' } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'user_id required' });
+  db.prepare('UPDATE users SET status = ?, last_seen = ? WHERE id = ?').run(status, Date.now(), user_id);
+  // Broadcast presence via SSE
+  const payload = JSON.stringify({ type: 'presence', data: { user: user_id, status } });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  res.json({ ok: true });
+});
+
+// Search (FTS5)
+app.get('/api/search', (req, res) => {
+  const q = req.query.q;
+  if (!q) return res.status(400).json({ error: 'q parameter required' });
+  const channel = req.query.channel || null;
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+
+  let rows;
+  if (channel) {
+    rows = db.prepare(`
+      SELECT m.*, rank FROM messages m
+      JOIN messages_fts ON messages_fts.rowid = m.id
+      WHERE messages_fts MATCH ? AND m.channel = ?
+      ORDER BY rank LIMIT ?
+    `).all(q, channel, limit);
+  } else {
+    rows = db.prepare(`
+      SELECT m.*, rank FROM messages m
+      JOIN messages_fts ON messages_fts.rowid = m.id
+      WHERE messages_fts MATCH ?
+      ORDER BY rank LIMIT ?
+    `).all(q, limit);
+  }
+  const results = rows.map(r => ({ ...formatMessage(r), score: r.rank }));
+  res.json(results);
 });
 
 // Projects
