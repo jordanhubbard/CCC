@@ -494,18 +494,15 @@ pub fn SquirrelChat() -> impl IntoView {
     let (dm_channels, set_dm_channels) = create_signal(Vec::<ScChannel>::new());
     // File attach
     let (attach_data, set_attach_data) = create_signal(Option::<(String, String, String)>::None); // (filename, mime, b64)
+    // Edit/delete/pin
+    let (edit_msg_id, set_edit_msg_id) = create_signal(Option::<i64>::None);
+    let (edit_text, set_edit_text) = create_signal(String::new());
+    let (pinned_messages, set_pinned_messages) = create_signal(Vec::<ScMessage>::new());
+    let (show_pins_panel, set_show_pins_panel) = create_signal(false);
+    // Mobile sidebar toggle
+    let (sidebar_open, set_sidebar_open) = create_signal(false);
 
     let chat_ref = create_node_ref::<leptos::html::Div>();
-
-    // ── Phase 5: mobile sidebar, edit, pins ───────────────────────────────────
-    // Mobile: sidebar open/close toggle
-    let (sidebar_open, set_sidebar_open) = create_signal(false);
-    // Edit: which message is being edited (message id)
-    let (editing_msg_id, set_editing_msg_id) = create_signal(Option::<i64>::None);
-    let (edit_text, set_edit_text) = create_signal(String::new());
-    // Pins panel for current channel
-    let (show_pins, set_show_pins) = create_signal(false);
-    let (pinned_msgs, set_pinned_msgs) = create_signal(Vec::<ScMessage>::new());
 
     // ── Load messages when channel changes ────────────────────────────────────
     let messages_res = create_resource(move || selected_channel.get(), fetch_sc_messages);
@@ -514,6 +511,24 @@ pub fn SquirrelChat() -> impl IntoView {
         if let Some(msgs) = messages_res.get() {
             set_messages.set(msgs);
         }
+    });
+
+    // ── Load pins when channel changes ────────────────────────────────────────
+    create_effect(move |_| {
+        let ch = selected_channel.get();
+        spawn_local(async move {
+            let url = format!("/sc/api/channels/{}/pins", ch);
+            if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(pins) = data["pins"].as_array() {
+                        let msgs: Vec<ScMessage> = pins.iter()
+                            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                            .collect();
+                        set_pinned_messages.set(msgs);
+                    }
+                }
+            }
+        });
     });
 
     // Request notification permission on mount
@@ -695,9 +710,6 @@ pub fn SquirrelChat() -> impl IntoView {
             } else if ev.key() == "Escape" {
                 set_show_channel_switcher.set(false);
                 set_show_help.set(false);
-                set_show_pins.set(false);
-                set_editing_msg_id.set(None);
-                set_sidebar_open.set(false);
             }
         });
         if let Some(win) = web_sys::window() {
@@ -759,27 +771,16 @@ pub fn SquirrelChat() -> impl IntoView {
                         let ch_id = ch.id.clone();
                         let ch_id2 = ch.id.clone();
                         let ch_id3 = ch.id.clone();
-                        let ch_id4 = ch.id.clone();
                         let ch_name = ch.name.clone();
                         view! {
                             <div
                                 class="sc-channel-item"
                                 class:sc-channel-active=move || selected_channel.get() == ch_id
-                                tabindex="0"
                                 on:click=move |_| {
                                     set_selected_channel.set(ch_id2.clone());
                                     set_unread.update(|u| { u.remove(&ch_id2.clone()); });
                                     set_mentions_unread.update(|u| { u.remove(&ch_id2.clone()); });
                                     set_selected_project.set(None);
-                                }
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if ev.key() == "Enter" || ev.key() == " " {
-                                        ev.prevent_default();
-                                        set_selected_channel.set(ch_id4.clone());
-                                        set_unread.update(|u| { u.remove(&ch_id4.clone()); });
-                                        set_mentions_unread.update(|u| { u.remove(&ch_id4.clone()); });
-                                        set_selected_project.set(None);
-                                    }
                                 }
                             >
                                 <span>"#" {ch_name}</span>
@@ -917,82 +918,6 @@ pub fn SquirrelChat() -> impl IntoView {
 
             // ── Main area ─────────────────────────────────────────────────────
             <div class="sc-main">
-                // ── Mobile hamburger + channel header ─────────────────────────
-                <div class="sc-channel-header">
-                    <button
-                        class="sc-hamburger"
-                        title="Toggle sidebar"
-                        on:click=move |_| set_sidebar_open.update(|v| *v = !*v)
-                    >"☰"</button>
-                    <span class="sc-channel-title">{move || format!("#{}", selected_channel.get())}</span>
-                    // Pins button — opens pins panel for current channel
-                    <button
-                        class="sc-pins-btn"
-                        title="Pinned messages"
-                        on:click={
-                            move |_| {
-                                let ch = selected_channel.get_untracked();
-                                set_show_pins.update(|v| *v = !*v);
-                                if show_pins.get_untracked() {
-                                    // Fetch pins
-                                    spawn_local(async move {
-                                        let url = format!("/sc/api/channels/{}/pins", ch);
-                                        if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
-                                            let pins: Vec<ScMessage> = resp.json().await.unwrap_or_default();
-                                            set_pinned_msgs.set(pins);
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    >"📌"</button>
-                </div>
-                // ── Pins panel (overlay) ───────────────────────────────────────
-                {move || if show_pins.get() {
-                    let pins = pinned_msgs.get();
-                    view! {
-                        <div class="sc-pins-panel">
-                            <div class="sc-pins-panel-header">
-                                "📌 Pinned Messages"
-                                <button class="sc-pins-close" on:click=move |_| set_show_pins.set(false)>"✕"</button>
-                            </div>
-                            {if pins.is_empty() {
-                                view! { <div class="sc-pins-empty">"No pinned messages in this channel."</div> }.into_view()
-                            } else {
-                                pins.iter().map(|msg| {
-                                    let msg_id = msg.id.unwrap_or(0);
-                                    let from = msg.from_agent.clone().unwrap_or_default();
-                                    let text = msg.text.clone().unwrap_or_default();
-                                    let ch_for_unpin = selected_channel.get_untracked();
-                                    view! {
-                                        <div class="sc-pinned-msg">
-                                            <button class="sc-pinned-msg-unpin" title="Unpin" on:click={
-                                                let ch2 = ch_for_unpin.clone();
-                                                move |_| {
-                                                    let ch3 = ch2.clone();
-                                                    spawn_local(async move {
-                                                        let url = format!("/sc/api/channels/{}/pins/{}", ch3, msg_id);
-                                                        if let Ok(req) = gloo_net::http::Request::delete(&url).build() {
-                                                            let _ = req.send().await;
-                                                        }
-                                                        // Refresh pins
-                                                        let url2 = format!("/sc/api/channels/{}/pins", ch3);
-                                                        if let Ok(resp) = gloo_net::http::Request::get(&url2).send().await {
-                                                            let pins: Vec<ScMessage> = resp.json().await.unwrap_or_default();
-                                                            set_pinned_msgs.set(pins);
-                                                        }
-                                                    });
-                                                }
-                                            }>"unpin"</button>
-                                            <div class="sc-pinned-msg-from">{from}</div>
-                                            <div class="sc-pinned-msg-text">{text}</div>
-                                        </div>
-                                    }
-                                }).collect::<Vec<_>>().into_view()
-                            }}
-                        </div>
-                    }.into_view()
-                } else { ().into_view() }}
                 // ── Search bar ────────────────────────────────────────────────
                 <div class="sc-search-bar">
                     <input
@@ -1232,6 +1157,11 @@ pub fn SquirrelChat() -> impl IntoView {
                         view! {
                             <div class="sc-chat">
                                 <div class="sc-chat-header">
+                                    // Mobile hamburger
+                                    <button class="sc-hamburger" aria-label="Toggle sidebar"
+                                        on:click=move |_| set_sidebar_open.update(|v| *v = !*v)>
+                                        "☰"
+                                    </button>
                                     <span class="sc-channel-title">"#" {move || selected_channel.get()}</span>
                                     <span class="sc-conn-badge">
                                         {move || if sc_connected.get() {
@@ -1240,7 +1170,69 @@ pub fn SquirrelChat() -> impl IntoView {
                                             view! { <span class="conn-badge conn-waiting">"○ offline"</span> }.into_view()
                                         }}
                                     </span>
+                                    // Pins toggle button
+                                    <button
+                                        class="sc-pins-btn"
+                                        class:sc-pins-active=move || show_pins_panel.get()
+                                        title="Pinned messages"
+                                        on:click=move |_| set_show_pins_panel.update(|v| *v = !*v)
+                                    >
+                                        {move || {
+                                            let n = pinned_messages.get().len();
+                                            if n > 0 { format!("📌 {}", n) } else { "📌".to_string() }
+                                        }}
+                                    </button>
                                 </div>
+
+                                // Pinned messages panel
+                                {move || if show_pins_panel.get() {
+                                    let pins = pinned_messages.get();
+                                    let ch = selected_channel.get_untracked();
+                                    view! {
+                                        <div class="sc-pins-panel">
+                                            <div class="sc-pins-header">
+                                                "📌 Pinned messages in #" {ch.clone()}
+                                            </div>
+                                            {if pins.is_empty() {
+                                                view! { <div class="sc-pins-empty">"No pinned messages yet."</div> }.into_view()
+                                            } else {
+                                                pins.iter().map(|msg| {
+                                                    let mid = msg.id.unwrap_or(0);
+                                                    let from = msg.from_agent.clone().unwrap_or_default();
+                                                    let text = msg.text.clone().unwrap_or_default();
+                                                    let ch2 = ch.clone();
+                                                    view! {
+                                                        <div class="sc-pin-item">
+                                                            <span class="sc-pin-from">{from}</span>
+                                                            <span class="sc-pin-text">{text}</span>
+                                                            <button class="sc-pin-remove" title="Unpin"
+                                                                on:click=move |_| {
+                                                                    let ch3 = ch2.clone();
+                                                                    spawn_local(async move {
+                                                                        let url = format!("/sc/api/channels/{}/pins/{}", ch3, mid);
+                                                                        if let Ok(req) = gloo_net::http::Request::delete(&url).build() {
+                                                                            let _ = req.send().await;
+                                                                        }
+                                                                        // Refresh pins
+                                                                        let url2 = format!("/sc/api/channels/{}/pins", ch3);
+                                                                        if let Ok(resp) = gloo_net::http::Request::get(&url2).send().await {
+                                                                            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                                                                                if let Some(arr) = data["pins"].as_array() {
+                                                                                    let msgs: Vec<ScMessage> = arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
+                                                                                    set_pinned_messages.set(msgs);
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                }
+                                                            >"✕"</button>
+                                                        </div>
+                                                    }
+                                                }).collect::<Vec<_>>().into_view()
+                                            }}
+                                        </div>
+                                    }.into_view()
+                                } else { ().into_view() }}
 
                                 <div class="sc-messages" node_ref=chat_ref>
                                     {move || {
@@ -1257,7 +1249,6 @@ pub fn SquirrelChat() -> impl IntoView {
                                             let from = msg.from_agent.clone()
                                                 .unwrap_or_else(|| "?".to_string());
                                             let text = msg.text.clone().unwrap_or_default();
-                                            let text_for_edit = text.clone();
                                             let msg_id = msg.id.unwrap_or(0);
                                             let reactions = msg.reactions.clone();
                                             let attachments = msg.attachments.clone();
@@ -1327,26 +1318,37 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                 }
                                                             }</button>
                                                             // Edit button
-                                                            <button class="sc-edit-btn" title="Edit message" on:click=move |_| {
-                                                                if editing_msg_id.get_untracked() == Some(msg_id) {
-                                                                    set_editing_msg_id.set(None);
-                                                                } else {
-                                                                    set_editing_msg_id.set(Some(msg_id));
-                                                                    set_edit_text.set(text_for_edit.clone());
+                                                            {
+                                                                let text_for_edit = text.clone();
+                                                                view! {
+                                                                    <button class="sc-edit-btn" title="Edit" on:click=move |_| {
+                                                                        set_edit_msg_id.set(Some(msg_id));
+                                                                        set_edit_text.set(text_for_edit.clone());
+                                                                    }>"✏️"</button>
                                                                 }
-                                                            }>"✏️"</button>
+                                                            }
                                                             // Pin button
-                                                            <button class="sc-pin-btn" title="Pin message" on:click={
-                                                                let ch_for_pin = selected_channel.get_untracked();
-                                                                move |_| {
-                                                                    let ch2 = ch_for_pin.clone();
-                                                                    spawn_local(async move {
-                                                                        let url = format!("/sc/api/channels/{}/pins/{}", ch2, msg_id);
-                                                                        if let Ok(req) = gloo_net::http::Request::post(&url).build() {
-                                                                            let _ = req.send().await;
+                                                            <button class="sc-pin-btn" title="Pin to channel" on:click=move |_| {
+                                                                let mid = msg_id;
+                                                                let ch = selected_channel.get_untracked();
+                                                                let my_id = identity.get_untracked().id.clone();
+                                                                spawn_local(async move {
+                                                                    let url = format!("/sc/api/channels/{}/pins/{}", ch, mid);
+                                                                    if let Ok(req) = gloo_net::http::Request::post(&url)
+                                                                        .json(&serde_json::json!({"pinned_by": my_id})) {
+                                                                        let _ = req.send().await;
+                                                                    }
+                                                                    // Refresh pins
+                                                                    let url2 = format!("/sc/api/channels/{}/pins", ch);
+                                                                    if let Ok(resp) = gloo_net::http::Request::get(&url2).send().await {
+                                                                        if let Ok(data) = resp.json::<serde_json::Value>().await {
+                                                                            if let Some(arr) = data["pins"].as_array() {
+                                                                                let msgs: Vec<ScMessage> = arr.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
+                                                                                set_pinned_messages.set(msgs);
+                                                                            }
                                                                         }
-                                                                    });
-                                                                }
+                                                                    }
+                                                                });
                                                             }>"📌"</button>
                                                             // Delete button
                                                             <button class="sc-del-btn" on:click=move |_| {
@@ -1363,64 +1365,65 @@ pub fn SquirrelChat() -> impl IntoView {
                                                             }>"🗑"</button>
                                                         </div>
                                                     </div>
-                                                    // Edit inline input (shown when editing this message)
-                                                    {move || if editing_msg_id.get() == Some(msg_id) {
+                                                    // Inline edit form
+                                                    {move || if edit_msg_id.get() == Some(msg_id) {
                                                         view! {
-                                                            <div>
-                                                                <input
-                                                                    class="sc-edit-input"
+                                                            <div class="sc-edit-form">
+                                                                <textarea
+                                                                    class="sc-edit-textarea"
                                                                     prop:value=move || edit_text.get()
                                                                     on:input=move |ev| set_edit_text.set(event_target_value(&ev))
                                                                     on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                                                        if ev.key() == "Enter" && !ev.shift_key() {
-                                                                            ev.prevent_default();
-                                                                            let new_text = edit_text.get_untracked();
+                                                                        if ev.key() == "Escape" {
+                                                                            set_edit_msg_id.set(None);
+                                                                        } else if ev.key() == "Enter" && (ev.ctrl_key() || ev.meta_key()) {
                                                                             let mid = msg_id;
+                                                                            let new_text = edit_text.get_untracked();
                                                                             spawn_local(async move {
                                                                                 let url = format!("/sc/api/messages/{}", mid);
-                                                                                let payload = serde_json::json!({ "text": new_text });
-                                                                                if let Ok(req) = gloo_net::http::Request::patch(&url).json(&payload) {
+                                                                                if let Ok(req) = gloo_net::http::Request::patch(&url)
+                                                                                    .json(&serde_json::json!({"text": new_text})) {
                                                                                     let _ = req.send().await;
                                                                                 }
                                                                             });
-                                                                            let saved = edit_text.get_untracked();
                                                                             set_messages.update(|msgs| {
-                                                                                if let Some(m) = msgs.iter_mut().find(|m| m.id == Some(msg_id)) {
-                                                                                    m.text = Some(saved);
+                                                                                if let Some(m) = msgs.get_mut(i) {
+                                                                                    m.text = Some(edit_text.get_untracked());
                                                                                 }
                                                                             });
-                                                                            set_editing_msg_id.set(None);
-                                                                        } else if ev.key() == "Escape" {
-                                                                            set_editing_msg_id.set(None);
+                                                                            set_edit_msg_id.set(None);
                                                                         }
                                                                     }
-                                                                    on:blur=move |_| {
-                                                                        // Save on blur too
-                                                                        let new_text = edit_text.get_untracked();
+                                                                />
+                                                                <div class="sc-edit-actions">
+                                                                    <span class="sc-edit-hint">"Ctrl+Enter to save · Esc to cancel"</span>
+                                                                    <button class="sc-edit-save" on:click=move |_| {
                                                                         let mid = msg_id;
+                                                                        let new_text = edit_text.get_untracked();
                                                                         spawn_local(async move {
                                                                             let url = format!("/sc/api/messages/{}", mid);
-                                                                            let payload = serde_json::json!({ "text": new_text });
-                                                                            if let Ok(req) = gloo_net::http::Request::patch(&url).json(&payload) {
+                                                                            if let Ok(req) = gloo_net::http::Request::patch(&url)
+                                                                                .json(&serde_json::json!({"text": new_text})) {
                                                                                 let _ = req.send().await;
                                                                             }
                                                                         });
-                                                                        let saved = edit_text.get_untracked();
                                                                         set_messages.update(|msgs| {
-                                                                            if let Some(m) = msgs.iter_mut().find(|m| m.id == Some(msg_id)) {
-                                                                                m.text = Some(saved);
+                                                                            if let Some(m) = msgs.get_mut(i) {
+                                                                                m.text = Some(edit_text.get_untracked());
                                                                             }
                                                                         });
-                                                                        set_editing_msg_id.set(None);
-                                                                    }
-                                                                />
-                                                                <div class="sc-edit-hint">"Enter to save · Esc to cancel"</div>
+                                                                        set_edit_msg_id.set(None);
+                                                                    }>"Save"</button>
+                                                                </div>
                                                             </div>
                                                         }.into_view()
-                                                    } else { ().into_view() }}
-                                                    <div class="sc-msg-content">
-                                                        {render_markdown(&text)}
-                                                    </div>
+                                                    } else {
+                                                        view! {
+                                                            <div class="sc-msg-content">
+                                                                {render_markdown(&text)}
+                                                            </div>
+                                                        }.into_view()
+                                                    }}
                                                     // Inline attachments
                                                     {if !attachments.is_empty() {
                                                         let atts = attachments.clone();

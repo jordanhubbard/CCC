@@ -32,6 +32,9 @@ pub struct ScMessage {
     /// File attachments on this message
     #[serde(default)]
     pub attachments: Vec<ScAttachment>,
+    /// Whether this message is pinned in its channel (client-side only, not from wire)
+    #[serde(skip)]
+    pub is_pinned: bool,
     /// legacy slash command result field
     pub slash_result: Option<String>,
 }

@@ -53,6 +53,9 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/attachments/:id", get(get_attachment))
         // Search
         .route("/api/search", get(search_messages))
+        // Pins
+        .route("/api/channels/:id/pins", get(list_pins))
+        .route("/api/channels/:id/pins/:msg_id", post(pin_message).delete(unpin_message))
         // Direct Messages
         .route("/api/dms", get(list_dms).post(open_dm))
         // Agents / Presence
@@ -373,6 +376,39 @@ async fn get_project_file(
         Ok(None) => (StatusCode::NOT_FOUND, "not found").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+// ── Pins ──────────────────────────────────────────────────────────────────────
+
+async fn list_pins(
+    Extension(state): Extension<SharedState>,
+    Path(channel_id): Path<String>,
+) -> R<Json<serde_json::Value>> {
+    let msgs: Vec<MessageWire> = state.db.get_pins(&channel_id)?.into_iter().map(MessageWire::from).collect();
+    Ok(Json(json!({ "pins": msgs, "channel": channel_id })))
+}
+
+#[derive(Deserialize)]
+struct PinBody {
+    pinned_by: Option<String>,
+}
+
+async fn pin_message(
+    Extension(state): Extension<SharedState>,
+    Path((channel_id, msg_id)): Path<(String, i64)>,
+    body: Option<Json<PinBody>>,
+) -> R<Json<serde_json::Value>> {
+    let pinned_by = body.as_ref().and_then(|b| b.pinned_by.as_deref()).unwrap_or("unknown");
+    let ok = state.db.pin_message(&channel_id, msg_id, pinned_by)?;
+    Ok(Json(json!({ "ok": ok, "channel": channel_id, "message_id": msg_id })))
+}
+
+async fn unpin_message(
+    Extension(state): Extension<SharedState>,
+    Path((channel_id, msg_id)): Path<(String, i64)>,
+) -> R<Json<serde_json::Value>> {
+    let ok = state.db.unpin_message(&channel_id, msg_id)?;
+    Ok(Json(json!({ "ok": ok })))
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────

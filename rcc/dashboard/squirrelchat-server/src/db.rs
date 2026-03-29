@@ -84,6 +84,16 @@ impl Db {
                 ('ops',      'ops',      'public', 'rocky', 'Ops and infra'),
                 ('agents',   'agents',   'public', 'rocky', 'Agent coordination');
 
+            -- Pinned messages per channel
+            CREATE TABLE IF NOT EXISTS pins (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id  TEXT NOT NULL,
+                message_id  INTEGER NOT NULL,
+                pinned_by   TEXT NOT NULL,
+                pinned_at   INTEGER DEFAULT (unixepoch() * 1000),
+                UNIQUE(channel_id, message_id)
+            );
+
             -- Message attachments (file sharing)
             CREATE TABLE IF NOT EXISTS attachments (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -524,6 +534,40 @@ impl Db {
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?)),
         ).ok();
         Ok(result)
+    }
+
+    // ── Pins ──────────────────────────────────────────────────────────────────
+
+    pub fn pin_message(&self, channel_id: &str, message_id: i64, pinned_by: &str) -> Result<bool> {
+        let conn = self.0.lock().unwrap();
+        let n = conn.execute(
+            "INSERT OR IGNORE INTO pins (channel_id, message_id, pinned_by) VALUES (?, ?, ?)",
+            params![channel_id, message_id, pinned_by],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn unpin_message(&self, channel_id: &str, message_id: i64) -> Result<bool> {
+        let conn = self.0.lock().unwrap();
+        let n = conn.execute(
+            "DELETE FROM pins WHERE channel_id = ? AND message_id = ?",
+            params![channel_id, message_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn get_pins(&self, channel_id: &str) -> Result<Vec<Message>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.ts, m.from_agent, m.text, m.channel, m.thread_id, m.mentions, m.slash_result
+             FROM messages m
+             JOIN pins p ON p.message_id = m.id
+             WHERE p.channel_id = ?
+             ORDER BY p.pinned_at DESC"
+        )?;
+        let msgs: Vec<Message> = stmt.query_map([channel_id], |row| self.row_to_message(&conn, row))?
+            .filter_map(|r| r.ok()).collect();
+        Ok(msgs)
     }
 
     // ── DMs ───────────────────────────────────────────────────────────────────
