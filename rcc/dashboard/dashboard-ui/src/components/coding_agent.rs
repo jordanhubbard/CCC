@@ -13,6 +13,8 @@ use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
+use super::diff_view::{DiffView, looks_like_diff, extract_diff};
+
 // ── Config ─────────────────────────────────────────────────────────────────
 
 const CRUSH_SERVER: &str = "http://100.87.229.125:8793"; // sparky Tailscale IP
@@ -73,6 +75,7 @@ pub fn CodingAgent() -> impl IntoView {
     let refresh_tick = create_rw_signal::<u32>(0);
     let cwd = create_rw_signal::<String>(String::new());
     let model = create_rw_signal::<String>(String::new());
+    let show_diff = create_rw_signal::<bool>(false);
 
     // Load sessions on mount + refresh
     let fetch_sessions = {
@@ -435,10 +438,14 @@ pub fn CodingAgent() -> impl IntoView {
                         })
                     }}
 
-                    // Streaming output
+                    // Streaming output + diff view
                     {move || {
                         let out = output.get();
                         if !out.is_empty() {
+                            let has_diff = looks_like_diff(&out);
+                            let diff_text = if has_diff { extract_diff(&out) } else { String::new() };
+                            let showing_diff = show_diff.get() && has_diff;
+
                             view! {
                                 <div class="ca-output-panel">
                                     <div class="ca-output-label">
@@ -447,8 +454,33 @@ pub fn CodingAgent() -> impl IntoView {
                                         } else {
                                             view! { <span class="ca-done">"✅ Done"</span> }.into_view()
                                         }}
+                                        {if has_diff {
+                                            view! {
+                                                <button
+                                                    class="ca-diff-toggle"
+                                                    on:click={
+                                                        let show_diff = show_diff.clone();
+                                                        move |_| show_diff.update(|v| *v = !*v)
+                                                    }
+                                                >
+                                                    {move || if show_diff.get() { "📝 Raw Output" } else { "📊 View Diff" }}
+                                                </button>
+                                            }.into_view()
+                                        } else {
+                                            view! {}.into_view()
+                                        }}
                                     </div>
-                                    <pre class="ca-output">{out}</pre>
+                                    {if showing_diff {
+                                        view! {
+                                            <div class="ca-diff-container">
+                                                <DiffView diff_text=diff_text />
+                                            </div>
+                                        }.into_view()
+                                    } else {
+                                        view! {
+                                            <pre class="ca-output">{out}</pre>
+                                        }.into_view()
+                                    }}
                                 </div>
                             }.into_view()
                         } else {
