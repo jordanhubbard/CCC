@@ -1,6 +1,7 @@
 use leptos::*;
 
-use crate::types::{QueueItem, QueueResponse};
+use crate::context::DashboardContext;
+use crate::types::QueueItem;
 
 fn relative_time(ts: &str) -> String {
     let now_ms = js_sys::Date::now();
@@ -43,21 +44,8 @@ fn status_label(status: Option<&str>) -> &'static str {
 
 #[component]
 pub fn ActivityFeed() -> impl IntoView {
-    let (tick, set_tick) = create_signal(0u32);
-
-    leptos::spawn_local(async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(30_000).await;
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        }
-    });
-
-    let queue = create_resource(move || tick.get(), |_| async move {
-        let Ok(resp) = gloo_net::http::Request::get("/api/queue").send().await else {
-            return QueueResponse::default();
-        };
-        resp.json::<QueueResponse>().await.unwrap_or_default()
-    });
+    let ctx = use_context::<DashboardContext>().expect("DashboardContext missing");
+    let queue = ctx.queue;
 
     view! {
         <section class="section section-activity">
