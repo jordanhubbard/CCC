@@ -1,48 +1,32 @@
-# 🐿️ Rocky Workqueue Dashboard
+# 🐿️ Rocky Command Center Dashboard
 
-Live dashboard for the Rocky/Bullwinkle/Natasha agent workqueue system.
+> **This directory is archived.** The Node.js dashboard (`server.mjs`) has been replaced by the Rust/WASM dashboard at `rcc/dashboard/`. See that directory for the live implementation.
 
-## Public URL
+## Migration (completed 2026-03-28)
 
-**http://localhost:8788/**
+The old Express.js dashboard has been fully superseded by the v2 Rust/Axum + Leptos WASM dashboard:
 
-## Architecture
+- **Backend:** `rcc/dashboard/dashboard-server/` (Axum, 18-test suite)
+- **Frontend:** `rcc/dashboard/dashboard-ui/` (Leptos/WASM, 12 components)
+- **Port:** Still `:8788` — same URL, drop-in replacement
 
-- **Port:** 8788 (public, bound to 0.0.0.0)
-- **Framework:** Node.js + Express
-- **Data:** Reads `~/.openclaw/workspace/workqueue/queue.json` live on every request
-- **Heartbeats:** Merges MinIO heartbeat files + in-memory agent POSTs
-- **systemd unit:** `wq-dashboard.service` (enabled, auto-restart)
-
-## Endpoints
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/` | No | Dashboard HTML (server-rendered, live data) |
-| GET | `/api/queue` | No | Full queue.json as JSON |
-| GET | `/api/heartbeats` | No | Merged heartbeat data for all 3 agents |
-| POST | `/api/upvote/:id` | Yes | Promote idea → pending task |
-| POST | `/api/comment/:id` | Yes | Comment/delete/subtask on item |
-| POST | `/api/complete/:id` | Yes | Mark item completed |
-| POST | `/api/heartbeat/:agent` | Yes | Agents POST their status |
-
-## Auth
-
-Write endpoints require `Authorization: Bearer <your-rcc-token>`.
-
-The browser dashboard prompts for the token on first action and stores it in sessionStorage.
+All old features ported:
+- Agent heartbeats, metrics, work queue
+- SquirrelBus viewer + send widget
+- SquirrelChat
+- Activity map (`/activity`)
+- MinIO browser (`/s3/*`)
+- Kanban, Idea Incubator, Changelog, Activity Feed
 
 ## Service Management
 
 ```bash
-sudo systemctl status wq-dashboard
-sudo systemctl restart wq-dashboard
-journalctl -u wq-dashboard -f
+# Build dist on Sparky
+cd rcc/dashboard && bash scripts/build-and-publish.sh
+
+# Run on Rocky
+DASHBOARD_DIST=~/.rcc/workspace/dashboard-v2/dist \
+RCC_URL=http://localhost:8789 \
+RCC_DASHBOARD_PORT=8788 \
+  ./dashboard-server
 ```
-
-## Comment Endpoint Intelligence
-
-POST `/api/comment/:id` with `{text: "..."}` parses intent:
-- `"delete"` or `"remove"` → deletes the item
-- `"break into X, Y, Z"` or contains `"subtask"` → unblocks + adds subtask notes
-- Anything else → unblocks item + appends comment to notes
