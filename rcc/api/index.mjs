@@ -1558,7 +1558,13 @@ if command -v openclaw &>/dev/null; then
   openclaw gateway restart 2>/dev/null || openclaw gateway start
 else
   echo "→ Installing openclaw..."
-  npm install -g openclaw 2>/dev/null || { echo "npm not found — please install Node.js first"; exit 1; }
+  # Ensure npm is available (may be missing even when node is present)
+  if ! command -v npm &>/dev/null; then
+    echo "  npm not found — installing..."
+    sudo apt-get install -y -q npm 2>/dev/null || \
+      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs
+  fi
+  npm install -g openclaw || { echo "ERROR: npm install failed"; exit 1; }
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw gateway start
 fi
