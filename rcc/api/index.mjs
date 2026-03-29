@@ -38,6 +38,11 @@ const SECRETS_PATH       = process.env.SECRETS_PATH       || '../data/secrets.js
 const CONVERSATIONS_PATH = process.env.CONVERSATIONS_PATH || './data/conversations.json';
 const USERS_PATH         = process.env.USERS_PATH         || './data/users.json';
 const LLM_REGISTRY_PATH  = process.env.LLM_REGISTRY_PATH  || './data/llm-registry.json';
+const PROVIDERS_PATH     = process.env.PROVIDERS_PATH     || './data/providers.json';
+const TUNNEL_STATE_PATH  = process.env.TUNNEL_STATE_PATH  || './data/tunnel-state.json';
+const TUNNEL_USER        = process.env.TUNNEL_USER        || 'jkh';
+const TUNNEL_AUTH_KEYS   = process.env.TUNNEL_AUTH_KEYS   || (process.env.HOME + '/.ssh/authorized_keys');
+const TUNNEL_PORT_START  = parseInt(process.env.TUNNEL_PORT_START || '18080', 10);
 
 // ── Slack config ───────────────────────────────────────────────────────────
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
@@ -67,6 +72,22 @@ async function notifyJkhCompletion(item, agent) {
     }).catch(e => console.warn('[notify-jkh] Slack DM failed:', e.message));
   } catch (e) {
     console.warn('[notify-jkh] error:', e.message);
+  }
+}
+
+// ── Project Slack channel fan-out ─────────────────────────────────────────
+async function fanoutToProjectChannels(projectId, text) {
+  if (!SLACK_BOT_TOKEN || !projectId) return;
+  try {
+    const projects = await readProjects();
+    const project = projects.find(p => p.id === projectId);
+    if (!project?.slack_channels?.length) return;
+    for (const ch of project.slack_channels) {
+      slackPost('chat.postMessage', { channel: ch.channel_id, text, mrkdwn: true })
+        .catch(e => console.warn(`[fanout] ${ch.channel_id}: ${e.message}`));
+    }
+  } catch (e) {
+    console.warn('[fanout] error:', e.message);
   }
 }
 
@@ -140,6 +161,20 @@ async function runDisappearanceCheck() {
 
 // Run disappearance check every 5 minutes
 setInterval(runDisappearanceCheck, 5 * 60 * 1000);
+
+// ── Generic JSON file helpers ─────────────────────────────────────────────
+async function readJsonFile(pathSpec, defaultValue = {}) {
+  const p = pathSpec.startsWith('/') ? pathSpec : new URL(pathSpec, import.meta.url).pathname;
+  if (!existsSync(p)) return defaultValue;
+  try { return JSON.parse(await readFile(p, 'utf8')); }
+  catch { return defaultValue; }
+}
+
+async function writeJsonFile(pathSpec, data) {
+  const p = pathSpec.startsWith('/') ? pathSpec : new URL(pathSpec, import.meta.url).pathname;
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2));
+}
 
 // ── Projects I/O ─────────────────────────────────────────────────────────
 async function readProjects() {
@@ -1045,6 +1080,24 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       return json(res, 200, users);
     }
 
+    // ── GET /api/providers — public provider list (read-only, no auth) ───
+    if (method === 'GET' && path === '/api/providers') {
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      return json(res, 200, Object.values(providers));
+    }
+
+    // ── GET /api/providers/:id — single provider lookup (no auth) ────────
+    {
+      const m = path.match(/^\/api\/providers\/([^/]+)$/);
+      if (method === 'GET' && m) {
+        const providers = await readJsonFile(PROVIDERS_PATH, {});
+        const id = decodeURIComponent(m[1]);
+        const p = providers[id];
+        if (!p) return json(res, 404, { error: 'Provider not found' });
+        return json(res, 200, p);
+      }
+    }
+
     // ── Auth-required endpoints ───────────────────────────────────────────
     if (!isAuthed(req)) {
       return json(res, 401, { error: 'Unauthorized' });
@@ -1116,10 +1169,17 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
         // Scout dedup key — preserved for itemAlreadyExists() checks
         scout_key: body.scout_key || null,
         repo: body.repo || null,
+        project: body.project || body.repo || null,
       };
       if (!q.items) q.items = [];
       q.items.push(item);
       await writeQueue(q);
+      // Fan-out: notify project channel that a new task was queued
+      if (item.project && item.priority !== 'idea') {
+        fanoutToProjectChannels(item.project,
+          `📋 New task queued: *${item.title}* (${item.priority})\n${item.description ? item.description.slice(0, 200) : ''}`
+        );
+      }
       return json(res, 201, { ok: true, item });
     }
 
@@ -1226,6 +1286,13 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       q.completed.push(item);
       await writeQueue(q);
       notifyJkhCompletion(item, agent); // fire-and-forget
+      // Fan-out to project channel
+      if (item.project) {
+        const resolution = (item.resolution || item.result || '').slice(0, 200);
+        fanoutToProjectChannels(item.project,
+          `✅ *${item.title}* — completed by ${agent || 'unknown'}${resolution ? '\n' + resolution : ''}`
+        );
+      }
       return json(res, 200, { ok: true, item });
     }
 
@@ -1328,6 +1395,12 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       item.journal.push(entry);
       item.itemVersion = (item.itemVersion || 0) + 1;
       await writeQueue(q);
+      // Fan-out significant agent comments to project channel
+      if (item.project && body.author && body.author !== 'api') {
+        fanoutToProjectChannels(item.project,
+          `💬 *${body.author}* on *${item.title}*: ${text.slice(0, 300)}`
+        );
+      }
       return json(res, 200, { ok: true, entry });
     }
 
@@ -3173,6 +3246,152 @@ echo "✅ $AGENT_NAME is online. Token: ${agentToken}"
       const entry = llmRegistry.get(agent);
       if (!entry) return json(res, 404, { error: 'LLM endpoint not found for agent' });
       return json(res, 200, entry.models);
+    }
+
+    // ── GET /api/providers — list all registered token providers ─────────────
+    if (method === 'GET' && path === '/api/providers') {
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      return json(res, 200, Object.values(providers));
+    }
+
+    // ── GET /api/providers/:id — get one provider ─────────────────────────
+    const providerIdMatch = path.match(/^\/api\/providers\/([^/]+)$/);
+    if (method === 'GET' && providerIdMatch) {
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      const id = decodeURIComponent(providerIdMatch[1]);
+      const p = providers[id];
+      if (!p) return json(res, 404, { error: 'Provider not found' });
+      return json(res, 200, p);
+    }
+
+    // ── PUT /api/providers/:id — register or update a provider ───────────
+    if (method === 'PUT' && providerIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(providerIdMatch[1]);
+      const body = await readBody(req);
+      if (!body) return json(res, 400, { error: 'Body required' });
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      const existing = providers[id] || {};
+      providers[id] = {
+        id,
+        model:        body.model       || existing.model       || null,
+        baseUrl:      body.baseUrl     || existing.baseUrl     || null,
+        local_port:   body.local_port  || existing.local_port  || null,
+        status:       body.status      || 'online',
+        owner:        body.owner       || existing.owner       || null,
+        context_len:  body.context_len || existing.context_len || null,
+        tags:         body.tags        || existing.tags        || [],
+        createdAt:    existing.createdAt || new Date().toISOString(),
+        updatedAt:    new Date().toISOString(),
+      };
+      await writeJsonFile(PROVIDERS_PATH, providers);
+      return json(res, 200, { ok: true, provider: providers[id] });
+    }
+
+    // ── POST /api/providers — register a new provider (auto-ID) ──────────
+    if (method === 'POST' && path === '/api/providers') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body) return json(res, 400, { error: 'Body required' });
+      if (!body.model) return json(res, 400, { error: 'model required' });
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      const id = body.id || `provider-${randomUUID().slice(0, 8)}`;
+      providers[id] = {
+        id,
+        model:       body.model,
+        baseUrl:     body.baseUrl     || null,
+        local_port:  body.local_port  || null,
+        status:      body.status      || 'online',
+        owner:       body.owner       || null,
+        context_len: body.context_len || null,
+        tags:        body.tags        || [],
+        createdAt:   new Date().toISOString(),
+        updatedAt:   new Date().toISOString(),
+      };
+      await writeJsonFile(PROVIDERS_PATH, providers);
+      return json(res, 201, { ok: true, id, provider: providers[id] });
+    }
+
+    // ── PATCH /api/providers/:id — partial update ─────────────────────────
+    if (method === 'PATCH' && providerIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(providerIdMatch[1]);
+      const body = await readBody(req);
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      if (!providers[id]) return json(res, 404, { error: 'Provider not found' });
+      providers[id] = { ...providers[id], ...body, id, updatedAt: new Date().toISOString() };
+      await writeJsonFile(PROVIDERS_PATH, providers);
+      return json(res, 200, { ok: true, provider: providers[id] });
+    }
+
+    // ── DELETE /api/providers/:id — deregister a provider ────────────────
+    if (method === 'DELETE' && providerIdMatch) {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const id = decodeURIComponent(providerIdMatch[1]);
+      const providers = await readJsonFile(PROVIDERS_PATH, {});
+      if (!providers[id]) return json(res, 404, { error: 'Provider not found' });
+      delete providers[id];
+      await writeJsonFile(PROVIDERS_PATH, providers);
+      return json(res, 200, { ok: true });
+    }
+
+    // ── POST /api/tunnel/request — auto-assign port + add pubkey ─────────
+    // Accepts: { pubkey: "ssh-ed25519 ...", label: "boris-sweden", agent: "boris" }
+    // Returns: { port: 18081, user: "jkh", host: "...", ok: true }
+    if (method === 'POST' && path === '/api/tunnel/request') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body?.pubkey) return json(res, 400, { error: 'pubkey required' });
+      // Validate pubkey format (must start with ssh- or ecdsa-sha2)
+      const pubkeyTrimmed = body.pubkey.trim();
+      if (!/^(ssh-|ecdsa-sha2)/.test(pubkeyTrimmed)) {
+        return json(res, 400, { error: 'Invalid pubkey format' });
+      }
+      const label   = (body.label  || body.agent || 'unknown').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+      const agent   = body.agent   || label;
+
+      // Load tunnel state to track assigned ports
+      const tunnelState = await readJsonFile(TUNNEL_STATE_PATH, { nextPort: TUNNEL_PORT_START, tunnels: {} });
+
+      // Check if this agent already has a tunnel (idempotent by agent name)
+      let assigned = tunnelState.tunnels[agent];
+      let alreadyExisted = !!assigned;
+      if (!assigned) {
+        const port = tunnelState.nextPort;
+        tunnelState.nextPort = port + 1;
+        assigned = { agent, label, port, pubkey: pubkeyTrimmed, addedAt: new Date().toISOString() };
+        tunnelState.tunnels[agent] = assigned;
+        await writeJsonFile(TUNNEL_STATE_PATH, tunnelState);
+
+        // Append pubkey to authorized_keys with tunnel restrictions
+        const comment = `rcc-tunnel-${label}`;
+        const authKeyEntry = `restrict,port-forwarding,permitopen="localhost:${port}" ${pubkeyTrimmed} ${comment}\n`;
+        try {
+          await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry, 'utf8');
+          console.log(`[rcc-api] Tunnel key added for ${agent} on port ${port}`);
+        } catch (authErr) {
+          console.warn(`[rcc-api] Could not write authorized_keys: ${authErr.message}`);
+          // Don't fail the request — caller can add manually
+        }
+      }
+
+      const publicHost = (RCC_PUBLIC_URL.replace(/^https?:\/\//, '').split(':')[0]) || '146.190.134.110';
+      return json(res, 200, {
+        ok:    true,
+        port:  assigned.port,
+        user:  TUNNEL_USER,
+        host:  publicHost,
+        agent: assigned.agent,
+        connect: `ssh -N -R ${assigned.port}:localhost:8080 ${TUNNEL_USER}@${publicHost}`,
+        alreadyExisted,
+      });
+    }
+
+    // ── GET /api/tunnel/list — list all registered tunnels ────────────────
+    if (method === 'GET' && path === '/api/tunnel/list') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const tunnelState = await readJsonFile(TUNNEL_STATE_PATH, { nextPort: TUNNEL_PORT_START, tunnels: {} });
+      return json(res, 200, Object.values(tunnelState.tunnels));
     }
 
     return json(res, 404, { error: 'Not found' });
