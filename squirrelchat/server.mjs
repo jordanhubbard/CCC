@@ -118,6 +118,19 @@ try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)'); } catch {}
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_files_channel ON files(channel)'); } catch {}
 
+// Phase 5.5: Pinned messages table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    pinned_by TEXT,
+    pinned_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+    UNIQUE(channel_id, message_id)
+  )
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_pins_channel ON pins(channel_id)'); } catch {}
+
 // Seed default channels if the channels table is empty
 const channelCount = db.prepare('SELECT COUNT(*) as cnt FROM channels').get();
 if (channelCount.cnt === 0) {
@@ -616,6 +629,44 @@ app.get('/api/agents', async (req, res) => {
     }
   } catch {}
   res.json([]);
+});
+
+// ── Phase 5.5: Pinned messages ─────────────────────────────────────────────
+
+// GET all pins for a channel (returns full message objects)
+app.get('/api/channels/:id/pins', (req, res) => {
+  const pins = db.prepare(`
+    SELECT m.* FROM messages m
+    INNER JOIN pins p ON p.message_id = m.id
+    WHERE p.channel_id = ?
+    ORDER BY p.pinned_at DESC
+  `).all(req.params.id);
+  res.json(pins.map(m => ({
+    id: String(m.id),
+    channel: m.channel,
+    from_agent: m.from_agent,
+    text: m.text,
+    ts: m.ts,
+    edited_at: m.edited_at,
+  })));
+});
+
+// POST pin a message
+app.post('/api/channels/:id/pins/:msgId', auth, (req, res) => {
+  const { id: channelId, msgId } = req.params;
+  const pinned_by = req.body?.from || 'unknown';
+  try {
+    db.prepare('INSERT OR IGNORE INTO pins (channel_id, message_id, pinned_by) VALUES (?, ?, ?)').run(channelId, msgId, pinned_by);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE unpin a message
+app.delete('/api/channels/:id/pins/:msgId', auth, (req, res) => {
+  db.prepare('DELETE FROM pins WHERE channel_id = ? AND message_id = ?').run(req.params.id, req.params.msgId);
+  res.json({ ok: true });
 });
 
 // SSE stream
