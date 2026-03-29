@@ -23,22 +23,56 @@ fn priority_class(p: &str) -> &'static str {
 fn status_label(s: &str) -> &'static str {
     match s {
         "pending" => "pending",
+        "claimed" => "claimed",
         "in_progress" | "in-progress" => "in-progress",
         "done" | "completed" => "done",
+        "closed" => "closed",
         "failed" => "failed",
         "blocked" => "blocked",
+        "deferred" => "deferred",
+        "incubating" => "incubating",
         _ => "unknown",
     }
 }
 
+fn is_active_status(s: &str) -> bool {
+    matches!(s, "pending" | "claimed" | "in-progress" | "in_progress")
+}
+
+fn days_since_epoch(y: u64, m: u64, d: u64) -> u64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let m = if m <= 2 { m + 12 } else { m };
+    let a = y / 100;
+    let b = 2u64.saturating_add(a / 4).saturating_sub(a);
+    let jd = ((365.25 * (y + 4716) as f64) as u64)
+        + ((30.6001 * (m + 1) as f64) as u64)
+        + d + b;
+    jd.saturating_sub(2440588)
+}
+
 fn age_display(created_at: &str) -> String {
-    // Basic age display — parse ISO timestamp and show relative time
-    // For simplicity, just show the date portion
-    if let Some(d) = created_at.split('T').next() {
-        d.to_string()
-    } else {
-        created_at.to_string()
+    let now_sec = (js_sys::Date::now() as u64) / 1000;
+    let parse = || -> Option<u64> {
+        let (date_part, time_part) = created_at.split_once('T')?;
+        let mut dp = date_part.split('-');
+        let y: u64 = dp.next()?.parse().ok()?;
+        let m: u64 = dp.next()?.parse().ok()?;
+        let d: u64 = dp.next()?.parse().ok()?;
+        let time_clean = time_part.trim_end_matches('Z');
+        let mut tp = time_clean.split(':');
+        let h: u64 = tp.next()?.parse().ok()?;
+        let mi: u64 = tp.next()?.parse().ok()?;
+        let s: f64 = tp.next().unwrap_or("0").parse().ok()?;
+        Some(days_since_epoch(y, m, d) * 86400 + h * 3600 + mi * 60 + s as u64)
+    };
+    if let Some(ts_sec) = parse() {
+        let diff = now_sec.saturating_sub(ts_sec);
+        if diff < 60 { return "just now".to_string(); }
+        if diff < 3600 { return format!("{}m ago", diff / 60); }
+        if diff < 86400 { return format!("{}h ago", diff / 3600); }
+        return format!("{}d ago", diff / 86400);
     }
+    created_at.split('T').next().unwrap_or(created_at).to_string()
 }
 
 #[component]
@@ -68,6 +102,11 @@ pub fn WorkQueue() -> impl IntoView {
                 if item.priority.as_deref() == Some("idea") {
                     return false; // ideas shown in Idea Incubator
                 }
+                // Only show active items in the main table (unless filter is set)
+                let status = item.status.as_deref().unwrap_or("pending");
+                if f.is_empty() && !is_active_status(status) {
+                    return false;
+                }
                 if f.is_empty() {
                     return true;
                 }
@@ -79,12 +118,7 @@ pub fn WorkQueue() -> impl IntoView {
                         .unwrap_or("")
                         .to_lowercase()
                         .contains(&f)
-                    || item
-                        .status
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&f)
+                    || status.to_lowercase().contains(&f)
             })
             .collect();
         items

@@ -88,13 +88,40 @@ async fn fetch_github_data(repo: String) -> GhProjectData {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+fn days_since_epoch(y: u64, m: u64, d: u64) -> u64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let m = if m <= 2 { m + 12 } else { m };
+    let a = y / 100;
+    let b = 2u64.saturating_add(a / 4).saturating_sub(a);
+    let jd = ((365.25 * (y + 4716) as f64) as u64)
+        + ((30.6001 * (m + 1) as f64) as u64)
+        + d + b;
+    jd.saturating_sub(2440588)
+}
+
 fn relative_time(ts: &str) -> String {
-    // Very basic relative time — just show the date part
-    if let Some(d) = ts.split('T').next() {
-        d.to_string()
-    } else {
-        ts.to_string()
+    let now_sec = (js_sys::Date::now() as u64) / 1000;
+    let parse = || -> Option<u64> {
+        let (date_part, time_part) = ts.split_once('T')?;
+        let mut dp = date_part.split('-');
+        let y: u64 = dp.next()?.parse().ok()?;
+        let m: u64 = dp.next()?.parse().ok()?;
+        let d: u64 = dp.next()?.parse().ok()?;
+        let time_clean = time_part.trim_end_matches('Z');
+        let mut tp = time_clean.split(':');
+        let h: u64 = tp.next()?.parse().ok()?;
+        let mi: u64 = tp.next()?.parse().ok()?;
+        let s: f64 = tp.next().unwrap_or("0").parse().ok()?;
+        Some(days_since_epoch(y, m, d) * 86400 + h * 3600 + mi * 60 + s as u64)
+    };
+    if let Some(ts_sec) = parse() {
+        let diff = now_sec.saturating_sub(ts_sec);
+        if diff < 60 { return "just now".to_string(); }
+        if diff < 3600 { return format!("{}m ago", diff / 60); }
+        if diff < 86400 { return format!("{}h ago", diff / 3600); }
+        return format!("{}d ago", diff / 86400);
     }
+    ts.split('T').next().unwrap_or(ts).to_string()
 }
 
 fn issue_state_icon(state: &str) -> &'static str {
