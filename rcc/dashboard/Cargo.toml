@@ -1,5 +1,5 @@
 [workspace]
-members = ["dashboard-server", "dashboard-ui"]
+members = ["dashboard-server", "dashboard-ui", "squirrelchat-server"]
 resolver = "2"
 
 [profile.release]
