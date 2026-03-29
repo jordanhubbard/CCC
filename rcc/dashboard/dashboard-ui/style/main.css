@@ -771,6 +771,7 @@ html, body {
 
 .agent-profile-card.online { border-left-color: var(--green); }
 .agent-profile-card.offline { border-left-color: var(--text-dimmer); }
+.agent-profile-card.stale { border-left-color: var(--orange); }
 .agent-profile-card.decommissioned { border-left-color: var(--red); opacity: 0.7; }
 
 .profile-header {
@@ -793,6 +794,7 @@ html, body {
 
 .badge-online { background: var(--green-dim); color: var(--green); }
 .badge-offline { background: var(--surface3); color: var(--text-dimmer); }
+.badge-stale { background: rgba(227,179,65,0.15); color: var(--orange); }
 .badge-decommissioned { background: var(--red-dim); color: var(--red); }
 
 .profile-meta-grid { display: flex; flex-direction: column; gap: 6px; }

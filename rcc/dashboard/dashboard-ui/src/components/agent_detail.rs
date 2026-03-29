@@ -34,10 +34,57 @@ pub struct AgentDetail {
     pub online: Option<bool>,
     pub decommissioned: Option<bool>,
     pub ts: Option<String>,
+    pub last_seen: Option<String>,
     pub model: Option<String>,
     pub pull_rev: Option<String>,
     pub gateway_url: Option<String>,
     pub uptime: Option<u64>,
+}
+
+/// Returns seconds since the given ISO-8601 timestamp, or u64::MAX if unparseable.
+fn secs_since(ts: &str) -> u64 {
+    let now_sec = (js_sys::Date::now() as u64) / 1000;
+    let parse = || -> Option<u64> {
+        let (dp, tp) = ts.split_once('T')?;
+        let mut d = dp.split('-');
+        let y: u64 = d.next()?.parse().ok()?;
+        let m: u64 = d.next()?.parse().ok()?;
+        let day: u64 = d.next()?.parse().ok()?;
+        let tc = tp.trim_end_matches('Z');
+        let mut t = tc.split(':');
+        let h: u64 = t.next()?.parse().ok()?;
+        let mi: u64 = t.next()?.parse().ok()?;
+        let s: f64 = t.next().unwrap_or("0").parse().ok()?;
+        // Days since Unix epoch (Gregorian approximation)
+        let yy = if m <= 2 { y - 1 } else { y };
+        let mm = if m <= 2 { m + 12 } else { m };
+        let a = yy / 100;
+        let b = 2 - a + a / 4;
+        let jd = ((365.25 * (yy + 4716) as f64) as u64)
+            + ((30.6001 * (mm + 1) as f64) as u64)
+            + day + b;
+        let epoch_sec = jd.saturating_sub(2440588) * 86400 + h * 3600 + mi * 60 + s as u64;
+        Some(now_sec.saturating_sub(epoch_sec))
+    };
+    parse().unwrap_or(u64::MAX)
+}
+
+/// Derive effective online status from stored `online` field + lastSeen staleness.
+/// Any heartbeat older than 2h overrides `online=true` → treated as offline/stale.
+fn effective_status(online: bool, decom: bool, last_seen_ts: Option<&str>) -> &'static str {
+    if decom {
+        return "decommissioned";
+    }
+    if !online {
+        return "offline";
+    }
+    // online=true but check staleness
+    let age = last_seen_ts.map(secs_since).unwrap_or(u64::MAX);
+    if age > 7200 {
+        "stale" // online flag set but heartbeat is >2h old
+    } else {
+        "online"
+    }
 }
 
 type HistoryVec = Vec<AgentHistoryEntry>;
@@ -45,6 +92,26 @@ type HistoryVec = Vec<AgentHistoryEntry>;
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
 async fn fetch_agent_detail(name: String) -> AgentDetail {
+    // Try /api/heartbeats map first (always has online/lastSeen derived correctly).
+    // Fall back to /api/agents/:name for agents that have individual records.
+    if let Ok(resp) = gloo_net::http::Request::get("/api/heartbeats").send().await {
+        if let Ok(map) = resp.json::<std::collections::HashMap<String, serde_json::Value>>().await {
+            if let Some(hb) = map.get(&name) {
+                let mut detail = AgentDetail::default();
+                detail.name = hb.get("agent").and_then(|v| v.as_str()).map(str::to_string);
+                detail.host = hb.get("host").and_then(|v| v.as_str()).map(str::to_string);
+                detail.status = hb.get("status").and_then(|v| v.as_str()).map(str::to_string);
+                detail.online = hb.get("online").and_then(|v| v.as_bool());
+                detail.decommissioned = hb.get("decommissioned").and_then(|v| v.as_bool());
+                detail.ts = hb.get("ts").and_then(|v| v.as_str()).map(str::to_string);
+                detail.last_seen = hb.get("lastSeen").and_then(|v| v.as_str()).map(str::to_string)
+                    .or_else(|| detail.ts.clone());
+                detail.model = hb.get("model").and_then(|v| v.as_str()).map(str::to_string);
+                return detail;
+            }
+        }
+    }
+    // Fallback: direct agent endpoint
     let Ok(resp) = gloo_net::http::Request::get(&format!("/api/agents/{name}"))
         .send()
         .await
@@ -247,20 +314,13 @@ pub fn AgentDetail() -> impl IntoView {
                                     Some(d) => {
                                         let online = d.online.unwrap_or(false);
                                         let decom = d.decommissioned.unwrap_or(false);
-                                        let status_class = if decom {
-                                            "decommissioned"
-                                        } else if online {
-                                            "online"
-                                        } else {
-                                            "offline"
-                                        };
-                                        let status_label = if decom {
-                                            "decommissioned"
-                                        } else if online {
-                                            "online"
-                                        } else {
-                                            "offline"
-                                        };
+                                        let last_seen = d.last_seen.clone()
+                                            .or_else(|| d.ts.clone());
+                                        let status_class = effective_status(
+                                            online, decom,
+                                            last_seen.as_deref(),
+                                        );
+                                        let status_label = status_class;
                                         view! {
                                             <div class=format!("agent-profile-card {status_class}")>
                                                 <div class="profile-header">
