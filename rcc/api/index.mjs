@@ -52,11 +52,11 @@ const TUNNEL_PORT_START  = parseInt(process.env.TUNNEL_PORT_START || '18080', 10
 const SERVICES_CATALOG = [
   { id: 'rcc-dashboard',    name: 'RCC Dashboard',      url: 'http://146.190.134.110:8789/projects', desc: 'Agent work queue + project tracker',      host: 'do-host1' },
   { id: 'squirrelbus',      name: 'SquirrelBus Viewer', url: 'http://146.190.134.110:8788/bus',      desc: 'Inter-agent message bus',                  host: 'do-host1' },
-  { id: 'whisper-api',      name: 'Whisper API',        url: 'http://sparky.local:8792',             desc: 'Speech-to-text (sparky GB10)',              host: 'sparky'   },
-  { id: 'agentfs',          name: 'AgentFS',            url: 'http://sparky.local:8791',             desc: 'Content-addressed WASM module store',       host: 'sparky'   },
-  { id: 'usdagent',         name: 'usdagent',           url: 'http://sparky.local:8000',             desc: 'LLM-backed USD 3D asset generator',         host: 'sparky'   },
+  { id: 'whisper-api',      name: 'Whisper API',        url: 'http://100.87.229.125:8792',            desc: 'Speech-to-text (sparky GB10)',              host: 'sparky'   },
+  { id: 'agentfs',          name: 'AgentFS',            url: 'http://100.87.229.125:8791',            desc: 'Content-addressed WASM module store',       host: 'sparky'   },
+  { id: 'usdagent',         name: 'usdagent',           url: 'http://100.87.229.125:8000',            desc: 'LLM-backed USD 3D asset generator',         host: 'sparky'   },
   { id: 'milvus',           name: 'Milvus',             url: 'http://100.89.199.14:19121',           desc: 'Vector database (do-host1)',                host: 'do-host1' },
-  { id: 'ollama',           name: 'Ollama',             url: 'http://sparky.local:11434',            desc: 'Local LLM inference',                      host: 'sparky'   },
+  { id: 'ollama',           name: 'Ollama',             url: 'http://100.87.229.125:11434',           desc: 'Local LLM inference',                      host: 'sparky'   },
 ];
 const SERVICES_CACHE = { data: null, ts: 0 };
 const SERVICES_CACHE_TTL = 30_000; // 30 seconds
