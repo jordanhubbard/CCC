@@ -1500,9 +1500,6 @@ curl -sf -X POST "\${RCC_URL}/api/agents/register" \\
 # Usage: curl "${RCC_PUBLIC_URL}/api/onboard?token=<token>" | bash
 set -euo pipefail
 
-# Ensure user-local bin is in PATH (needed for openclaw after user-prefix npm install)
-export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
-
 AGENT_NAME="${entry.agent}"
 AGENT_ROLE="${agentRole}"
 RCC_URL="${RCC_PUBLIC_URL}"
@@ -1561,17 +1558,12 @@ if command -v openclaw &>/dev/null; then
   openclaw gateway restart 2>/dev/null || openclaw gateway start
 else
   echo "→ Installing openclaw..."
-  # Ensure npm is available (may be missing even when node is present)
-  if ! command -v npm &>/dev/null; then
-    echo "  npm not found — installing..."
-    sudo apt-get install -y -q npm 2>/dev/null || \
-      (curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs)
-  fi
-  # Install to user-local prefix to avoid needing sudo
-  export NPM_CONFIG_PREFIX="$HOME/.local"
-  mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/node_modules"
-  npm install -g openclaw --prefix "$HOME/.local" || { echo "ERROR: npm install failed"; exit 1; }
-  export PATH="$HOME/.local/bin:$PATH"
+  # Install Node.js 22 LTS via NodeSource (provides both node + npm, replaces any old distro version)
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+  # Verify npm is present
+  npm --version || { echo "ERROR: npm still missing after NodeSource install"; exit 1; }
+  sudo npm install -g openclaw || { echo "ERROR: npm install -g openclaw failed"; exit 1; }
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw gateway start
 fi
