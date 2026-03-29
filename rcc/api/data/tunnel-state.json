@@ -1,0 +1,11 @@
+{
+  "nextPort": 18083,
+  "tunnels": {
+    "Peabody": {
+      "agent": "Peabody",
+      "port": 18082,
+      "pubkey": null,
+      "preallocatedAt": "2026-03-29T07:24:10.976Z"
+    }
+  }
+}

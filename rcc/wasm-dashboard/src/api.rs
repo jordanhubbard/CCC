@@ -1,5 +1,5 @@
 use gloo_net::http::Request;
-use crate::types::{QueueItem, HeartbeatMap, BusMessage, Project, CalEvent};
+use crate::types::{QueueItem, HeartbeatMap, BusMessage, Project, CalEvent, Provider};
 
 pub const AUTH_TOKEN: &str = "wq-5dcad756f6d3e345c00b5cb3dfcbdedb";
 
@@ -146,6 +146,24 @@ pub async fn fetch_projects() -> Result<Vec<Project>, String> {
     }
 
     resp.json::<Vec<Project>>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ── Providers ─────────────────────────────────────────────────────────────────
+
+pub async fn fetch_providers() -> Result<Vec<Provider>, String> {
+    let resp = Request::get("/api/providers")
+        .header("Authorization", &auth_header())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    resp.json::<Vec<Provider>>()
         .await
         .map_err(|e| e.to_string())
 }

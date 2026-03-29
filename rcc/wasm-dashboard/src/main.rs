@@ -14,6 +14,7 @@ use crate::components::{
     bus::BusTab,
     geek_view::GeekView,
     metrics::MetricsPanel,
+    providers::ProvidersPanel,
 };
 
 // ── Root App ──────────────────────────────────────────────────────────────────
@@ -96,6 +97,9 @@ fn App() -> impl IntoView {
                     }.into_any(),
                     Tab::Bus => view! {
                         <BusTab />
+                    }.into_any(),
+                    Tab::Providers => view! {
+                        <ProvidersPanel />
                     }.into_any(),
                     Tab::GeekView => view! {
                         <GeekView heartbeats=heartbeats />

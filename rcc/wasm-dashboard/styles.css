@@ -523,3 +523,76 @@ nav.topnav .live-dot.online { color: var(--green); }
 
 .machine-node:hover rect { stroke: var(--accent) !important; }
 .service-node:hover circle { stroke: var(--accent) !important; }
+
+/* ── Providers panel ─────────────────────────────────────────── */
+.providers-panel { padding: 8px 0; }
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.provider-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  transition: border-color 0.15s;
+}
+.provider-card:hover { border-color: var(--accent); }
+
+.provider-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.provider-id {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.provider-model {
+  font-size: 12px;
+  color: var(--accent);
+  font-family: monospace;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.provider-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.provider-status-badge.online  { background: rgba(63,185,80,0.15);  color: var(--green); }
+.provider-status-badge.offline { background: rgba(248,81,73,0.15);  color: var(--red); }
+.provider-status-badge.stale   { background: rgba(210,153,34,0.15); color: var(--yellow); }
+
+.provider-meta { display: flex; flex-direction: column; gap: 4px; }
+
+.meta-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+.meta-label {
+  color: var(--text-muted);
+  min-width: 56px;
+  flex-shrink: 0;
+}
+.meta-value { color: var(--text); word-break: break-all; }
+
+.provider-url  { color: var(--text-dim); font-family: monospace; font-size: 11px; }
+.provider-tags { color: var(--text-muted); }
+
+.loading-msg { color: var(--text-dim); font-size: 13px; padding: 20px; text-align: center; }
+.empty-state { color: var(--text-dim); font-size: 13px; padding: 20px; text-align: center; }

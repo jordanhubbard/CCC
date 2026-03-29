@@ -1,0 +1,65 @@
+{
+  "natasha": {
+    "agent": "natasha",
+    "host": "sparky",
+    "baseUrl": "http://sparky:11434/v1",
+    "models": [
+      {
+        "name": "nomic-embed-text",
+        "aliases": [],
+        "type": "embedding",
+        "contextLen": null,
+        "dims": 768,
+        "quantization": null,
+        "tags": [
+          "local",
+          "private",
+          "fast"
+        ],
+        "vram_gb": null
+      },
+      {
+        "name": "llama3.2",
+        "aliases": [],
+        "type": "chat",
+        "contextLen": 128000,
+        "dims": null,
+        "quantization": null,
+        "tags": [
+          "local",
+          "private",
+          "medium"
+        ],
+        "vram_gb": null
+      }
+    ],
+    "backend": "ollama",
+    "status": "online",
+    "updatedAt": "2026-03-28T11:32:56.924Z"
+  },
+  "boris": {
+    "agent": "boris",
+    "host": "135.225.53.8",
+    "baseUrl": "http://135.225.53.8:8080/v1",
+    "models": [
+      {
+        "name": "nemotron",
+        "aliases": [],
+        "type": "chat",
+        "contextLen": null,
+        "dims": null,
+        "quantization": null,
+        "tags": [
+          "large",
+          "local",
+          "reasoning",
+          "tool-use"
+        ],
+        "vram_gb": 192
+      }
+    ],
+    "backend": "vllm",
+    "status": "loading",
+    "updatedAt": "2026-03-28T18:00:52.938Z"
+  }
+}

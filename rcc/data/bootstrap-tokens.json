@@ -1,0 +1,182 @@
+{
+  "rcc-bootstrap-Sherman-1e0fa6db": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774769208388,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-517ba7f5": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774769208467,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-6f6c43ef": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774769208547,
+    "used": false
+  },
+  "rcc-bootstrap-Sherman-67646427": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774771099867,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-f532e096": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771099932,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-e37cba56": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771100008,
+    "used": false
+  },
+  "rcc-bootstrap-Sherman-1137a05f": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774771274629,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-f07400da": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771274698,
+    "used": false
+  },
+  "rcc-bootstrap-Sherman-6fb4c17a": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774771462134,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-976060c7": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771462190,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-047d896d": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771462240,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-efa319ae": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771584246,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-db97a518": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774771584337,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-4cbd77e8": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772132413,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-2ba8de56": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772132483,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-e14ab386": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772359534,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-80ccb77a": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772359613,
+    "used": false
+  },
+  "rcc-bootstrap-Sherman-436f3ddb": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774772471931,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-39994020": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772472004,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-688a3690": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772472068,
+    "used": false
+  },
+  "rcc-bootstrap-Sherman-88f3ba44": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774772540055,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-5883967b": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772540126,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-9f543fce": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772540197,
+    "used": false
+  },
+  "rcc-bootstrap-Sherman-5e45cfc4": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774772603118,
+    "used": false
+  },
+  "rcc-bootstrap-Dudley-76b01ae9": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772603185,
+    "used": false
+  },
+  "rcc-bootstrap-Snidley-7b8ede1f": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772603251,
+    "used": false
+  },
+  "rcc-bootstrap-Peabody-d818b7af": {
+    "agent": "Peabody",
+    "role": "vllm-worker",
+    "expiresAt": 1774772745109,
+    "used": true
+  },
+  "rcc-bootstrap-Sherman-4934cc7c": {
+    "agent": "Sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774772745171,
+    "used": true
+  },
+  "rcc-bootstrap-Dudley-9e6a7c19": {
+    "agent": "Dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772745248,
+    "used": true
+  },
+  "rcc-bootstrap-Snidley-9fc3610a": {
+    "agent": "Snidley",
+    "role": "vllm-worker",
+    "expiresAt": 1774772745322,
+    "used": true
+  }
+}

@@ -5,6 +5,7 @@ const TABS: &[Tab] = &[
     Tab::Overview,
     Tab::Kanban,
     Tab::Bus,
+    Tab::Providers,
     Tab::Projects,
     Tab::Calendar,
     Tab::GeekView,

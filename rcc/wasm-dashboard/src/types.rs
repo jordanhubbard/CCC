@@ -6,6 +6,7 @@ pub enum Tab {
     Overview,
     Kanban,
     Bus,
+    Providers,
     Projects,
     Calendar,
     GeekView,
@@ -15,13 +16,14 @@ pub enum Tab {
 impl Tab {
     pub fn label(&self) -> &'static str {
         match self {
-            Tab::Overview => "Overview",
-            Tab::Kanban   => "Kanban",
-            Tab::Bus      => "SquirrelBus",
-            Tab::Projects => "Projects",
-            Tab::Calendar => "Calendar",
-            Tab::GeekView => "🖥️ Geek View",
-            Tab::Settings => "⚙️ Settings",
+            Tab::Overview  => "Overview",
+            Tab::Kanban    => "Kanban",
+            Tab::Bus       => "SquirrelBus",
+            Tab::Providers => "⚡ Providers",
+            Tab::Projects  => "Projects",
+            Tab::Calendar  => "Calendar",
+            Tab::GeekView  => "🖥️ Geek View",
+            Tab::Settings  => "⚙️ Settings",
         }
     }
 }
@@ -190,6 +192,51 @@ pub struct CalEvent {
     pub owner: Option<String>,
     #[serde(rename = "type", default)]
     pub event_type: Option<String>,
+}
+
+// ── Token Provider ────────────────────────────────────────────────────────────
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Provider {
+    pub id: String,
+    pub model: String,
+    #[serde(rename = "baseUrl", default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub local_port: Option<u32>,
+    #[serde(default = "default_provider_status")]
+    pub status: String,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub context_len: Option<u64>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+fn default_provider_status() -> String {
+    "unknown".to_string()
+}
+
+impl Provider {
+    pub fn status_class(&self) -> &'static str {
+        match self.status.as_str() {
+            "online"  => "online",
+            "offline" => "offline",
+            _         => "stale",
+        }
+    }
+
+    pub fn context_label(&self) -> String {
+        match self.context_len {
+            None => "—".to_string(),
+            Some(n) if n >= 1_000_000 => format!("{}M ctx", n / 1_000_000),
+            Some(n) if n >= 1_000     => format!("{}K ctx", n / 1_000),
+            Some(n)                    => format!("{} ctx", n),
+        }
+    }
 }
 
 // ── Agent color/emoji helpers ─────────────────────────────────────────────────

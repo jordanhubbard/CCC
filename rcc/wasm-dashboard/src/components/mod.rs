@@ -5,3 +5,4 @@ pub mod kanban;
 pub mod bus;
 pub mod geek_view;
 pub mod metrics;
+pub mod providers;

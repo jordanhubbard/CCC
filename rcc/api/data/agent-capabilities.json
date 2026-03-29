@@ -1,0 +1,23 @@
+{
+  "boris": {
+    "gpu": true,
+    "gpu_model": "L40",
+    "gpu_count": 4,
+    "gpu_vram_gb": 190,
+    "vllm": true,
+    "vllm_port": 8080,
+    "vllm_model": "nemotron-3-super-120b"
+  },
+  "natasha": {
+    "0": "gpu",
+    "1": "claude",
+    "2": "milvus",
+    "3": "embeddings",
+    "gpu": true,
+    "gpu_model": "GB10 Blackwell",
+    "gpu_vram_gb": 192,
+    "claude_cli": true,
+    "inference_key": true,
+    "cuda": true
+  }
+}
