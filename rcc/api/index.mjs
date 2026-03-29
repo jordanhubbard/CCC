@@ -1636,13 +1636,25 @@ echo "   4. Check tunnel: systemctl --user status rcc-vllm-tunnel"` : ''}
         console.warn(`[rcc-api] ID collision on "${body.id}" — reassigned to "${itemId}"`);
       }
 
+      // Coerce numeric priority to string label; reject unknown strings
+      const VALID_PRIORITIES = new Set(['critical','high','medium','normal','low','idea']);
+      const NUMERIC_PRIORITY_MAP = (n) => n >= 80 ? 'critical' : n >= 60 ? 'high' : n >= 40 ? 'medium' : n >= 20 ? 'low' : 'idea';
+      let rawPriority = body.priority ?? 'normal';
+      if (typeof rawPriority === 'number') {
+        rawPriority = NUMERIC_PRIORITY_MAP(rawPriority);
+        console.warn(`[rcc-api] Numeric priority ${body.priority} coerced to "${rawPriority}" for item "${body.title?.slice(0,40)}"`);
+      } else if (!VALID_PRIORITIES.has(rawPriority)) {
+        console.warn(`[rcc-api] Unknown priority "${rawPriority}" for item "${body.title?.slice(0,40)}" — defaulting to "normal"`);
+        rawPriority = 'normal';
+      }
+
       const item = {
         id: itemId,
         itemVersion: 1,
         created: new Date().toISOString(),
         source: body.source || 'api',
         assignee: body.assignee || 'all',
-        priority: body.priority || 'normal',
+        priority: rawPriority,
         status: 'pending',
         title: body.title,
         description: body.description || '',
