@@ -12,6 +12,59 @@ import { once } from 'events';
 // ── Minimal WASM module (magic + version + empty module) ──────────────────────
 // \0asm version=1, no sections
 const VALID_WASM = Buffer.from([0x00,0x61,0x73,0x6d,0x01,0x00,0x00,0x00]);
+
+// ── Inline copies of pure capability functions (avoid importing the server) ───
+function _readULEB128(buf, offset) {
+  let result = 0, shift = 0;
+  while (offset < buf.length) {
+    const byte = buf[offset++];
+    result |= (byte & 0x7f) << shift;
+    shift += 7;
+    if (!(byte & 0x80)) break;
+  }
+  return [result >>> 0, offset];
+}
+function _parseWasmCapabilities(wasmBuf) {
+  if (wasmBuf.length < 8) return null;
+  let pos = 8;
+  while (pos < wasmBuf.length) {
+    const sectionId = wasmBuf[pos++];
+    if (pos >= wasmBuf.length) break;
+    const [sectionSize, afterSize] = _readULEB128(wasmBuf, pos);
+    pos = afterSize;
+    const sectionEnd = pos + sectionSize;
+    if (sectionId === 0) {
+      const [nameLen, afterNameLen] = _readULEB128(wasmBuf, pos);
+      const nameEnd = afterNameLen + nameLen;
+      if (nameEnd > sectionEnd) { pos = sectionEnd; continue; }
+      const sectionName = wasmBuf.slice(afterNameLen, nameEnd).toString('utf8');
+      if (sectionName === 'agentfs.capabilities') {
+        try { const caps = JSON.parse(wasmBuf.slice(nameEnd, sectionEnd).toString('utf8'));
+          return { requires: Array.isArray(caps.requires) ? caps.requires.map(String) : [],
+                   provides: Array.isArray(caps.provides) ? caps.provides.map(String) : [] }; }
+        catch { return null; }
+      }
+    }
+    pos = sectionEnd;
+  }
+  return null;
+}
+function _checkCapabilities(caps, required = []) {
+  if (!required.length) return { ok: true, missing: [] };
+  if (!caps) return { ok: false, missing: required, reason: 'no capability section' };
+  const declared = new Set([...caps.requires, ...caps.provides]);
+  const missing = required.filter(r => !declared.has(r));
+  return { ok: missing.length === 0, missing };
+}
+/** Build a minimal WASM binary with an agentfs.capabilities custom section. */
+function _buildWasmWithCaps(caps) {
+  const name = Buffer.from('agentfs.capabilities');
+  const json = Buffer.from(JSON.stringify(caps));
+  const nameLen = Buffer.alloc(1); nameLen[0] = name.length;
+  const sectionContent = Buffer.concat([nameLen, name, json]);
+  const sectionSize = Buffer.alloc(1); sectionSize[0] = sectionContent.length;
+  return Buffer.concat([VALID_WASM, Buffer.from([0x00]), sectionSize, sectionContent]);
+}
 const INVALID_WASM = Buffer.from([0xde,0xad,0xbe,0xef]);
 const WASM_HASH = createHash('sha256').update(VALID_WASM).digest('hex');
 
@@ -74,16 +127,28 @@ function makeTestServer(port, token) {
     }
     if (!checkAuth(req)) return jres(res, 401, { error: 'unauthorized' });
 
-    // POST /agentfs/modules
+    // POST /agentfs/modules[?require=...]
     if (p === '/agentfs/modules' && req.method === 'POST') {
       const buf = await readBody(req);
       const v = validateMagic(buf);
       if (!v.ok) return jres(res, 400, { error: `invalid WASM: ${v.reason}` });
+
+      // Mock capability gate: ?require= param → reject if module doesn't declare them
+      const requireParam = url.searchParams.get('require') || '';
+      const requiredCaps = requireParam ? requireParam.split(',').map(s=>s.trim()).filter(Boolean) : [];
+      if (requiredCaps.length) {
+        // Minimal mock: no module has caps unless buf > 8 bytes (custom section present in real test)
+        // For test purposes: always reject if require is set and buf === VALID_WASM (no section)
+        if (buf.length <= 8) {
+          return jres(res, 422, { error: 'capability gate rejected module', missing: requiredCaps, declared: null });
+        }
+      }
+
       const hash = sha(buf);
       const already = store.has(hash);
-      const meta = { hash, size: buf.length, uploaded_at: new Date().toISOString(), aot: false, aot_size: null, aot_ms: null };
+      const meta = { hash, size: buf.length, uploaded_at: new Date().toISOString(), aot: false, aot_size: null, aot_ms: null, capabilities: null };
       if (!already) store.set(hash, { buf, meta });
-      return jres(res, already ? 200 : 201, { hash, size: buf.length, already_exists: already, aot: false });
+      return jres(res, already ? 200 : 201, { hash, size: buf.length, already_exists: already, aot: false, capabilities: null });
     }
 
     // GET /agentfs/modules (list)
@@ -230,6 +295,45 @@ describe('AgentFS', () => {
     assert.equal(r.body.size, buf.length);
     // clean up
     await req('DELETE', `/agentfs/modules/${r.body.hash}`);
+  });
+
+  // ── Capability gate (unit tests — pure functions, no server import) ─────────
+  test('parseWasmCapabilities returns null for minimal WASM (no custom section)', () => {
+    const result = _parseWasmCapabilities(VALID_WASM);
+    assert.equal(result, null, 'minimal WASM has no capability section');
+  });
+
+  test('parseWasmCapabilities parses custom section', () => {
+    const wasmWithCaps = _buildWasmWithCaps({ requires: ['net'], provides: ['inference'] });
+    const caps = _parseWasmCapabilities(wasmWithCaps);
+    assert.ok(caps !== null, 'should find capability section');
+    assert.deepEqual(caps.requires, ['net']);
+    assert.deepEqual(caps.provides, ['inference']);
+  });
+
+  test('checkCapabilities: ok when no requirements', () => {
+    const result = _checkCapabilities(null, []);
+    assert.ok(result.ok);
+    assert.deepEqual(result.missing, []);
+  });
+
+  test('checkCapabilities: rejects when caps absent and requirements present', () => {
+    const result = _checkCapabilities(null, ['net']);
+    assert.ok(!result.ok);
+    assert.ok(result.missing.includes('net'));
+  });
+
+  test('checkCapabilities: ok when declared caps satisfy requirements', () => {
+    const result = _checkCapabilities({ requires: ['net'], provides: ['inference'] }, ['net', 'inference']);
+    assert.ok(result.ok);
+    assert.deepEqual(result.missing, []);
+  });
+
+  test('POST with ?require= rejects module missing caps', async () => {
+    // Upload a module that has no capability section, but require gpu
+    const r = await req('POST', '/agentfs/modules?require=gpu', VALID_WASM, { 'Content-Type': 'application/wasm' });
+    assert.equal(r.status, 422, `expected 422 cap gate rejection, got ${r.status}`);
+    assert.ok(r.body.missing?.includes('gpu'));
   });
 
   test('content-addressing: same bytes = same hash always', async () => {

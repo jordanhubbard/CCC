@@ -16,6 +16,10 @@
  * Modules are immutable once stored (hash collision = same content).
  *
  * WASM validation: checks magic bytes + version before accepting.
+ * Capability gate: parses WASM custom section "agentfs.capabilities" (JSON).
+ *   Modules may declare: { requires: ["net","fs","gpu"], provides: ["inference"] }
+ *   Upload can enforce required caps via ?require=net,gpu query param.
+ *   Modules missing declared caps are rejected with 422.
  * Wasmtime AOT pre-compilation: on upload, compiles to .cwasm native artifact
  * and stores it alongside the .wasm in MinIO. GET ?aot=1 returns the .cwasm.
  * Eliminates JIT latency from vibe-swap hot-load cycles (<100ms swap target).
@@ -54,6 +58,87 @@ const AOT_ENABLED   = process.env.AGENTFS_AOT !== '0';   // default on; set AGEN
 
 // WASM magic bytes: \0asm + version 1
 const WASM_MAGIC = Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+
+// ── WASM capability gate ───────────────────────────────────────────────────────
+// Reads the custom section named "agentfs.capabilities" from a WASM binary.
+// Custom section format: id=0, payload = <name_len:u32le><name><json_bytes>
+// Returns { requires: string[], provides: string[] } or null if section absent.
+
+const CAPS_SECTION_NAME = 'agentfs.capabilities';
+
+/**
+ * Parse a WASM LEB128 unsigned integer. Returns [value, bytesConsumed].
+ */
+function readULEB128(buf, offset) {
+  let result = 0, shift = 0;
+  while (offset < buf.length) {
+    const byte = buf[offset++];
+    result |= (byte & 0x7f) << shift;
+    shift += 7;
+    if (!(byte & 0x80)) break;
+  }
+  return [result >>> 0, offset];
+}
+
+/**
+ * Extract capability declarations from WASM custom section "agentfs.capabilities".
+ * Returns { requires: string[], provides: string[] } or null if not found.
+ */
+export function parseWasmCapabilities(wasmBuf) {
+  if (wasmBuf.length < 8) return null;
+  let pos = 8; // skip magic + version
+
+  while (pos < wasmBuf.length) {
+    if (pos >= wasmBuf.length) break;
+    const sectionId = wasmBuf[pos++];
+    if (pos >= wasmBuf.length) break;
+
+    // Read section size (LEB128)
+    const [sectionSize, afterSize] = readULEB128(wasmBuf, pos);
+    pos = afterSize;
+    const sectionEnd = pos + sectionSize;
+
+    if (sectionId === 0) {
+      // Custom section: read name length (LEB128), then name bytes
+      const [nameLen, afterNameLen] = readULEB128(wasmBuf, pos);
+      const nameStart = afterNameLen;
+      const nameEnd = nameStart + nameLen;
+      if (nameEnd > sectionEnd) { pos = sectionEnd; continue; }
+
+      const sectionName = wasmBuf.slice(nameStart, nameEnd).toString('utf8');
+      if (sectionName === CAPS_SECTION_NAME) {
+        const jsonBytes = wasmBuf.slice(nameEnd, sectionEnd);
+        try {
+          const caps = JSON.parse(jsonBytes.toString('utf8'));
+          return {
+            requires: Array.isArray(caps.requires) ? caps.requires.map(String) : [],
+            provides: Array.isArray(caps.provides) ? caps.provides.map(String) : [],
+          };
+        } catch {
+          return null; // malformed JSON — treat as absent
+        }
+      }
+    }
+    pos = sectionEnd;
+  }
+  return null; // section not found
+}
+
+/**
+ * Check that a module's declared capabilities satisfy caller requirements.
+ * @param {object|null} caps   - parsed caps (or null = no section)
+ * @param {string[]} required  - caps caller requires the module to declare
+ * @returns {{ ok: boolean, missing: string[] }}
+ */
+export function checkCapabilities(caps, required = []) {
+  if (!required.length) return { ok: true, missing: [] };
+  if (!caps) {
+    return { ok: false, missing: required, reason: 'module has no agentfs.capabilities section' };
+  }
+  const declared = new Set([...caps.requires, ...caps.provides]);
+  const missing = required.filter(r => !declared.has(r));
+  return { ok: missing.length === 0, missing };
+}
 
 // ── S3 client (MinIO) ─────────────────────────────────────────────────────────
 const s3 = new S3Client({
@@ -171,6 +256,25 @@ async function handleUpload(req, res) {
   const magic = validateWasmMagic(buf);
   if (!magic.ok) return json(res, 400, { error: `invalid WASM: ${magic.reason}` });
 
+  // Parse capability section (optional — absent = no declared caps)
+  const caps = parseWasmCapabilities(buf);
+
+  // Capability gate: ?require=net,gpu enforces that module declares those caps
+  const url2 = new URL(req.url, 'http://localhost');
+  const requireParam = url2.searchParams.get('require') || '';
+  const requiredCaps = requireParam ? requireParam.split(',').map(s => s.trim()).filter(Boolean) : [];
+  if (requiredCaps.length) {
+    const capCheck = checkCapabilities(caps, requiredCaps);
+    if (!capCheck.ok) {
+      return json(res, 422, {
+        error: 'capability gate rejected module',
+        missing: capCheck.missing,
+        declared: caps ? { requires: caps.requires, provides: caps.provides } : null,
+        reason: capCheck.reason || `module does not declare required capabilities: ${capCheck.missing.join(', ')}`,
+      });
+    }
+  }
+
   // AOT compile (also validates structurally via wasmtime)
   const compiled = await aotCompile(buf);
   if (!compiled.ok) return json(res, 400, { error: `WASM validation failed: ${compiled.reason}` });
@@ -183,7 +287,7 @@ async function handleUpload(req, res) {
   // Check if already stored (idempotent)
   try {
     await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
-    return json(res, 200, { hash, size: buf.length, already_exists: true, aot: compiled.aot });
+    return json(res, 200, { hash, size: buf.length, already_exists: true, aot: compiled.aot, capabilities: caps });
   } catch { /* not found, proceed */ }
 
   // Store WASM + AOT artifact (in parallel)
@@ -215,6 +319,7 @@ async function handleUpload(req, res) {
     aot: compiled.aot,
     aot_size: compiled.cwasm?.length ?? null,
     aot_ms: compiled.aot_ms ?? null,
+    capabilities: caps ?? null,
   };
   await s3.send(new PutObjectCommand({
     Bucket: BUCKET, Key: meta,
