@@ -18,7 +18,7 @@
 
 import { readFile } from 'fs/promises';
 import { createHash } from 'crypto';
-import { vectorUpsert, ensureCollections } from './index.mjs';
+import { vectorUpsert, vectorUpsertBatch, ensureCollections } from './index.mjs';
 
 // When EMBED_BACKEND=local, route memory ingest to the sparky-local collection
 const EMBED_BACKEND = process.env.EMBED_BACKEND || 'remote';
@@ -129,6 +129,41 @@ export async function ingestMessage(msg) {
     });
   } catch (err) {
     console.warn(`[ingest] Failed to ingest message ${msg.id}:`, err.message);
+  }
+}
+
+/**
+ * Batch ingest multiple SquirrelChat messages in a single embedding call.
+ * Uses vectorUpsertBatch → embedBatchLocal (adaptive batching on GB10 GPU).
+ * ~100x faster than calling ingestMessage in a loop for large backlogs.
+ *
+ * @param {object[]} msgs - Array of message objects (same shape as ingestMessage)
+ */
+export async function ingestMessages(msgs) {
+  if (!msgs || !msgs.length) return;
+  try {
+    await ensureReady();
+    const items = msgs
+      .filter(msg => msg.text && msg.text.length >= 5)
+      .map(msg => ({
+        id:   createHash('md5').update(`squirrelchat:${msg.id}:${msg.ts}`).digest('hex'),
+        text: (msg.text || '').slice(0, 1000),
+        meta: {
+          agent:   (msg.from_agent || 'unknown').slice(0, 32),
+          content: (msg.text || '').slice(0, 4096),
+          source:  `squirrelchat:${msg.id || 'unknown'}`,
+          ts:      new Date(msg.ts || Date.now()).toISOString().slice(0, 32),
+        },
+      }));
+    if (!items.length) return;
+    await vectorUpsertBatch(MEMORY_COLLECTION, items);
+    console.log(`[ingest] batch ingested ${items.length}/${msgs.length} messages (${MEMORY_COLLECTION})`);
+  } catch (err) {
+    console.warn(`[ingest] ingestMessages batch failed, falling back to serial:`, err.message);
+    // Graceful fallback to one-at-a-time
+    for (const msg of msgs) {
+      await ingestMessage(msg).catch(() => {});
+    }
   }
 }
 

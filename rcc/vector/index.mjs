@@ -136,13 +136,55 @@ async function embedLocal(text) {
 }
 
 /**
- * Batch embed via ollama. ollama /api/embed accepts a single input string or array.
+ * Batch embed via ollama. ollama /api/embed accepts arrays natively — use real batching.
+ * Adaptive batch size: starts at OLLAMA_BATCH_SIZE (default 64), backs off on error.
  */
+
+// Adaptive batch state (module-level, survives across calls in a single process)
+let _batchSize = parseInt(process.env.OLLAMA_BATCH_SIZE || '64', 10);
+let _lastBatchMs = null;  // latency of last successful batch (ms)
+
 async function embedBatchLocal(texts) {
-  // ollama processes one at a time (no true batch API), but calls are fast on GPU
+  if (!texts.length) return [];
   const results = [];
-  for (const text of texts) {
-    results.push(await embedLocal(text));
+  let i = 0;
+  while (i < texts.length) {
+    const chunk = texts.slice(i, i + _batchSize);
+    const t0 = Date.now();
+    try {
+      const resp = await fetch(`${OLLAMA_BASE_URL}/api/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, input: chunk }),
+      });
+      if (!resp.ok) throw new Error(`ollama batch embed ${resp.status}`);
+      const data = await resp.json();
+      const embeddings = data.embeddings;
+      if (!Array.isArray(embeddings) || embeddings.length !== chunk.length) {
+        throw new Error(`ollama returned ${embeddings?.length} embeddings for ${chunk.length} inputs`);
+      }
+      _lastBatchMs = Date.now() - t0;
+      // Adaptive scale-up: if latency < 500ms, try a larger batch next time (cap at 512)
+      if (_lastBatchMs < 500 && _batchSize < 512) {
+        _batchSize = Math.min(512, Math.round(_batchSize * 1.5));
+      }
+      results.push(...embeddings);
+      i += chunk.length;
+    } catch (err) {
+      // Back off batch size on error, retry with smaller chunks
+      if (_batchSize > 8) {
+        _batchSize = Math.max(8, Math.round(_batchSize / 2));
+        console.warn(`[vector] ollama batch error — backing off to batch_size=${_batchSize}: ${err.message}`);
+        // Don't advance i — retry same chunk with smaller batch
+      } else {
+        // At minimum batch size — fall back to single embeds for this chunk
+        console.warn(`[vector] ollama single-embed fallback for chunk at i=${i}: ${err.message}`);
+        for (const text of chunk) {
+          results.push(await embedLocal(text));
+        }
+        i += chunk.length;
+      }
+    }
   }
   return results;
 }
