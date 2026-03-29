@@ -1,0 +1,19 @@
+[Unit]
+Description=Crush Server — HTTP/SSE bridge for charmbracelet/crush
+After=network.target
+
+[Service]
+Type=simple
+User=jkh
+WorkingDirectory=/home/jkh/Src/rockyandfriends/rcc/crush-server
+ExecStart=/usr/bin/env node /home/jkh/Src/rockyandfriends/rcc/crush-server/index.mjs
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=CRUSH_SERVER_PORT=8793
+Environment=CRUSH_BIN=/home/jkh/.npm-global/bin/crush
+# Pass through any API keys from environment if needed
+# EnvironmentFile=/home/jkh/.config/crush/env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+{
+  "name": "crush-server",
+  "version": "1.0.0",
+  "description": "HTTP/SSE bridge for charmbracelet/crush coding sessions",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "dev": "node --watch index.mjs"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}

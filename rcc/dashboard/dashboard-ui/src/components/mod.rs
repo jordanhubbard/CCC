@@ -1,6 +1,7 @@
 pub mod activity_feed;
 pub mod health_banner;
 pub mod agent_cards;
+pub mod coding_agent;
 pub mod issues;
 pub mod agent_detail;
 pub mod bus_send;

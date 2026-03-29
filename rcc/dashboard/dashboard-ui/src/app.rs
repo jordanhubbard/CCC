@@ -7,6 +7,7 @@ use crate::components::{
     agent_detail::AgentDetail,
     bus_send::BusSend,
     changelog::Changelog,
+    coding_agent::CodingAgent,
     geek_view::GeekView,
     health_banner::HealthBanner,
     idea_incubator::IdeaIncubator,
@@ -71,6 +72,11 @@ pub fn App() -> impl IntoView {
                         class:tab-active=move || tab.get() == 6
                         on:click=move |_| set_tab.set(6)
                     >"🔌 Providers"</button>
+                    <button
+                        class="tab-btn"
+                        class:tab-active=move || tab.get() == 7
+                        on:click=move |_| set_tab.set(7)
+                    >"⚡ Coding"</button>
                 </div>
             </header>
             <main class="dash-main">
@@ -82,6 +88,7 @@ pub fn App() -> impl IntoView {
                     4 => view! { <AgentDetail /> }.into_view(),
                     5 => view! { <Issues /> }.into_view(),
                     6 => view! { <Providers /> }.into_view(),
+                    7 => view! { <CodingAgent /> }.into_view(),
                     _ => view! {
                         <div class="dash-main-content">
                             <div class="dash-row dash-row-top">
