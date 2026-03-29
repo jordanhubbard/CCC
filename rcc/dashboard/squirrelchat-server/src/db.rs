@@ -129,7 +129,7 @@ impl Db {
         let reactions = self.load_reactions(conn, id);
         let reply_count = self.load_reply_count(conn, id);
 
-        Ok(Message { id, ts, from_agent, text, channel, mentions, thread_id, reply_count, reactions, slash_result })
+        Ok(Message { id, ts, from_agent, text, channel, mentions, thread_id, reply_count, reactions_map: reactions, slash_result })
     }
 
     // ── Messages ──────────────────────────────────────────────────────────────

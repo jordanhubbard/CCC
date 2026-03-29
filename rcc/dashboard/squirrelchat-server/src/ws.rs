@@ -100,8 +100,8 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
                             if let Err(e) = state.db.upsert_heartbeat(&agent, &status) {
                                 warn!("heartbeat upsert error: {}", e);
                             }
-                            use crate::models::PresenceData;
-                            state.hub.broadcast(&SF::Presence { data: PresenceData { user: agent, status } });
+                            let online = status != "offline";
+                            state.hub.broadcast(&SF::Presence { agent, online });
                         }
                         Err(e) => {
                             warn!("unknown client frame: {} — {:?}", text, e);
