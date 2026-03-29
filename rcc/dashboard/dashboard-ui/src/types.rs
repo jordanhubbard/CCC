@@ -1,5 +1,21 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+
+/// Deserialize priority as either a string ("high", "idea") or a number (85, 90).
+/// Numbers are converted to their string representation.
+fn deserialize_priority_flexible<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde_json::Value;
+    let v: Option<Value> = Option::deserialize(deserializer)?;
+    Ok(match v {
+        None => None,
+        Some(Value::String(s)) => Some(s),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        Some(other) => Some(other.to_string()),
+    })
+}
 
 // ── Heartbeat / Agent ────────────────────────────────────────────────────────
 
@@ -16,18 +32,68 @@ pub struct HeartbeatData {
 
 pub type HeartbeatMap = HashMap<String, HeartbeatData>;
 
+// ── Agent Registry (from /api/agents) ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCapabilities {
+    pub claude_cli: Option<bool>,
+    pub claude_cli_model: Option<String>,
+    pub inference_key: Option<bool>,
+    pub inference_provider: Option<String>,
+    pub gpu: Option<bool>,
+    pub gpu_model: Option<String>,
+    pub gpu_count: Option<u32>,
+    pub gpu_vram_gb: Option<u32>,
+    pub vllm: Option<bool>,
+    pub vllm_port: Option<u32>,
+    pub vllm_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLlm {
+    pub base_url: Option<String>,
+    pub backend: Option<String>,
+    pub models: Option<Vec<String>>,
+    pub model_count: Option<u32>,
+    pub fresh: Option<bool>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInfo {
+    pub name: Option<String>,
+    pub host: Option<String>,
+    #[serde(rename = "type")]
+    pub agent_type: Option<String>,
+    pub registered_at: Option<String>,
+    pub last_seen: Option<String>,
+    pub online_status: Option<String>,
+    pub capabilities: Option<AgentCapabilities>,
+    pub llm: Option<AgentLlm>,
+}
+
+pub type AgentList = Vec<AgentInfo>;
+
 // ── Work Queue ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueItem {
     pub id: String,
+    #[serde(default)]
     pub title: String,
+    #[serde(default, deserialize_with = "deserialize_priority_flexible")]
     pub priority: Option<String>,
     pub assignee: Option<String>,
     pub status: Option<String>,
     pub created_at: Option<String>,
+    /// Also accept "description" or "notes" as body fallback
+    #[serde(alias = "description", alias = "notes")]
     pub body: Option<String>,
+    #[serde(default)]
     pub tags: Option<Vec<String>>,
     pub claimed_by: Option<String>,
     pub resolution: Option<String>,
