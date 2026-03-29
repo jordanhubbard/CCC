@@ -69,14 +69,28 @@ if [ "$HTTP_CODE" = "200" ]; then
 else
     echo "[crash-hook] Dashboard API unavailable (HTTP ${HTTP_CODE}), writing directly to queue.json"
     
-    # Direct write to queue.json as fallback
-    # Use a simple node script for safe JSON manipulation
+    # Direct write to queue.json as fallback, with burst dedup
     node -e "
 const fs = require('fs');
 const qPath = '${QUEUE_PATH}';
+const svc = '${SERVICE}';
+const BURST_WINDOW_MS = 60_000;
+const BURST_MAX = 3;
 try {
   const data = JSON.parse(fs.readFileSync(qPath, 'utf8'));
   data.items = data.items || [];
+  const now = Date.now();
+  // Dedup: count recent crash items for this service still pending
+  const recentCrashes = data.items.filter(i =>
+    i.id && i.id.startsWith('wq-crash-') &&
+    Array.isArray(i.tags) && i.tags.includes(svc) &&
+    i.status === 'pending' &&
+    (now - new Date(i.created || 0).getTime()) < BURST_WINDOW_MS
+  );
+  if (recentCrashes.length >= BURST_MAX) {
+    console.log('[crash-hook] Burst suppressed — ' + recentCrashes.length + ' recent crash items for ' + svc + ' already pending');
+    process.exit(0);
+  }
   data.items.push({
     id: 'wq-crash-${TS}',
     itemVersion: 1,
