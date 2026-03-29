@@ -2059,6 +2059,36 @@ echo "   4. Check tunnel: systemctl --user status rcc-vllm-tunnel"` : ''}
       };
       await writeAgents(agents);
       AUTH_TOKENS.add(token);
+
+      // ── Auto-register vLLM workers with TokenHub ─────────────────────────
+      if (body.capabilities?.vllm && body.capabilities?.vllm_port && process.env.TOKENHUB_URL && process.env.TOKENHUB_ADMIN_TOKEN) {
+        const tunnelState = await readJsonFile(TUNNEL_STATE_PATH, { tunnels: {} });
+        const tunnel = Object.values(tunnelState.tunnels).find(t => t.agent === body.name || t.agent?.toLowerCase() === body.name?.toLowerCase());
+        if (tunnel?.port) {
+          const providerId = `${body.name.toLowerCase()}-vllm`;
+          const providerUrl = `http://127.0.0.1:${tunnel.port}`;
+          try {
+            // Register provider
+            await fetch(`${process.env.TOKENHUB_URL}/admin/v1/providers`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.TOKENHUB_ADMIN_TOKEN}` },
+              body: JSON.stringify({ id: providerId, type: 'vllm', base_url: providerUrl, api_key: 'none', enabled: true }),
+            });
+            // Register model
+            await fetch(`${process.env.TOKENHUB_URL}/admin/v1/models`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.TOKENHUB_ADMIN_TOKEN}` },
+              body: JSON.stringify({ id: `nemotron-${body.name.toLowerCase()}`, provider_id: providerId, weight: 8, max_context_tokens: 262144, enabled: true }),
+            });
+            console.log(\`[rcc-api] Registered \${body.name} as TokenHub provider \${providerId} on port \${tunnel.port}\`);
+          } catch (thErr) {
+            console.warn(\`[rcc-api] TokenHub registration failed for \${body.name}: \${thErr.message}\`);
+          }
+        } else {
+          console.log(\`[rcc-api] \${body.name} has vLLM but no tunnel assigned yet — skipping TokenHub registration\`);
+        }
+      }
+
       return json(res, 201, { ok: true, token, agent: { ...agents[body.name], token } });
     }
 
