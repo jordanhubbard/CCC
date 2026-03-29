@@ -1,0 +1,27 @@
+[Unit]
+Description=Whisper.cpp inference server — large-v3 CUDA on sparky GB10
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jkh
+WorkingDirectory=/home/jkh/Src/whisper.cpp
+ExecStart=/home/jkh/Src/whisper.cpp/build/bin/whisper-server \
+  -m /home/jkh/Src/whisper.cpp/models/ggml-large-v3.bin \
+  --host 0.0.0.0 \
+  --port 8792 \
+  --threads 4
+ExecStartPost=/bin/bash -c 'for i in 1 2 3 4 5; do sleep 2 && curl -fs http://localhost:8792/ -o /dev/null && exit 0; done; exit 1'
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=60
+
+Environment=CUDA_VISIBLE_DEVICES=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=whisper-natasha
+
+[Install]
+WantedBy=multi-user.target
