@@ -10,7 +10,7 @@
 
 import { createServer } from 'http';
 import { readFile, writeFile, mkdir, chmod, appendFile } from 'fs/promises';
-import { existsSync, createReadStream as createRS } from 'fs';
+import { existsSync, createReadStream as createRS, readFileSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { createInterface } from 'readline';
 import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
