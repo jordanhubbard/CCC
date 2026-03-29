@@ -29,6 +29,7 @@ jobs:
         uses: tailscale/github-action@v3
         with:
           authkey: ${{ secrets.TS_AUTHKEY }}
+          tags: tag:ci
           args: "--ephemeral --accept-routes"
 
       - name: Run build on sparky via SSH
