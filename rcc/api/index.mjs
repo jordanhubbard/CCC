@@ -1530,7 +1530,8 @@ echo "│  Phase 5: OpenClaw Install                              │"
 echo "└─────────────────────────────────────────────────────────┘"
 
 if command -v openclaw &>/dev/null; then
-  echo "→ openclaw found — configuring and restarting gateway..."
+  echo "→ openclaw found — repairing config and restarting gateway..."
+  openclaw doctor --fix 2>/dev/null || true
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw gateway restart 2>/dev/null || openclaw gateway start
 else
@@ -1539,6 +1540,7 @@ else
   sudo apt-get install -y nodejs
   npm --version || { echo "ERROR: npm missing"; exit 1; }
   sudo npm install -g openclaw || { echo "ERROR: npm install -g openclaw failed"; exit 1; }
+  openclaw doctor --fix 2>/dev/null || true
   openclaw config set gateway.mode local 2>/dev/null || true
   openclaw gateway start
 fi
