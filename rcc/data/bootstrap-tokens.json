@@ -4,27 +4,32 @@
     "role": "vllm-worker",
     "expiresAt": 1774936214318,
     "used": false,
-    "useCount": 0
+    "useCount": 0,
+    "maxUses": 3
   },
   "rcc-bootstrap-peabody-712d0a98": {
     "agent": "peabody",
     "role": "vllm-worker",
     "expiresAt": 1774936254803,
     "used": false,
-    "useCount": 0
+    "useCount": 0,
+    "maxUses": 3
   },
   "rcc-bootstrap-sherman-165beb3c": {
     "agent": "sherman",
     "role": "vllm-worker",
     "expiresAt": 1774936427926,
     "used": false,
-    "useCount": 0
+    "useCount": 0,
+    "maxUses": 3
   },
   "rcc-bootstrap-peabody-8a245849": {
     "agent": "peabody",
     "role": "vllm-worker",
     "expiresAt": 1774936454453,
-    "used": true,
-    "useCount": 0
+    "used": false,
+    "useCount": 0,
+    "maxUses": 3,
+    "lastUsedAt": "2026-03-30T05:58:12.032Z"
   }
 }

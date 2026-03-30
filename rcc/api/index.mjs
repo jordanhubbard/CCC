@@ -1769,8 +1769,13 @@ async function handleRequest(req, res) {
       const entry = bootstrapTokens.get(token);
       if (!entry) return json(res, 401, { error: 'Invalid bootstrap token' });
       if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
-      if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
-      entry.used = true;
+      const maxUses = entry.maxUses || 3;
+      const useCount = entry.useCount || 0;
+      if (useCount >= maxUses) return json(res, 401, { error: 'Bootstrap token exhausted' });
+      // Increment use count; mark used only when fully exhausted
+      entry.useCount = useCount + 1;
+      entry.used = entry.useCount >= maxUses;
+      entry.lastUsedAt = new Date().toISOString();
       saveBootstrapTokens();
 
       const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
@@ -4761,8 +4766,12 @@ loadPackages();
       const entry = bootstrapTokens.get(token);
       if (!entry) return json(res, 401, { error: 'Invalid bootstrap token' });
       if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
-      if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
-      entry.used = true;
+      const maxUses2 = entry.maxUses || 3;
+      const useCount2 = entry.useCount || 0;
+      if (useCount2 >= maxUses2) return json(res, 401, { error: 'Bootstrap token exhausted' });
+      entry.useCount = useCount2 + 1;
+      entry.used = entry.useCount >= maxUses2;
+      entry.lastUsedAt = new Date().toISOString();
       saveBootstrapTokens();
 
       const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
