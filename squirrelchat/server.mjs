@@ -2,6 +2,7 @@ import express from 'express';
 import { ingestMessage } from '../../../.openclaw/workspace/rcc/vector/ingest.mjs';
 import { DatabaseSync as Database } from 'node:sqlite';
 import archiver from 'archiver';
+import multer from 'multer';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -152,6 +153,17 @@ for (const a of agentSeeds) insertUser.run(a, a.charAt(0).toUpperCase() + a.slic
 
 // SSE clients
 const sseClients = new Set();
+
+// Multer for multipart/form-data (voice uploads)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+// ElevenLabs voice IDs
+const EL_VOICES = {
+  Rachel: '21m00Tcm4TlvDq8ikWAM',
+  Domi: 'AZnzlk1XvdvUeBnXmlld',
+  Bella: 'EXAVITQu4vr4xnSDxMaL',
+  Josh: 'TxGEqnHWrfWFTfGW9XjX',
+};
 
 // Middleware
 app.use(express.json({ limit: '10mb' }));
@@ -667,6 +679,93 @@ app.post('/api/channels/:id/pins/:msgId', auth, (req, res) => {
 app.delete('/api/channels/:id/pins/:msgId', auth, (req, res) => {
   db.prepare('DELETE FROM pins WHERE channel_id = ? AND message_id = ?').run(req.params.id, req.params.msgId);
   res.json({ ok: true });
+});
+
+// ── Voice: STT transcription proxy ────────────────────────────────────────────
+
+app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'audio file required (field: audio)' });
+
+  try {
+    const formData = new FormData();
+    const mimeType = req.file.mimetype || 'audio/webm';
+    formData.append('file', new Blob([req.file.buffer], { type: mimeType }), req.file.originalname || 'audio.webm');
+
+    const whisperRes = await fetch('http://sparky.tail407856.ts.net:8792/inference', {
+      method: 'POST',
+      body: formData,
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!whisperRes.ok) {
+      return res.status(503).json({ error: 'STT unavailable', reason: `Whisper returned ${whisperRes.status}` });
+    }
+
+    const data = await whisperRes.json();
+    return res.json({ text: data.text || '' });
+  } catch (err) {
+    console.warn('[voice/transcribe] error:', err.message);
+    return res.status(503).json({ error: 'STT unavailable', reason: err.message });
+  }
+});
+
+// ── Voice: TTS synthesis ───────────────────────────────────────────────────────
+
+app.post('/api/voice/synthesize', async (req, res) => {
+  const { text, voice = 'Rachel' } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+
+  // Try ElevenLabs first
+  if (apiKey) {
+    try {
+      const voiceId = EL_VOICES[voice] || EL_VOICES.Rachel;
+      const elRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg',
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_monolingual_v1',
+          voice_settings: { stability: 0.5, similarity_boost: 0.5 },
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (elRes.ok) {
+        res.set('Content-Type', 'audio/mpeg');
+        return res.send(Buffer.from(await elRes.arrayBuffer()));
+      }
+      console.warn('[voice/synthesize] ElevenLabs returned', elRes.status);
+    } catch (err) {
+      console.warn('[voice/synthesize] ElevenLabs error:', err.message);
+    }
+  }
+
+  // Fallback: sparky piper TTS
+  try {
+    const piperRes = await fetch('http://sparky.tail407856.ts.net:8792/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (piperRes.ok) {
+      const contentType = piperRes.headers.get('content-type') || 'audio/wav';
+      res.set('Content-Type', contentType);
+      return res.send(Buffer.from(await piperRes.arrayBuffer()));
+    }
+    console.warn('[voice/synthesize] piper returned', piperRes.status);
+  } catch (err) {
+    console.warn('[voice/synthesize] piper error:', err.message);
+  }
+
+  return res.status(404).json({ error: 'TTS unavailable', reason: 'No TTS backend reachable' });
 });
 
 // SSE stream

@@ -103,6 +103,14 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
   #app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
 }
+.mic-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px; color: var(--muted); line-height: 1; }
+.mic-btn:hover { background: var(--input); }
+.mic-btn.recording { color: #e74c3c; animation: sc-pulse 1s ease-in-out infinite; }
+@keyframes sc-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.tts-btn { background: none; border: none; cursor: pointer; font-size: 13px; color: var(--muted); padding: 0 2px; }
+.tts-btn:hover { color: var(--text); }
+.tts-btn.tts-loading { opacity: 0.45; cursor: wait; }
+.tts-btn.tts-playing { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -127,7 +135,10 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
     <div class="composer">
       <textarea id="composer" placeholder="Message #general"></textarea>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-        <small style="color:var(--muted);">Enter to send • Shift+Enter for newline • Arrow ↑ to edit last</small>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <small style="color:var(--muted);">Enter to send • Shift+Enter for newline • Arrow ↑ to edit last</small>
+          <button class="mic-btn" id="mic-btn" title="Voice input (click to record)">🎤</button>
+        </div>
         <button class="primary" id="send">Send</button>
       </div>
     </div>
@@ -246,6 +257,14 @@ function renderMessages(container = document.getElementById('messages'), message
       actions.append(edit, del);
     }
     const pin = document.createElement('span'); pin.textContent = '📌'; pin.onclick = () => pinMessage(msg); actions.append(pin);
+    if (msg.from_agent !== state.user?.name) {
+      const ttsBtn = document.createElement('button');
+      ttsBtn.className = 'tts-btn';
+      ttsBtn.textContent = '🔊';
+      ttsBtn.title = 'Read aloud';
+      ttsBtn.onclick = () => playTTS(msg.text || '', ttsBtn);
+      actions.appendChild(ttsBtn);
+    }
     content.append(header, body, actions);
     if (msg.thread_count && msg.thread_count > 0) {
       const threadLink = document.createElement('div');
@@ -499,8 +518,133 @@ async function init() {
     console.error(err);
   }
 }
+// ── Voice: STT mic recording ──────────────────────────────────────────────────
+let _mediaRecorder = null;
+let _audioChunks = [];
+let _isRecording = false;
+
+function setupMicButton() {
+  const micBtn = document.getElementById('mic-btn');
+  const composer = document.getElementById('composer');
+
+  micBtn.onclick = async () => {
+    if (_isRecording) {
+      _mediaRecorder && _mediaRecorder.stop();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      _mediaRecorder = new MediaRecorder(stream, { mimeType });
+      _audioChunks = [];
+
+      _mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) _audioChunks.push(e.data); };
+
+      _mediaRecorder.onstop = async () => {
+        _isRecording = false;
+        micBtn.classList.remove('recording');
+        micBtn.title = 'Voice input (click to record)';
+        stream.getTracks().forEach(t => t.stop());
+
+        const blob = new Blob(_audioChunks, { type: mimeType });
+        micBtn.textContent = '⏳';
+        micBtn.disabled = true;
+
+        try {
+          const fd = new FormData();
+          fd.append('audio', blob, 'recording.webm');
+          const authHdr = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+          const res = await fetch('/api/voice/transcribe', { method: 'POST', headers: authHdr, body: fd });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.reason || d.error || 'transcription failed'); }
+          const { text } = await res.json();
+          if (text) {
+            composer.value += (composer.value ? ' ' : '') + text;
+            composer.focus();
+          }
+        } catch (err) {
+          console.warn('[voice/stt]', err);
+          alert('Voice transcription unavailable: ' + err.message);
+        } finally {
+          micBtn.textContent = '🎤';
+          micBtn.disabled = false;
+        }
+      };
+
+      _mediaRecorder.start();
+      _isRecording = true;
+      micBtn.classList.add('recording');
+      micBtn.title = 'Recording… click to stop';
+    } catch (err) {
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        alert('Microphone access denied. Allow mic permission in your browser settings.');
+      } else {
+        console.error('[voice/mic]', err);
+        alert('Could not access microphone: ' + err.message);
+      }
+    }
+  };
+}
+
+// ── Voice: TTS playback ───────────────────────────────────────────────────────
+let _currentAudio = null;
+let _currentTtsBtn = null;
+
+async function playTTS(text, btn) {
+  // Toggle off if same button
+  if (_currentTtsBtn === btn && _currentAudio && !_currentAudio.ended) {
+    _currentAudio.pause();
+    _currentAudio = null;
+    btn.classList.remove('tts-playing', 'tts-loading');
+    _currentTtsBtn = null;
+    return;
+  }
+  // Stop any other playing audio
+  if (_currentAudio) {
+    _currentAudio.pause();
+    _currentTtsBtn && _currentTtsBtn.classList.remove('tts-playing', 'tts-loading');
+    _currentAudio = null;
+  }
+  _currentTtsBtn = btn;
+  btn.classList.add('tts-loading');
+
+  try {
+    const authHdr = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+    const res = await fetch('/api/voice/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHdr },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      alert('TTS unavailable: ' + (d.reason || d.error || res.status));
+      btn.classList.remove('tts-loading');
+      _currentTtsBtn = null;
+      return;
+    }
+    const audioBlob = await res.blob();
+    const url = URL.createObjectURL(audioBlob);
+    _currentAudio = new Audio(url);
+    btn.classList.remove('tts-loading');
+    btn.classList.add('tts-playing');
+    _currentAudio.onended = () => {
+      btn.classList.remove('tts-playing');
+      URL.revokeObjectURL(url);
+      _currentAudio = null;
+      _currentTtsBtn = null;
+    };
+    _currentAudio.play();
+  } catch (err) {
+    console.warn('[voice/tts]', err);
+    btn.classList.remove('tts-loading', 'tts-playing');
+    alert('TTS error: ' + err.message);
+    _currentTtsBtn = null;
+  }
+}
+
 setupLogin();
 setupEvents();
+setupMicButton();
 if (state.user && state.token) init();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
