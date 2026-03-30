@@ -19,5 +19,17 @@
     "claude_cli": true,
     "inference_key": true,
     "cuda": true
+  },
+  "rocky": {
+    "claude_cli": true,
+    "inference_key": true,
+    "inference_provider": "nvidia",
+    "gpu": false,
+    "gpu_count": 0,
+    "milvus": true,
+    "squirrelbus": true,
+    "slack": true,
+    "mattermost": true,
+    "rcc_host": true
   }
 }

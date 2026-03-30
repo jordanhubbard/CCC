@@ -16,8 +16,12 @@ import { EventEmitter } from 'events';
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const NVIDIA_API_BASE = process.env.NVIDIA_API_BASE || 'https://inference-api.nvidia.com/v1';
-const NVIDIA_API_KEY  = process.env.NVIDIA_API_KEY  || '';
+// Prefer tokenhub for all LLM calls — routes to local vLLM (Boris/Sweden nodes) or NVIDIA NIM.
+// Falls back to direct NVIDIA inference-api if tokenhub is not configured.
+const TOKENHUB_URL    = process.env.TOKENHUB_URL   || '';
+const TOKENHUB_KEY    = process.env.TOKENHUB_AGENT_KEY || '';
+const NVIDIA_API_BASE = (TOKENHUB_URL ? `${TOKENHUB_URL}/v1` : null) || process.env.NVIDIA_API_BASE || 'https://inference-api.nvidia.com/v1';
+const NVIDIA_API_KEY  = (TOKENHUB_URL && TOKENHUB_KEY) ? TOKENHUB_KEY : (process.env.NVIDIA_API_KEY || '');
 const STATE_PATH      = process.env.BRAIN_STATE_PATH || './brain-state.json';
 const TICK_MS         = parseInt(process.env.BRAIN_TICK_MS || '30000', 10);
 
