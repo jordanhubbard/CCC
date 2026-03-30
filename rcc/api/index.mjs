@@ -2399,7 +2399,7 @@ else
   grep -q "rcc-vllm-tunnel autostart" "\$HOME/.bashrc" 2>/dev/null || cat >> "\$HOME/.bashrc" << 'RCEOF'
 # rcc-vllm-tunnel autostart (added by RCC onboard)
 if [ -z "$(pgrep -f 'rcc-tunnel-key')" ]; then
-  nohup bash -c "while true; do ${TUNNEL_CMD}; sleep 10; done" > $HOME/.rcc/logs/tunnel.log 2>&1 &
+  nohup bash -c "while true; do \${TUNNEL_CMD}; sleep 10; done" > \$HOME/.rcc/logs/tunnel.log 2>&1 &
 fi
 RCEOF
 fi
@@ -2490,7 +2490,7 @@ else
   grep -q "vllm-worker autostart" "\$HOME/.bashrc" 2>/dev/null || cat >> "\$HOME/.bashrc" << 'VLLMRCEOF'
 # vllm-worker autostart (added by RCC onboard)
 if [ -z "$(pgrep -f 'vllm.entrypoints')" ]; then
-  nohup bash -c "${VLLM_START_CMD}" > $HOME/.rcc/logs/vllm.log 2>&1 &
+  nohup bash -c "\${VLLM_START_CMD}" > \$HOME/.rcc/logs/vllm.log 2>&1 &
 fi
 VLLMRCEOF
 fi
