@@ -2436,8 +2436,18 @@ else
   # nohup restart-loop fallback (containers without supervisord)
   TUNNEL_PID="\$HOME/.rcc/tunnel.pid"
   mkdir -p "\$HOME/.rcc/logs"
-  nohup bash -c "while true; do \${TUNNEL_CMD}; echo 'tunnel exited, restarting in 10s'; sleep 10; done" \\
-    > "\$HOME/.rcc/logs/tunnel.log" 2>&1 &
+  # Write tunnel cmd to a small script so nohup doesn't choke on special chars
+  TUNNEL_SCRIPT="\$HOME/.rcc/start-tunnel.sh"
+  cat > "\$TUNNEL_SCRIPT" << TSCRIPTEOF
+#!/usr/bin/env bash
+while true; do
+  \${TUNNEL_CMD}
+  echo "tunnel exited, restarting in 10s"
+  sleep 10
+done
+TSCRIPTEOF
+  chmod +x "\$TUNNEL_SCRIPT"
+  nohup bash "\$TUNNEL_SCRIPT" > "\$HOME/.rcc/logs/tunnel.log" 2>&1 &
   echo \$! > "\$TUNNEL_PID"
   echo "  ✅ Tunnel started via nohup restart-loop (pid \$(cat \$TUNNEL_PID))"
   # Wire into .bashrc for container restarts
