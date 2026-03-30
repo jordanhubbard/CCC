@@ -2403,21 +2403,34 @@ TUNNELEOF
     echo "  ✅ Tunnel started (systemd user)" || echo "  ⚠️  systemd enable failed"
 
 elif [ "\$HAS_SUPERVISORD" = "true" ]; then
-  SUPCONF="\$HOME/.config/supervisord.d/rcc-vllm-tunnel.conf"
-  mkdir -p "\$(dirname \$SUPCONF)"
-  cat > "\$SUPCONF" << SUPEOF
-[program:rcc-vllm-tunnel]
+  # Try system supervisord conf dir first (Boris pattern), fall back to user dir
+  SYS_CONF_DIR="/etc/supervisor/conf.d"
+  USER_CONF_DIR="\$HOME/.config/supervisord.d"
+  mkdir -p "\$USER_CONF_DIR"
+  TUNNEL_CONF_CONTENT="[program:rcc-vllm-tunnel]
 command=\${TUNNEL_CMD}
 autostart=true
 autorestart=true
 startsecs=5
 startretries=999
 stdout_logfile=\$HOME/.rcc/logs/tunnel.log
-stderr_logfile=\$HOME/.rcc/logs/tunnel.log
-SUPEOF
-  supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
-    supervisorctl start rcc-vllm-tunnel && \\
-    echo "  ✅ Tunnel started (supervisord)" || echo "  ⚠️  supervisorctl failed — check conf"
+stderr_logfile=\$HOME/.rcc/logs/tunnel.log"
+  # Write to user dir always (for reference)
+  echo "\$TUNNEL_CONF_CONTENT" > "\$USER_CONF_DIR/rcc-vllm-tunnel.conf"
+  # Try system dir (requires root/sudo)
+  if sudo tee "\$SYS_CONF_DIR/rcc-vllm-tunnel.conf" > /dev/null 2>&1 <<< "\$TUNNEL_CONF_CONTENT"; then
+    echo "  ✅ Conf written to system supervisord dir"
+    supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
+      supervisorctl start rcc-vllm-tunnel && \\
+      echo "  ✅ Tunnel started (supervisord system)" || echo "  ⚠️  supervisorctl failed"
+  else
+    echo "  ⚠️  Cannot write to \$SYS_CONF_DIR (no sudo). Root must run:"
+    echo "     sudo tee \$SYS_CONF_DIR/rcc-vllm-tunnel.conf <<'EOF'"
+    echo "\$TUNNEL_CONF_CONTENT"
+    echo "EOF"
+    echo "     sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl start rcc-vllm-tunnel"
+    echo "  → Falling back to nohup restart-loop..."
+  fi"
 
 else
   # nohup restart-loop fallback (containers without supervisord)
@@ -2494,22 +2507,33 @@ VLLMEOF
     echo "  ✅ vLLM started (systemd user)" || echo "  ⚠️  systemd failed"
 
 elif [ "\$HAS_SUPERVISORD" = "true" ]; then
-  SUPCONF="\$HOME/.config/supervisord.d/vllm-worker.conf"
-  mkdir -p "\$(dirname \$SUPCONF)"
-  cat > "\$SUPCONF" << SUPEOF
-[program:vllm-worker]
+  # Try system supervisord conf dir (Boris pattern), fall back gracefully
+  SYS_CONF_DIR="/etc/supervisor/conf.d"
+  USER_CONF_DIR="\$HOME/.config/supervisord.d"
+  mkdir -p "\$USER_CONF_DIR"
+  VLLM_CONF_CONTENT="[program:vllm-worker]
 command=\${VLLM_START_CMD}
 autostart=true
 autorestart=true
 startsecs=10
 startretries=3
-environment=HOME="\$HOME",PATH="\$VLLM_VENV/bin:/usr/local/bin:/usr/bin:/bin"
+environment=HOME=\"\$HOME\",PATH=\"\$VLLM_VENV/bin:/usr/local/bin:/usr/bin:/bin\"
 stdout_logfile=\$HOME/.rcc/logs/vllm.log
-stderr_logfile=\$HOME/.rcc/logs/vllm.log
-SUPEOF
-  supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
-    supervisorctl start vllm-worker && \\
-    echo "  ✅ vLLM started (supervisord)" || echo "  ⚠️  supervisorctl failed"
+stderr_logfile=\$HOME/.rcc/logs/vllm.log"
+  echo "\$VLLM_CONF_CONTENT" > "\$USER_CONF_DIR/vllm-worker.conf"
+  if sudo tee "\$SYS_CONF_DIR/vllm-worker.conf" > /dev/null 2>&1 <<< "\$VLLM_CONF_CONTENT"; then
+    echo "  ✅ Conf written to system supervisord dir"
+    supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
+      supervisorctl start vllm-worker && \\
+      echo "  ✅ vLLM started (supervisord system)" || echo "  ⚠️  supervisorctl failed"
+  else
+    echo "  ⚠️  Cannot write to \$SYS_CONF_DIR (no sudo). Root must run:"
+    echo "     sudo tee \$SYS_CONF_DIR/vllm-worker.conf <<'EOF'"
+    echo "\$VLLM_CONF_CONTENT"
+    echo "EOF"
+    echo "     sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl start vllm-worker"
+    echo "  → Falling back to nohup..."
+  fi"
 
 else
   # nohup fallback — containers without supervisord
