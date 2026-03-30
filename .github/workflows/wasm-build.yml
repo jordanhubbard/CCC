@@ -22,22 +22,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Join the tailnet so we can reach sparky at its Tailscale IP (100.87.229.125).
-      # TS_AUTHKEY must be a pre-auth key from https://login.tailscale.com/admin/settings/keys
-      # (ephemeral, reusable, no tags required — just a plain auth key).
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v3
-        with:
-          authkey: ${{ secrets.TS_AUTHKEY }}
-          args: "--ephemeral --accept-routes"
-
-      - name: Run build on sparky via SSH
+      # Route: CI runner → do-host1 (Rocky, public IP) → sparky LAN (10.11.100.116)
+      # Reason: sparky has GlobalProtect VPN that conflicts with Tailscale kernel routing,
+      # making direct TS SSH impossible. do-host1 can reach sparky's LAN IP directly.
+      - name: Run build on sparky via SSH (ProxyJump through do-host1)
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SPARKY_HOST }}
+          host: 10.11.100.116
           username: jkh
           key: ${{ secrets.SPARKY_SSH_KEY }}
           timeout: 300s
+          proxy_host: ${{ secrets.ROCKY_HOST }}
+          proxy_username: jkh
+          proxy_key: ${{ secrets.ROCKY_SSH_KEY }}
+          proxy_timeout: 30s
           script: |
             set -euo pipefail
             export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
@@ -64,10 +62,14 @@ jobs:
       - name: Package and publish dist artifact to MinIO
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SPARKY_HOST }}
+          host: 10.11.100.116
           username: jkh
           key: ${{ secrets.SPARKY_SSH_KEY }}
           timeout: 60s
+          proxy_host: ${{ secrets.ROCKY_HOST }}
+          proxy_username: jkh
+          proxy_key: ${{ secrets.ROCKY_SSH_KEY }}
+          proxy_timeout: 30s
           script: |
             set -euo pipefail
             export PATH="$HOME/.local/bin:$PATH"
@@ -132,10 +134,14 @@ jobs:
       - name: Run dashboard-server unit tests on sparky
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SPARKY_HOST }}
+          host: 10.11.100.116
           username: jkh
           key: ${{ secrets.SPARKY_SSH_KEY }}
           timeout: 120s
+          proxy_host: ${{ secrets.ROCKY_HOST }}
+          proxy_username: jkh
+          proxy_key: ${{ secrets.ROCKY_SSH_KEY }}
+          proxy_timeout: 30s
           script: |
             set -euo pipefail
             export PATH="$HOME/.cargo/bin:$PATH"
