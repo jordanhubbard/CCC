@@ -78,25 +78,26 @@ jobs:
       - name: Package and publish dist artifact to MinIO
         env:
           GITHUB_SHA: ${{ github.sha }}
-          MINIO_HOST: ${{ secrets.MINIO_HOST }}
-          MINIO_CREDS: ${{ secrets.MINIO_CREDS }}
         run: |
-          ssh sparky-tunnel MINIO_HOST="$MINIO_HOST" MINIO_CREDS="$MINIO_CREDS" GITHUB_SHA="$GITHUB_SHA" "
+          # Build tarball on sparky, then SCP to Rocky, then mc push to MinIO
+          # (mc is on Rocky, MinIO needs SigV4 auth which curl basic-auth can't do)
+          ssh sparky-tunnel GITHUB_SHA="$GITHUB_SHA" "
             set -euo pipefail
             DIST=\"\$HOME/.openclaw/workspace/rcc/dashboard/dist\"
             TARBALL=\"/tmp/wasm-dist-\$GITHUB_SHA.tar.gz\"
             tar -czf \"\$TARBALL\" -C \"\$DIST\" .
             echo \"Artifact: \$(du -sh \$TARBALL)\"
-            curl -sf -X PUT \
-              -H 'Content-Type: application/octet-stream' \
-              --data-binary @\"\$TARBALL\" \
-              \"http://\$MINIO_HOST/agents/natasha/wasm-dist-latest.tar.gz\" \
-              -u \"\$MINIO_CREDS\"
-            curl -sf -X PUT \
-              -H 'Content-Type: application/octet-stream' \
-              --data-binary @\"\$TARBALL\" \
-              \"http://\$MINIO_HOST/agents/natasha/wasm-dist-\$GITHUB_SHA.tar.gz\" \
-              -u \"\$MINIO_CREDS\"
+          "
+          # SCP via the tunnel: sparky -> Runner -> Rocky doesn't work directly.
+          # Instead, SSH to Rocky and have Rocky scp from sparky tunnel port.
+          ssh do-host1 GITHUB_SHA="$GITHUB_SHA" "
+            set -euo pipefail
+            TARBALL=\"/tmp/wasm-dist-\$GITHUB_SHA.tar.gz\"
+            scp -i ~/.ssh/id_ed25519_sparky_ci -o StrictHostKeyChecking=no -P 2222 jkh@127.0.0.1:\$TARBALL \$TARBALL
+            echo \"Fetched: \$(du -sh \$TARBALL)\"
+            mc alias set minio http://localhost:9000 rocky2197fb96dde4618aa17f e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1 2>/dev/null || true
+            mc cp \$TARBALL minio/agents/natasha/wasm-dist-latest.tar.gz
+            mc cp \$TARBALL minio/agents/natasha/wasm-dist-\$GITHUB_SHA.tar.gz
             echo 'Published to MinIO'
           "
 
