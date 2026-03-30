@@ -39,6 +39,7 @@ fn maybe_notify(title: &str, body: &str) {
 use crate::components::sc_reactions::{EmojiPicker, ReactionsBar};
 use crate::components::sc_thread::ThreadPanel;
 use crate::components::sc_channel_modal::CreateChannelModal;
+use crate::components::sc_voice::{VoiceConfigPanel, default_voice_config, play_tts_with_label};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
