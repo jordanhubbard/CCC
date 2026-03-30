@@ -263,31 +263,14 @@ fn with_auth(req: gloo_net::http::RequestBuilder) -> gloo_net::http::RequestBuil
 // ─── Async fetchers ───────────────────────────────────────────────────────────
 
 async fn fetch_sc_messages(channel: String) -> Vec<ScMessage> {
-    // Primary: Axum squirrelchat-server on 8793
-    let url = format!("http://localhost:8793/api/messages?channel={}&limit=50", channel);
-    let Ok(req) = gloo_net::http::Request::get(&url).build() else { return vec![] };
+    let url = format!("/sc/api/messages?channel={}&limit=50", channel);
+    let Ok(req) = with_auth(gloo_net::http::Request::get(&url)).build() else { return vec![] };
     let Ok(resp) = req.send().await else { return vec![] };
-    if resp.ok() {
-        return resp.json::<Vec<ScMessage>>().await.unwrap_or_default();
-    }
-    // Fallback: Node.js server.mjs via dashboard proxy
-    let url2 = format!("/sc/api/messages?channel={}&limit=50", channel);
-    let Ok(req2) = with_auth(gloo_net::http::Request::get(&url2)).build() else { return vec![] };
-    let Ok(resp2) = req2.send().await else { return vec![] };
-    resp2.json::<Vec<ScMessage>>().await.unwrap_or_default()
+    resp.json::<Vec<ScMessage>>().await.unwrap_or_default()
 }
 
-/// Fetch channel list from Axum server; falls back to Node proxy, then hardcoded defaults.
+/// Fetch channel list from squirrelchat-server via /sc proxy.
 async fn fetch_sc_channels() -> Vec<ScChannel> {
-    // Primary: Axum squirrelchat-server on 8793
-    if let Ok(resp) = gloo_net::http::Request::get("http://localhost:8793/api/channels").send().await {
-        if resp.ok() {
-            if let Ok(chs) = resp.json::<Vec<ScChannel>>().await {
-                if !chs.is_empty() { return chs; }
-            }
-        }
-    }
-    // Fallback: Node proxy
     let Ok(req) = with_auth(gloo_net::http::Request::get("/sc/api/channels")).build() else {
         return default_channels();
     };
@@ -336,15 +319,6 @@ async fn fetch_sc_identity() -> ScIdentity {
 }
 
 async fn fetch_sc_agents() -> Vec<ScUser> {
-    // Primary: Axum squirrelchat-server on 8793
-    if let Ok(resp) = gloo_net::http::Request::get("http://localhost:8793/api/agents").send().await {
-        if resp.ok() {
-            if let Ok(users) = resp.json::<Vec<ScUser>>().await {
-                if !users.is_empty() { return users; }
-            }
-        }
-    }
-    // Fallback: Node proxy
     let Ok(req) = with_auth(gloo_net::http::Request::get("/sc/api/agents")).build() else {
         return vec![];
     };
@@ -409,14 +383,8 @@ fn trigger_send(
             "text": text_clone,
             "channel": channel_clone,
         });
-        // Post to Axum server; fallback to Node proxy
-        let posted = {
-            let req_builder = gloo_net::http::Request::post("http://localhost:8793/api/messages");
-            if let Ok(req) = req_builder.json(&payload) {
-                req.send().await.map(|r| r.ok()).unwrap_or(false)
-            } else { false }
-        };
-        if !posted {
+        // Post via /sc proxy
+        {
             let req_builder = gloo_net::http::Request::post("/sc/api/messages");
             let req_builder = if let Some(tok) = &token {
                 req_builder.header("Authorization", &format!("Bearer {}", tok))
@@ -572,12 +540,17 @@ pub fn SquirrelChat() -> impl IntoView {
     });
 
     // ── WebSocket connection to squirrelchat-server ───────────────────────────
-    // Constructs ws://<host>:8793/api/ws from window.location.
-    // TODO: when dashboard-server proxies /sc/ws → 8793, switch to relative path.
+    // WebSocket connects directly to squirrelchat-server (8793); dashboard-server
+    // does not proxy WS upgrades. Uses wss:// when page is served over HTTPS.
     {
         let ws_url = web_sys::window()
-            .and_then(|w| w.location().hostname().ok())
-            .map(|host| format!("ws://{}:8793/api/ws", host))
+            .and_then(|w| {
+                let loc = w.location();
+                let proto = loc.protocol().ok()?;
+                let host = loc.hostname().ok()?;
+                let ws_proto = if proto == "https:" { "wss" } else { "ws" };
+                Some(format!("{}://{}:8793/api/ws", ws_proto, host))
+            })
             .unwrap_or_else(|| "ws://localhost:8793/api/ws".to_string());
 
         if let Ok(ws) = web_sys::WebSocket::new(&ws_url) {

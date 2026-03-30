@@ -8,4 +8,4 @@ ignore = ["../dist", "target"]
 
 [[proxy]]
 rewrite = "/sc"
-backend = "http://localhost:8790"
+backend = "http://localhost:8793"
