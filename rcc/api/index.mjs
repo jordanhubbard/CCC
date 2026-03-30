@@ -1833,12 +1833,13 @@ async function handleRequest(req, res) {
         res.writeHead(401, { 'Content-Type': 'text/plain' });
         return res.end('# Error: Bootstrap token expired\n# Generate a new one: POST /api/bootstrap/token {"agent":"<name>","role":"vllm-worker"}\n');
       }
-      if (entry.used) {
+      const maxUses = entry.maxUses || 3;  // allow retries — containers often fail on first attempt
+      const useCount = entry.useCount || 0;
+      if (useCount >= maxUses) {
         res.writeHead(401, { 'Content-Type': 'text/plain' });
-        return res.end('# Error: Bootstrap token already used\n');
+        return res.end('# Error: Bootstrap token exhausted (max uses reached)\n');
       }
-      entry.used = true;
-      saveBootstrapTokens();
+      // Mark used AFTER generating the script (not before) so failures don't burn the token
       const roleHint = entry.role || 'auto';
 
       // Load agent token (reuse existing if resurrection)
@@ -2589,7 +2590,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
       // Assemble the full script
       const fullScript = script + vllmPhases + verifyAndSummary;
 
-      console.log(`[rcc-api] Onboard script generated for ${entry.agent} (role hint: ${roleHint}) from ${req.socket?.remoteAddress}`);
+      // Mark use ONLY when we successfully deliver the script
+      entry.useCount = (entry.useCount || 0) + 1;
+      entry.used = entry.useCount >= (entry.maxUses || 3);
+      entry.lastUsedAt = new Date().toISOString();
+      saveBootstrapTokens();
+      console.log(`[rcc-api] Onboard script generated for ${entry.agent} (role hint: ${roleHint}) use ${entry.useCount}/${entry.maxUses||3} from ${req.socket?.remoteAddress}`);
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end(fullScript);
     }

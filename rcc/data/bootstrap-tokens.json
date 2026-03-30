@@ -1,68 +1,30 @@
 {
-  "rcc-bootstrap-boris-2c219258": {
-    "agent": "boris",
-    "role": "vllm-worker",
-    "expiresAt": 1774827023535,
-    "used": false
-  },
-  "rcc-bootstrap-peabody-b089f84b": {
+  "rcc-bootstrap-peabody-3b1b83f0": {
     "agent": "peabody",
     "role": "vllm-worker",
-    "expiresAt": 1774827023553,
-    "used": false
+    "expiresAt": 1774936214318,
+    "used": false,
+    "useCount": 0
   },
-  "rcc-bootstrap-snidely-d03e74b2": {
-    "agent": "snidely",
-    "role": "vllm-worker",
-    "expiresAt": 1774827023568,
-    "used": false
-  },
-  "rcc-bootstrap-sherman-3bee5a17": {
-    "agent": "sherman",
-    "role": "vllm-worker",
-    "expiresAt": 1774827023585,
-    "used": false
-  },
-  "rcc-bootstrap-dudley-d2384622": {
-    "agent": "dudley",
-    "role": "vllm-worker",
-    "expiresAt": 1774827023604,
-    "used": false
-  },
-  "rcc-bootstrap-boris-7327f12e": {
-    "agent": "boris",
-    "role": "vllm-worker",
-    "expiresAt": 1774827027191,
-    "used": false
-  },
-  "rcc-bootstrap-peabody-2f43fb4b": {
+  "rcc-bootstrap-peabody-712d0a98": {
     "agent": "peabody",
     "role": "vllm-worker",
-    "expiresAt": 1774827031992,
-    "used": true
+    "expiresAt": 1774936254803,
+    "used": false,
+    "useCount": 0
   },
-  "rcc-bootstrap-snidely-8abf1f34": {
-    "agent": "snidely",
-    "role": "vllm-worker",
-    "expiresAt": 1774827032018,
-    "used": true
-  },
-  "rcc-bootstrap-sherman-28bbd09c": {
+  "rcc-bootstrap-sherman-165beb3c": {
     "agent": "sherman",
     "role": "vllm-worker",
-    "expiresAt": 1774827032041,
-    "used": true
+    "expiresAt": 1774936427926,
+    "used": false,
+    "useCount": 0
   },
-  "rcc-bootstrap-dudley-056cff69": {
-    "agent": "dudley",
+  "rcc-bootstrap-peabody-8a245849": {
+    "agent": "peabody",
     "role": "vllm-worker",
-    "expiresAt": 1774827032063,
-    "used": true
-  },
-  "rcc-bootstrap-boris-ef89e29e": {
-    "agent": "boris",
-    "role": "vllm-worker",
-    "expiresAt": 1774828570123,
-    "used": true
+    "expiresAt": 1774936454453,
+    "used": true,
+    "useCount": 0
   }
 }
