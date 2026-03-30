@@ -98,6 +98,9 @@ pub struct User {
     pub online: bool,
     pub status: String,
     pub last_seen: Option<i64>,
+    /// Auth token (not serialized to clients in list views; only returned on login/me)
+    #[serde(skip_serializing)]
+    pub token: Option<String>,
 }
 
 // ── Project ───────────────────────────────────────────────────────────────────

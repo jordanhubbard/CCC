@@ -296,27 +296,70 @@ fn default_channels() -> Vec<ScChannel> {
 /// Fetch current user identity from /sc/api/me; falls back to localStorage,
 /// then to a generic "anonymous" identity.
 async fn fetch_sc_identity() -> ScIdentity {
-    // Try server first
+    // Try server first (if we have a stored token)
     if let Ok(req) = with_auth(gloo_net::http::Request::get("/sc/api/me")).build() {
         if let Ok(resp) = req.send().await {
             if resp.ok() {
                 if let Ok(id) = resp.json::<ScIdentity>().await {
-                    return id;
+                    if !id.needs_name {
+                        // Merge token from localStorage
+                        let mut id = id;
+                        id.token = sc_token();
+                        return id;
+                    }
                 }
             }
         }
     }
     // Fall back to localStorage
     if let Some(id) = sc_stored_identity() {
-        return id;
+        if !id.name.is_empty() && id.name != "anonymous" {
+            return id;
+        }
     }
-    // Final fallback
+    // Final fallback — needs to set a name
     ScIdentity {
         id: "anonymous".to_string(),
         name: "anonymous".to_string(),
         needs_name: true,
         ..Default::default()
     }
+}
+
+/// POST /sc/api/login to claim a name and get a token back.
+async fn sc_login(name: &str) -> Option<ScIdentity> {
+    let payload = serde_json::json!({ "name": name, "type": "human" });
+    let req_builder = gloo_net::http::Request::post("/sc/api/login");
+    // Attach existing token if re-authing
+    let req_builder = if let Some(tok) = sc_token() {
+        req_builder.header("Authorization", &format!("Bearer {}", tok))
+    } else {
+        req_builder
+    };
+    let req = req_builder.json(&payload).ok()?;
+    let resp = req.send().await.ok()?;
+    let data: serde_json::Value = resp.json().await.ok()?;
+    if data["ok"].as_bool() != Some(true) {
+        return None;
+    }
+    let token = data["token"].as_str()?.to_string();
+    let id_val = &data["identity"];
+    let identity = ScIdentity {
+        id: id_val["id"].as_str().unwrap_or("anonymous").to_string(),
+        name: id_val["name"].as_str().unwrap_or("anonymous").to_string(),
+        role: id_val["role"].as_str().map(|s| s.to_string()),
+        needs_name: false,
+        token: Some(token.clone()),
+        ..Default::default()
+    };
+    // Persist to localStorage
+    if let Some(storage) = local_storage() {
+        let _ = storage.set_item("sc_token", &token);
+        if let Ok(json) = serde_json::to_string(&identity) {
+            let _ = storage.set_item("sc_identity", &json);
+        }
+    }
+    Some(identity)
 }
 
 async fn fetch_sc_agents() -> Vec<ScUser> {
@@ -479,6 +522,10 @@ pub fn SquirrelChat() -> impl IntoView {
     let (show_pins_panel, set_show_pins_panel) = create_signal(false);
     // Mobile sidebar toggle
     let (sidebar_open, set_sidebar_open) = create_signal(false);
+    // Login modal
+    let (login_name, set_login_name) = create_signal(String::new());
+    let (login_error, set_login_error) = create_signal(Option::<String>::None);
+    let (login_submitting, set_login_submitting) = create_signal(false);
     // Presence map — polled every 30s
     let (presence, set_presence) = create_signal(ScPresenceMap::default());
     // Thread unread counts: parent_msg_id → new_reply_count since thread last opened
@@ -918,6 +965,23 @@ pub fn SquirrelChat() -> impl IntoView {
         <div class="sc-layout">
             // ── Sidebar ────────────────────────────────────────────────────────
             <aside class="sc-sidebar" class:sc-sidebar-open=move || sidebar_open.get()>
+                // Current user identity
+                {move || {
+                    let id = identity.get();
+                    if id.needs_name || id.name == "anonymous" {
+                        ().into_view()
+                    } else {
+                        let initial = id.name.chars().next().unwrap_or('?').to_uppercase().to_string();
+                        let role_label = id.role.as_deref().unwrap_or("user").to_string();
+                        view! {
+                            <div class="sc-user-identity">
+                                <span class="sc-user-avatar">{initial}</span>
+                                <span class="sc-user-name">{id.name.clone()}</span>
+                                <span class="sc-user-role">{role_label}</span>
+                            </div>
+                        }.into_view()
+                    }
+                }}
                 // Channels
                 <div class="sc-sidebar-section">
                     <div class="sc-section-header">
@@ -2616,6 +2680,87 @@ pub fn SquirrelChat() -> impl IntoView {
                     </div>
                 }.into_view()
             } else { ().into_view() }}
+
+            // ── Login / Identity modal ─────────────────────────────────────────
+            {move || {
+                let id = identity.get();
+                if !id.needs_name {
+                    return ().into_view();
+                }
+                view! {
+                    <div class="sc-modal-overlay sc-login-overlay">
+                        <div class="sc-modal sc-login-modal">
+                            <div class="sc-login-header">
+                                <h2>"🐿️ Welcome to SquirrelChat"</h2>
+                                <p class="sc-login-subtitle">"Pick a display name to get started"</p>
+                            </div>
+                            <input
+                                type="text"
+                                class="sc-modal-input sc-login-input"
+                                placeholder="Your name (e.g. jkh)"
+                                maxlength="32"
+                                autofocus=true
+                                prop:value=move || login_name.get()
+                                on:input=move |ev| {
+                                    set_login_name.set(event_target_value(&ev));
+                                    set_login_error.set(None);
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "Enter" {
+                                        ev.prevent_default();
+                                        let name = login_name.get_untracked().trim().to_string();
+                                        if name.is_empty() || login_submitting.get_untracked() {
+                                            return;
+                                        }
+                                        set_login_submitting.set(true);
+                                        spawn_local(async move {
+                                            match sc_login(&name).await {
+                                                Some(new_id) => {
+                                                    set_identity.set(new_id);
+                                                    set_login_error.set(None);
+                                                }
+                                                None => {
+                                                    set_login_error.set(Some("Name taken or invalid. Try another.".to_string()));
+                                                }
+                                            }
+                                            set_login_submitting.set(false);
+                                        });
+                                    }
+                                }
+                            />
+                            {move || login_error.get().map(|err| view! {
+                                <div class="sc-login-error">{err}</div>
+                            })}
+                            <button
+                                class="sc-btn-primary sc-login-btn"
+                                prop:disabled=move || login_name.get().trim().is_empty() || login_submitting.get()
+                                on:click=move |_| {
+                                    let name = login_name.get_untracked().trim().to_string();
+                                    if name.is_empty() || login_submitting.get_untracked() {
+                                        return;
+                                    }
+                                    set_login_submitting.set(true);
+                                    spawn_local(async move {
+                                        match sc_login(&name).await {
+                                            Some(new_id) => {
+                                                set_identity.set(new_id);
+                                                set_login_error.set(None);
+                                            }
+                                            None => {
+                                                set_login_error.set(Some("Name taken or invalid. Try another.".to_string()));
+                                            }
+                                        }
+                                        set_login_submitting.set(false);
+                                    });
+                                }
+                            >
+                                {move || if login_submitting.get() { "Joining..." } else { "Join SquirrelChat" }}
+                            </button>
+                            <p class="sc-login-hint">"Agent names (Rocky, Bullwinkle, etc.) are reserved."</p>
+                        </div>
+                    </div>
+                }.into_view()
+            }}
 
             // ── Cmd+/ Help modal ──────────────────────────────────────────────
             {move || if show_help.get() {

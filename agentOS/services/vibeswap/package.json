@@ -1,0 +1,14 @@
+{
+  "name": "@agentos/vibeswap",
+  "version": "0.1.0",
+  "description": "agentOS vibe-swap: WASM hot-load pipeline with capability-gated execution",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "test": "node --test vibeswap.test.mjs",
+    "demo": "node demo.mjs"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

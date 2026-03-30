@@ -1782,3 +1782,99 @@ button:focus-visible {
     align-items: center;
     gap: 8px;
 }
+
+/* ── Login / Identity Modal ─────────────────────────────────────────────── */
+
+.sc-login-overlay {
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.sc-login-modal {
+  max-width: 400px;
+  text-align: center;
+  padding: 32px 28px;
+}
+
+.sc-login-header h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  color: var(--text, #cdd6f4);
+}
+
+.sc-login-subtitle {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--subtext0, #a6adc8);
+}
+
+.sc-login-input {
+  width: 100%;
+  text-align: center;
+  font-size: 18px !important;
+  padding: 12px 16px !important;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.sc-login-error {
+  color: var(--red, #f38ba8);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.sc-login-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 16px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.sc-login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sc-login-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--subtext0, #a6adc8);
+  font-style: italic;
+}
+
+/* ── User identity display in sidebar ───────────────────────────────────── */
+
+.sc-user-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--surface1, #45475a);
+  font-size: 13px;
+  color: var(--text, #cdd6f4);
+}
+
+.sc-user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--mauve, #cba6f7);
+  color: var(--base, #1e1e2e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.sc-user-name {
+  font-weight: 600;
+}
+
+.sc-user-role {
+  font-size: 11px;
+  color: var(--subtext0, #a6adc8);
+  margin-left: auto;
+}

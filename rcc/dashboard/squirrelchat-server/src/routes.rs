@@ -35,6 +35,9 @@ pub fn build_router(state: SharedState) -> Router {
     Router::new()
         // Health
         .route("/health", get(health))
+        // Identity / Auth
+        .route("/api/me", get(get_me))
+        .route("/api/login", post(login))
         // WebSocket
         .route("/api/ws", get(ws::ws_handler))
         // Channels
@@ -81,7 +84,129 @@ pub fn build_router(state: SharedState) -> Router {
 // ── Health ───────────────────────────────────────────────────────────────────
 
 async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "ok": true, "version": "2.0.0" }))
+    Json(json!({ "ok": true, "version": "2.1.0" }))
+}
+
+// ── Identity / Auth ──────────────────────────────────────────────────────────
+
+/// Extract the current user from the Authorization: Bearer <token> header.
+fn extract_user_from_token(state: &SharedState, headers: &axum::http::HeaderMap) -> Option<crate::models::User> {
+    let auth = headers.get("authorization")?.to_str().ok()?;
+    let token = auth.strip_prefix("Bearer ")
+        .or_else(|| auth.strip_prefix("bearer "))?;
+    state.db.get_user_by_token(token).ok()?
+}
+
+#[derive(Deserialize)]
+struct LoginBody {
+    name: String,
+    /// Optional: "human" or "agent". Defaults to "human" for login.
+    #[serde(rename = "type")]
+    user_type: Option<String>,
+}
+
+/// POST /api/login — claim a display name and get back a session token.
+/// If the name already exists and has a token, the caller must provide the
+/// existing token to re-auth (prevents name hijacking). New names get created.
+async fn login(
+    Extension(state): Extension<SharedState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<LoginBody>,
+) -> R<Json<serde_json::Value>> {
+    let name = body.name.trim().to_lowercase();
+    if name.is_empty() || name.len() > 32 {
+        return Ok(Json(json!({ "ok": false, "error": "Name must be 1-32 characters" })));
+    }
+    // Disallow names that collide with known agent names
+    let reserved = ["rocky", "bullwinkle", "natasha", "boris", "peabody", "sherman", "dudley", "snidely"];
+    let user_type = body.user_type.as_deref().unwrap_or("human");
+    if user_type == "human" && reserved.contains(&name.as_str()) {
+        return Ok(Json(json!({ "ok": false, "error": "That name is reserved for an agent" })));
+    }
+
+    // Check if user already exists
+    if let Some(existing) = state.db.get_user_by_name(&name)? {
+        // If the existing user has a token, the caller must present it to re-login
+        if let Some(existing_token) = &existing.token {
+            let provided = headers.get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|a| a.strip_prefix("Bearer ").or_else(|| a.strip_prefix("bearer ")));
+            if provided == Some(existing_token.as_str()) {
+                // Re-auth: return the same token + identity
+                return Ok(Json(json!({
+                    "ok": true,
+                    "identity": {
+                        "id": existing.id,
+                        "name": existing.name,
+                        "role": existing.user_type,
+                        "needs_name": false,
+                    },
+                    "token": existing_token,
+                })));
+            } else {
+                return Ok(Json(json!({ "ok": false, "error": "Name already taken" })));
+            }
+        }
+        // No token yet — assign one (first login for this name)
+        let token = generate_token();
+        state.db.set_user_token(&name, &token)?;
+        state.db.upsert_heartbeat(&name, "online")?;
+        return Ok(Json(json!({
+            "ok": true,
+            "identity": {
+                "id": existing.id,
+                "name": existing.name,
+                "role": existing.user_type,
+                "needs_name": false,
+            },
+            "token": token,
+        })));
+    }
+
+    // New user — create with token
+    let token = generate_token();
+    state.db.create_user(&name, user_type, &token)?;
+    state.db.upsert_heartbeat(&name, "online")?;
+    Ok(Json(json!({
+        "ok": true,
+        "identity": {
+            "id": name,
+            "name": name,
+            "role": user_type,
+            "needs_name": false,
+        },
+        "token": token,
+    })))
+}
+
+/// GET /api/me — return the current user's identity based on their auth token.
+async fn get_me(
+    Extension(state): Extension<SharedState>,
+    headers: axum::http::HeaderMap,
+) -> R<Json<serde_json::Value>> {
+    if let Some(user) = extract_user_from_token(&state, &headers) {
+        Ok(Json(json!({
+            "id": user.id,
+            "name": user.name,
+            "role": user.user_type,
+            "needs_name": false,
+        })))
+    } else {
+        Ok(Json(json!({
+            "id": "anonymous",
+            "name": "anonymous",
+            "role": "guest",
+            "needs_name": true,
+        })))
+    }
+}
+
+/// Generate a random session token (hex string).
+fn generate_token() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let random_part: u64 = (ts as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    format!("sc-{:016x}{:016x}", ts as u64, random_part)
 }
 
 // ── Channels ─────────────────────────────────────────────────────────────────

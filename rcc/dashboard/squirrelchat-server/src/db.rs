@@ -355,7 +355,7 @@ impl Db {
     pub fn get_users(&self) -> Result<Vec<User>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, type, status, last_seen FROM users ORDER BY name ASC"
+            "SELECT id, name, type, status, last_seen, token FROM users ORDER BY name ASC"
         )?;
         let users: Vec<User> = stmt.query_map([], |row| {
             let status: String = row.get(3).unwrap_or_else(|_| "offline".into());
@@ -368,6 +368,7 @@ impl Db {
                 online,
                 status,
                 last_seen,
+                token: row.get(5).ok(),
             })
         })?.filter_map(|r| r.ok()).collect();
         Ok(users)
@@ -380,6 +381,75 @@ impl Db {
             "INSERT INTO users (id, name, status, last_seen) VALUES (?1, ?1, ?2, ?3)
              ON CONFLICT(id) DO UPDATE SET status = ?2, last_seen = ?3",
             params![agent_id, status, ts],
+        )?;
+        Ok(())
+    }
+
+    /// Look up a user by their auth token.
+    pub fn get_user_by_token(&self, token: &str) -> Result<Option<User>> {
+        let conn = self.0.lock().unwrap();
+        let user = conn.query_row(
+            "SELECT id, name, type, status, last_seen, token FROM users WHERE token = ?",
+            [token],
+            |row| {
+                let status: String = row.get(3).unwrap_or_else(|_| "offline".into());
+                let last_seen: Option<i64> = row.get(4)?;
+                let online = is_online(last_seen);
+                Ok(User {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    user_type: row.get(2).unwrap_or_else(|_| "agent".into()),
+                    online,
+                    status,
+                    last_seen,
+                    token: row.get(5).ok(),
+                })
+            },
+        ).ok();
+        Ok(user)
+    }
+
+    /// Look up a user by name (case-insensitive).
+    pub fn get_user_by_name(&self, name: &str) -> Result<Option<User>> {
+        let conn = self.0.lock().unwrap();
+        let user = conn.query_row(
+            "SELECT id, name, type, status, last_seen, token FROM users WHERE LOWER(id) = LOWER(?1) OR LOWER(name) = LOWER(?1)",
+            [name],
+            |row| {
+                let status: String = row.get(3).unwrap_or_else(|_| "offline".into());
+                let last_seen: Option<i64> = row.get(4)?;
+                let online = is_online(last_seen);
+                Ok(User {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    user_type: row.get(2).unwrap_or_else(|_| "agent".into()),
+                    online,
+                    status,
+                    last_seen,
+                    token: row.get(5).ok(),
+                })
+            },
+        ).ok();
+        Ok(user)
+    }
+
+    /// Set a user's auth token.
+    pub fn set_user_token(&self, name: &str, token: &str) -> Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE users SET token = ? WHERE LOWER(id) = LOWER(?)",
+            params![token, name],
+        )?;
+        Ok(())
+    }
+
+    /// Create a new user with a token.
+    pub fn create_user(&self, name: &str, user_type: &str, token: &str) -> Result<()> {
+        let conn = self.0.lock().unwrap();
+        let ts = now_ms();
+        conn.execute(
+            "INSERT INTO users (id, name, type, status, last_seen, token) VALUES (?1, ?1, ?2, 'online', ?3, ?4)",
+            params![name, user_type, ts, token],
         )?;
         Ok(())
     }
