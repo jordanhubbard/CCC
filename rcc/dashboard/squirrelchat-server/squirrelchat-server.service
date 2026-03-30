@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=jkh
 WorkingDirectory=/home/jkh/.openclaw/workspace/squirrelchat
-ExecStart=/home/jkh/.openclaw/workspace/rcc/dashboard/target/release/squirrelchat-server
+ExecStart=/home/jkh/rockyandfriends/rcc/dashboard/target/release/squirrelchat-server
 Environment=SQUIRRELCHAT_PORT=8793
 Environment=SQUIRRELCHAT_DB=/home/jkh/.openclaw/workspace/squirrelchat/squirrelchat.db
 Environment=RUST_LOG=info
