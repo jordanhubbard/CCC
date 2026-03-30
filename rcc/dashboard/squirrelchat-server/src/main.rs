@@ -27,6 +27,41 @@ async fn main() -> anyhow::Result<()> {
 
     let state: SharedState = Arc::new(AppState { db, hub });
 
+    // ── Scheduled message delivery worker ─────────────────────────────────────
+    {
+        let worker_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                let pending = match worker_state.db.get_pending_scheduled_messages(now) {
+                    Ok(rows) => rows,
+                    Err(e) => { tracing::warn!("scheduled_messages query failed: {}", e); continue; }
+                };
+                for (id, channel_id, sender, text, _deliver_at) in pending {
+                    match worker_state.db.insert_message(&sender, &text, &channel_id, &[], None) {
+                        Ok(msg_id) => {
+                            if let Ok(Some(msg)) = worker_state.db.get_message(msg_id) {
+                                worker_state.hub.broadcast(&crate::models::ServerFrame::Message {
+                                    message: crate::models::MessageWire::from(msg),
+                                });
+                                worker_state.hub.broadcast(&crate::models::ServerFrame::UnreadUpdate {
+                                    counts: std::collections::HashMap::new(),
+                                });
+                            }
+                            let _ = worker_state.db.mark_scheduled_delivered(&id);
+                            info!("Delivered scheduled message {} to #{}", id, channel_id);
+                        }
+                        Err(e) => { tracing::warn!("Failed to deliver scheduled message {}: {}", id, e); }
+                    }
+                }
+            }
+        });
+    }
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)

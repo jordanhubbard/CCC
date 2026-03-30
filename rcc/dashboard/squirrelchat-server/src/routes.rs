@@ -42,6 +42,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/channels/:id", delete(del_channel))
         // Messages
         .route("/api/messages", get(list_messages).post(post_message))
+        .route("/api/messages/schedule", post(schedule_message))
         .route("/api/messages/:id", patch(edit_message).delete(del_message))
         // Threads
         .route("/api/messages/:id/thread", get(get_thread))
@@ -197,6 +198,79 @@ async fn del_message(
         // MessageDelete broadcast removed — not in ScWsFrame
     }
     Ok(Json(json!({ "ok": ok })))
+}
+
+// ── Scheduled messages ────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ScheduleMessageBody {
+    channel_id: String,
+    sender: String,
+    text: String,
+    deliver_at: String,
+}
+
+async fn schedule_message(
+    Extension(state): Extension<SharedState>,
+    Json(body): Json<ScheduleMessageBody>,
+) -> R<Json<serde_json::Value>> {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let deliver_at_ts = parse_deliver_at(&body.deliver_at, now_secs)
+        .ok_or_else(|| anyhow::anyhow!("could not parse deliver_at: '{}'", body.deliver_at))?;
+
+    static CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = CTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let id = format!("sched-{}-{}", now_secs, n);
+
+    state.db.insert_scheduled_message(&id, &body.channel_id, &body.sender, &body.text, deliver_at_ts)?;
+
+    Ok(Json(serde_json::json!({ "ok": true, "id": id, "deliver_at_ts": deliver_at_ts })))
+}
+
+fn parse_deliver_at(s: &str, now_secs: i64) -> Option<i64> {
+    let s = s.trim();
+
+    // "in Xm" or "in Xh"
+    if let Some(rest) = s.strip_prefix("in ") {
+        let rest = rest.trim();
+        if let Some(mins) = rest.strip_suffix('m').and_then(|n| n.trim().parse::<i64>().ok()) {
+            return Some(now_secs + mins * 60);
+        }
+        if let Some(hrs) = rest.strip_suffix('h').and_then(|n| n.trim().parse::<i64>().ok()) {
+            return Some(now_secs + hrs * 3600);
+        }
+    }
+
+    // "HH:MM"
+    if s.len() == 5 && s.chars().nth(2) == Some(':') {
+        let parts: Vec<&str> = s.splitn(2, ':').collect();
+        if let (Ok(h), Ok(m)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+            if h < 24 && m < 60 {
+                use chrono::{Utc, Timelike};
+                let now = Utc::now();
+                let mut candidate = now
+                    .with_hour(h as u32).unwrap()
+                    .with_minute(m as u32).unwrap()
+                    .with_second(0).unwrap()
+                    .with_nanosecond(0).unwrap();
+                if candidate.timestamp() <= now_secs {
+                    candidate = candidate + chrono::Duration::days(1);
+                }
+                return Some(candidate.timestamp());
+            }
+        }
+    }
+
+    // ISO8601 / RFC3339
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.timestamp());
+    }
+
+    None
 }
 
 // ── Threads ───────────────────────────────────────────────────────────────────

@@ -143,6 +143,17 @@ impl Db {
                 updated_at INTEGER DEFAULT (unixepoch() * 1000),
                 PRIMARY KEY (user_id, channel_id)
             );
+
+            -- Scheduled messages for future delivery
+            CREATE TABLE IF NOT EXISTS scheduled_messages (
+                id         TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                sender     TEXT NOT NULL,
+                text       TEXT NOT NULL,
+                deliver_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                delivered  INTEGER NOT NULL DEFAULT 0
+            );
         "#)?;
         Ok(())
     }
@@ -715,6 +726,52 @@ impl Db {
             counts.insert(ch, cnt);
         }
         Ok(counts)
+    }
+    // ── Scheduled messages ────────────────────────────────────────────────────
+
+    pub fn insert_scheduled_message(
+        &self,
+        id: &str,
+        channel_id: &str,
+        sender: &str,
+        text: &str,
+        deliver_at: i64,
+    ) -> Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "INSERT INTO scheduled_messages (id, channel_id, sender, text, deliver_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![id, channel_id, sender, text, deliver_at, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_pending_scheduled_messages(&self, now: i64) -> Result<Vec<(String, String, String, String, i64)>> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, channel_id, sender, text, deliver_at
+             FROM scheduled_messages
+             WHERE delivered = 0 AND deliver_at <= ?"
+        )?;
+        let rows = stmt.query_map([now], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    }
+
+    pub fn mark_scheduled_delivered(&self, id: &str) -> Result<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE scheduled_messages SET delivered = 1 WHERE id = ?",
+            [id],
+        )?;
+        Ok(())
     }
 }
 

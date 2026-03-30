@@ -498,6 +498,9 @@ pub fn SquirrelChat() -> impl IntoView {
     let (ai_suggestion, set_ai_suggestion) = create_signal(String::new());
     let (ai_error, set_ai_error) = create_signal(false);
 
+    // Schedule toast state
+    let (schedule_toast, set_schedule_toast) = create_signal(Option::<String>::None);
+
     let chat_ref = create_node_ref::<leptos::html::Div>();
 
     // ── Load messages when channel changes ────────────────────────────────────
@@ -1861,6 +1864,14 @@ pub fn SquirrelChat() -> impl IntoView {
                                     }
                                 }}
 
+                                {move || if let Some(msg) = schedule_toast.get() {
+                                    view! {
+                                        <div class="sc-schedule-toast">
+                                            "🕐 " {msg}
+                                        </div>
+                                    }.into_view()
+                                } else { ().into_view() }}
+
                                 {move || if ai_loading.get() {
                                     view! {
                                         <div class="sc-ai-loading">
@@ -1983,6 +1994,50 @@ pub fn SquirrelChat() -> impl IntoView {
                                                 if ev.key() == "Enter" && ev.ctrl_key() {
                                                     ev.prevent_default();
                                                     let text = input_text.get_untracked();
+                                                    // Check for /schedule command
+                                                    if text.trim_start().starts_with("/schedule ") {
+                                                        let rest = text.trim_start()
+                                                            .trim_start_matches("/schedule ")
+                                                            .trim()
+                                                            .to_string();
+                                                        // Parse: first token is time, rest is message
+                                                        let (time_part, msg_part) = if let Some(sp) = rest.find(' ') {
+                                                            (rest[..sp].to_string(), rest[sp+1..].trim().to_string())
+                                                        } else {
+                                                            (rest.clone(), String::new())
+                                                        };
+                                                        if msg_part.is_empty() {
+                                                            return;
+                                                        }
+                                                        let ch = selected_channel.get_untracked();
+                                                        let sender = identity.get_untracked().name.clone();
+                                                        let preview = if msg_part.len() > 40 {
+                                                            format!("{}…", &msg_part[..40])
+                                                        } else {
+                                                            msg_part.clone()
+                                                        };
+                                                        let toast_msg = format!("Scheduled for {}: {}", time_part, preview);
+                                                        set_input_text.set(String::new());
+                                                        spawn_local(async move {
+                                                            let payload = serde_json::json!({
+                                                                "channel_id": ch,
+                                                                "sender": sender,
+                                                                "text": msg_part,
+                                                                "deliver_at": time_part,
+                                                            });
+                                                            if let Ok(req) = gloo_net::http::Request::post("/sc/api/messages/schedule").json(&payload) {
+                                                                if let Ok(resp) = req.send().await {
+                                                                    if resp.status() == 200 {
+                                                                        set_schedule_toast.set(Some(toast_msg));
+                                                                        gloo_timers::callback::Timeout::new(3000, move || {
+                                                                            set_schedule_toast.set(None);
+                                                                        }).forget();
+                                                                    }
+                                                                }
+                                                            }
+                                                        });
+                                                        return;
+                                                    }
                                                     // Check for /ai command
                                                     if text.trim_start().starts_with("/ai ") {
                                                         let prompt = text.trim_start()
