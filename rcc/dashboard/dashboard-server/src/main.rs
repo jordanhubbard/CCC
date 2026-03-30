@@ -429,7 +429,7 @@ async fn main() {
     let rcc_url = std::env::var("RCC_URL")
         .unwrap_or_else(|_| "http://localhost:8789".to_string());
     let sc_url = std::env::var("SC_URL")
-        .unwrap_or_else(|_| "http://localhost:8790".to_string());
+        .unwrap_or_else(|_| "http://localhost:8793".to_string());
     let agent_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or_default();
     let operator = std::env::var("OPERATOR_HANDLE").unwrap_or_else(|_| "jkh".to_string());
     let dist = std::env::var("DASHBOARD_DIST").unwrap_or_else(|_| "dist".to_string());
