@@ -12,9 +12,10 @@
 #   2. Symlinks ~/.rcc/workspace → this repo (if not already set up)
 #   3. Creates ~/.rcc/rcc-pull-loop.sh (a while-true pull loop)
 #   4. Registers rcc-pull-loop with supervisord (or falls back to nohup)
-#   5. Starts a 'claude-main' tmux session with Claude Code
-#   6. Pre-creates the log file
-#   7. Prints a summary
+#   5. Registers rcc-exec-listener (SquirrelBus remote exec) with supervisord
+#   6. Starts a 'claude-main' tmux session with Claude Code
+#   7. Pre-creates the log file
+#   8. Prints a summary
 #
 # Idempotent: safe to run more than once.
 
@@ -23,8 +24,10 @@ set -euo pipefail
 RCC_DIR="$HOME/.rcc"
 WORKSPACE="$RCC_DIR/workspace"
 PULL_LOOP="$RCC_DIR/rcc-pull-loop.sh"
+EXEC_LISTENER="$RCC_DIR/rcc-exec-listener.sh"
 LOG_DIR="$RCC_DIR/logs"
 LOG_FILE="$LOG_DIR/pull.log"
+EXEC_LOG="$LOG_DIR/exec-listener.log"
 SUPERVISORD_CONF="/etc/supervisord.conf"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -144,24 +147,42 @@ chmod +x "$PULL_LOOP"
 success "Pull loop script: $PULL_LOOP"
 
 # ── Step 4: Log file pre-creation ───────────────────────────────────────────
-info "Pre-creating log file..."
+info "Pre-creating log files..."
 mkdir -p "$LOG_DIR"
-touch "$LOG_FILE"
-chown "$USER:$USER" "$LOG_FILE" 2>/dev/null || true
-success "Log file: $LOG_FILE"
+touch "$LOG_FILE" "$EXEC_LOG"
+chown "$USER:$USER" "$LOG_FILE" "$EXEC_LOG" 2>/dev/null || true
+success "Log files: $LOG_FILE, $EXEC_LOG"
 
-# ── Step 5: Supervisord integration (or nohup fallback) ─────────────────────
+# ── Step 5a: Create exec-listener wrapper script ─────────────────────────────
+info "Creating exec-listener wrapper script..."
+
+cat > "$EXEC_LISTENER" << 'EOF'
+#!/usr/bin/env bash
+# rcc-exec-listener.sh — starts agent-listener.mjs with env from ~/.rcc/.env
+set -euo pipefail
+ENV_FILE="$HOME/.rcc/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a; source "$ENV_FILE"; set +a
+fi
+WORKSPACE="$HOME/.rcc/workspace"
+exec node "$WORKSPACE/rcc/exec/agent-listener.mjs"
+EOF
+
+chmod +x "$EXEC_LISTENER"
+success "Exec listener wrapper: $EXEC_LISTENER"
+
+# ── Step 5b: Supervisord integration (or nohup fallback) ─────────────────────
 PULL_REGISTERED=false
+EXEC_REGISTERED=false
 
 if [ -f "$SUPERVISORD_CONF" ]; then
-  info "supervisord.conf found — registering rcc-agent-pull program..."
+  info "supervisord.conf found — registering programs..."
 
-  # Check if already registered
+  # Register rcc-agent-pull
   if grep -q "\[program:rcc-agent-pull\]" "$SUPERVISORD_CONF" 2>/dev/null; then
     success "rcc-agent-pull already in supervisord.conf — skipping"
     PULL_REGISTERED=true
   else
-    # Append the program block
     sudo tee -a "$SUPERVISORD_CONF" > /dev/null << EOF
 
 [program:rcc-agent-pull]
@@ -177,20 +198,43 @@ stdout_logfile_backups=1
 user=$USER
 EOF
     success "rcc-agent-pull block appended to $SUPERVISORD_CONF"
-
-    # Reload supervisord
-    info "Reloading supervisord..."
-    sudo supervisorctl -c "$SUPERVISORD_CONF" reread && \
-    sudo supervisorctl -c "$SUPERVISORD_CONF" update && \
-    success "supervisord reloaded — rcc-agent-pull is running" || \
-    warn "supervisorctl update failed — you may need to restart supervisord manually"
-
     PULL_REGISTERED=true
   fi
-else
-  info "supervisord.conf not found — falling back to nohup background process"
 
-  # Check if pull loop is already running
+  # Register rcc-exec-listener
+  if grep -q "\[program:rcc-exec-listener\]" "$SUPERVISORD_CONF" 2>/dev/null; then
+    success "rcc-exec-listener already in supervisord.conf — skipping"
+    EXEC_REGISTERED=true
+  else
+    sudo tee -a "$SUPERVISORD_CONF" > /dev/null << EOF
+
+[program:rcc-exec-listener]
+command=$EXEC_LISTENER
+autostart=true
+autorestart=true
+startsecs=5
+startretries=10
+stdout_logfile=$EXEC_LOG
+stderr_logfile=$EXEC_LOG
+stdout_logfile_maxbytes=2MB
+stdout_logfile_backups=2
+user=$USER
+EOF
+    success "rcc-exec-listener block appended to $SUPERVISORD_CONF"
+    EXEC_REGISTERED=true
+  fi
+
+  # Reload supervisord once for both changes
+  info "Reloading supervisord..."
+  sudo supervisorctl -c "$SUPERVISORD_CONF" reread && \
+  sudo supervisorctl -c "$SUPERVISORD_CONF" update && \
+  success "supervisord reloaded — rcc-agent-pull + rcc-exec-listener running" || \
+  warn "supervisorctl update failed — you may need to restart supervisord manually"
+
+else
+  info "supervisord.conf not found — falling back to nohup background processes"
+
+  # Pull loop
   if pgrep -f "rcc-pull-loop.sh" > /dev/null 2>&1; then
     success "rcc-pull-loop.sh already running (PID: $(pgrep -f rcc-pull-loop.sh | head -1))"
     PULL_REGISTERED=true
@@ -205,6 +249,23 @@ else
       warn "Pull loop may have exited immediately — check $LOG_FILE"
     fi
     PULL_REGISTERED=true
+  fi
+
+  # Exec listener
+  if pgrep -f "agent-listener.mjs" > /dev/null 2>&1; then
+    success "agent-listener.mjs already running (PID: $(pgrep -f agent-listener.mjs | head -1))"
+    EXEC_REGISTERED=true
+  else
+    nohup bash "$EXEC_LISTENER" >> "$EXEC_LOG" 2>&1 &
+    EXEC_PID=$!
+    sleep 1
+    if kill -0 "$EXEC_PID" 2>/dev/null; then
+      success "Exec listener started via nohup (PID: $EXEC_PID)"
+      echo "$EXEC_PID" > "$RCC_DIR/exec-listener.pid"
+    else
+      warn "Exec listener may have exited — check $EXEC_LOG (SQUIRRELBUS_TOKEN required in .env)"
+    fi
+    EXEC_REGISTERED=true
   fi
 fi
 
@@ -251,27 +312,39 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "🐿️  ${GREEN}Container setup complete!${NC}"
 echo ""
-echo "  Workspace:   $WORKSPACE"
-echo "  Pull loop:   $PULL_LOOP"
-echo "  Logs:        $LOG_FILE"
+echo "  Workspace:     $WORKSPACE"
+echo "  Pull loop:     $PULL_LOOP"
+echo "  Exec listener: $EXEC_LISTENER"
+echo "  Pull log:      $LOG_FILE"
+echo "  Exec log:      $EXEC_LOG"
 echo ""
 
 if [ -f "$SUPERVISORD_CONF" ]; then
-  echo "  Pull method: supervisord (program: rcc-agent-pull)"
-  echo "  Check:       sudo supervisorctl -c $SUPERVISORD_CONF status"
+  echo "  Process manager: supervisord"
+  echo "  Programs:        rcc-agent-pull, rcc-exec-listener"
+  echo "  Check:           sudo supervisorctl -c $SUPERVISORD_CONF status"
 else
-  echo "  Pull method: nohup background process"
-  echo "  Check:       pgrep -fa rcc-pull-loop"
-  echo "  PID file:    $RCC_DIR/pull-loop.pid"
+  echo "  Process manager: nohup background"
+  echo "  Check pull:      pgrep -fa rcc-pull-loop"
+  echo "  Check exec:      pgrep -fa agent-listener"
+  echo "  PID files:       $RCC_DIR/pull-loop.pid, $RCC_DIR/exec-listener.pid"
 fi
 
 echo ""
 echo "  Verify these manually:"
-echo "  1. ~/.rcc/.env exists with AGENT_NAME, RCC_URL, RCC_AGENT_TOKEN"
-echo "  2. Pull loop is running: tail -f $LOG_FILE"
-echo "  3. Claude session: tmux attach -t claude-main"
+echo "  1. ~/.rcc/.env exists with AGENT_NAME, RCC_URL, RCC_AGENT_TOKEN, SQUIRRELBUS_TOKEN"
+echo "  2. Pull loop running:      tail -f $LOG_FILE"
+echo "  3. Exec listener running:  tail -f $EXEC_LOG"
+echo "  4. Claude session:         tmux attach -t claude-main"
 echo ""
 echo "  If .env is missing:"
 echo "    cp $REPO_DIR/deploy/.env.template ~/.rcc/.env"
 echo "    nano ~/.rcc/.env"
+echo ""
+echo "  Required .env keys for exec listener:"
+echo "    SQUIRRELBUS_TOKEN   — shared bus secret (get from Rocky/RCC)"
+echo "    SQUIRRELBUS_URL     — http://146.190.134.110:8788"
+echo "    RCC_URL             — http://146.190.134.110:8789"
+echo "    RCC_AGENT_TOKEN     — your agent bearer token"
+echo "    AGENT_NAME          — your agent name (peabody, sherman, etc.)"
 echo ""
