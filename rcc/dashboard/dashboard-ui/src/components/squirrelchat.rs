@@ -528,6 +528,24 @@ pub fn SquirrelChat() -> impl IntoView {
         }
     });
 
+    // ── Load DMs on mount ─────────────────────────────────────────────────────
+    spawn_local(async move {
+        let my_id = identity.get_untracked().id.clone();
+        if my_id.is_empty() {
+            // Identity hasn't resolved yet — retry once after a short delay
+            gloo_timers::future::TimeoutFuture::new(1_500).await;
+        }
+        let my_id = identity.get_untracked().id.clone();
+        let url = format!("/sc/api/dms?agent={}", my_id);
+        if let Ok(resp) = gloo_net::http::Request::get(&url).send().await {
+            if let Ok(dms) = resp.json::<Vec<ScChannel>>().await {
+                if !dms.is_empty() {
+                    set_dm_channels.set(dms);
+                }
+            }
+        }
+    });
+
     // ── Load initial unread counts ────────────────────────────────────────────
     spawn_local(async move {
         let my_id = identity.get_untracked().id.clone();
@@ -977,20 +995,41 @@ pub fn SquirrelChat() -> impl IntoView {
                     </div>
                     {move || {
                         let dms = dm_channels.get();
+                        let my_name = identity.get().name.clone();
                         dms.iter().map(|dm| {
                             let dm_id = dm.id.clone();
                             let dm_id2 = dm.id.clone();
                             let dm_id3 = dm.id.clone();
-                            let dm_name = dm.name.clone();
+                            // Show other person's name: strip " & <my_name>" or "<my_name> & "
+                            let dm_name = {
+                                let n = dm.name.clone();
+                                let other = if let Some(s) = n.strip_suffix(&format!(" & {}", my_name)) {
+                                    s.to_string()
+                                } else if let Some(s) = n.strip_prefix(&format!("{} & ", my_name)) {
+                                    s.to_string()
+                                } else {
+                                    n
+                                };
+                                other
+                            };
                             view! {
                                 <div
                                     class="sc-channel-item sc-dm-item"
                                     class:sc-channel-active=move || selected_channel.get() == dm_id
                                     on:click=move |_| {
-                                        set_selected_channel.set(dm_id2.clone());
-                                        set_unread.update(|u| { u.remove(&dm_id2.clone()); });
-                                        set_mentions_unread.update(|u| { u.remove(&dm_id2.clone()); });
+                                        let ch = dm_id2.clone();
+                                        set_selected_channel.set(ch.clone());
+                                        set_unread.update(|u| { u.remove(&ch); });
+                                        set_mentions_unread.update(|u| { u.remove(&ch); });
                                         set_selected_project.set(None);
+                                        // Persist read cursor
+                                        let my_id = identity.get_untracked().id.clone();
+                                        spawn_local(async move {
+                                            let url = format!("/sc/api/channels/{}/read", ch);
+                                            let _ = gloo_net::http::Request::post(&url)
+                                                .json(&serde_json::json!({"user": my_id}))
+                                                .map(|r| r.send());
+                                        });
                                     }
                                 >
                                     <span>"💬 " {dm_name}</span>
