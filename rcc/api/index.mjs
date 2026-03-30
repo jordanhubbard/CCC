@@ -2816,7 +2816,7 @@ stderr_logfile=\$HOME/.rcc/logs/tunnel.log"
   # Write to user dir always (for reference)
   echo "\$TUNNEL_CONF_CONTENT" > "\$USER_CONF_DIR/rcc-vllm-tunnel.conf"
   # Try system dir (requires root/sudo)
-  if sudo tee "\$SYS_CONF_DIR/rcc-vllm-tunnel.conf" > /dev/null 2>&1 <<< "\$TUNNEL_CONF_CONTENT"; then
+  if printf '%s\\n' "\$TUNNEL_CONF_CONTENT" | sudo tee "\$SYS_CONF_DIR/rcc-vllm-tunnel.conf" > /dev/null 2>&1; then
     echo "  ✅ Conf written to system supervisord dir"
     supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
       supervisorctl start rcc-vllm-tunnel && \\
@@ -2929,7 +2929,7 @@ environment=HOME=\"\$HOME\",PATH=\"\$VLLM_VENV/bin:/usr/local/bin:/usr/bin:/bin\
 stdout_logfile=\$HOME/.rcc/logs/vllm.log
 stderr_logfile=\$HOME/.rcc/logs/vllm.log"
   echo "\$VLLM_CONF_CONTENT" > "\$USER_CONF_DIR/vllm-worker.conf"
-  if sudo tee "\$SYS_CONF_DIR/vllm-worker.conf" > /dev/null 2>&1 <<< "\$VLLM_CONF_CONTENT"; then
+  if printf '%s\\n' "\$VLLM_CONF_CONTENT" | sudo tee "\$SYS_CONF_DIR/vllm-worker.conf" > /dev/null 2>&1; then
     echo "  ✅ Conf written to system supervisord dir"
     supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
       supervisorctl start vllm-worker && \\
@@ -5915,6 +5915,89 @@ loadPackages();
         keyWritten,
         alreadyExisted,
         connect: `ssh -N -R ${assigned.port}:localhost:8080 ${TUNNEL_USER}@${publicHost}`,
+        warning: keyWritten ? null : 'authorized_keys write failed — admin must add key manually',
+      });
+    }
+
+    // ── POST /api/tunnel/shell — register shell-access reverse tunnel ──────
+    // Like /api/tunnel/request but allocates from the shell-tunnel port pool (19080+)
+    // and writes a permissive authorized_keys entry that allows reverse port-forwarding
+    // to localhost:22 (so Rocky can SSH back into the container).
+    // Accepts: { pubkey: "ssh-ed25519 ...", agent: "peabody", label: "peabody-shell-tunnel" }
+    // Returns: { port, user, host, ok, keyWritten }
+    if (method === 'POST' && path === '/api/tunnel/shell') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      if (!body?.pubkey) return json(res, 400, { error: 'pubkey required' });
+      const pubkeyTrimmed = body.pubkey.trim();
+      if (!/^(ssh-|ecdsa-sha2)/.test(pubkeyTrimmed)) {
+        return json(res, 400, { error: 'Invalid pubkey format' });
+      }
+      const label = (body.label || body.agent || 'unknown').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+      const agent = body.agent || label;
+      const SHELL_TUNNEL_STATE_PATH = TUNNEL_STATE_PATH.replace('.json', '-shell.json');
+      const SHELL_PORT_START = 19080;
+
+      const shellState = await readJsonFile(SHELL_TUNNEL_STATE_PATH, { nextPort: SHELL_PORT_START, tunnels: {} });
+      let assigned = shellState.tunnels[agent];
+      let alreadyExisted = !!assigned;
+      let keyWritten = alreadyExisted;
+
+      if (!assigned) {
+        const port = shellState.nextPort;
+        shellState.nextPort = port + 1;
+        assigned = { agent, label, port, pubkey: pubkeyTrimmed, addedAt: new Date().toISOString() };
+        shellState.tunnels[agent] = assigned;
+        await writeJsonFile(SHELL_TUNNEL_STATE_PATH, shellState);
+
+        // Shell tunnel authorized_keys entry: allow port-forwarding only (no PTY, no commands)
+        // The agent will forward its sshd port (22) to do-host1 localhost:<port>
+        const comment = `rcc-shell-tunnel-${label}`;
+        const authKeyEntry = `no-pty,no-agent-forwarding,no-X11-forwarding,permitopen="localhost:${port}" ${pubkeyTrimmed} ${comment}\n`;
+        try {
+          await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry, 'utf8');
+          try {
+            const { execSync } = await import('child_process');
+            execSync(`sudo chown tunnel:tunnel ${TUNNEL_AUTH_KEYS} && sudo chmod 600 ${TUNNEL_AUTH_KEYS}`, { stdio: 'ignore' });
+          } catch {}
+          keyWritten = true;
+          console.log(`[rcc-api] Shell tunnel key added for ${agent} on port ${port}`);
+        } catch (authErr) {
+          keyWritten = false;
+          console.warn(`[rcc-api] Could not write shell tunnel authorized_keys for ${agent}: ${authErr.message}`);
+        }
+      } else if (assigned.pubkey !== pubkeyTrimmed) {
+        assigned.pubkey = pubkeyTrimmed;
+        assigned.updatedAt = new Date().toISOString();
+        shellState.tunnels[agent] = assigned;
+        await writeJsonFile(SHELL_TUNNEL_STATE_PATH, shellState);
+        const comment = `rcc-shell-tunnel-${label}`;
+        const authKeyEntry = `no-pty,no-agent-forwarding,no-X11-forwarding,permitopen="localhost:${assigned.port}" ${pubkeyTrimmed} ${comment}\n`;
+        try {
+          await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry, 'utf8');
+          try {
+            const { execSync } = await import('child_process');
+            execSync(`sudo chown tunnel:tunnel ${TUNNEL_AUTH_KEYS} && sudo chmod 600 ${TUNNEL_AUTH_KEYS}`, { stdio: 'ignore' });
+          } catch {}
+          keyWritten = true;
+          console.log(`[rcc-api] Shell tunnel key rotated for ${agent} on port ${assigned.port}`);
+        } catch (authErr) {
+          keyWritten = false;
+          console.warn(`[rcc-api] Could not rotate shell tunnel authorized_keys for ${agent}: ${authErr.message}`);
+        }
+      }
+
+      const publicHost = (RCC_PUBLIC_URL.replace(/^https?:\/\//, '').split(':')[0]) || '146.190.134.110';
+      return json(res, 200, {
+        ok: true,
+        port: assigned.port,
+        user: TUNNEL_USER,
+        host: publicHost,
+        agent: assigned.agent,
+        keyWritten,
+        alreadyExisted,
+        // Rocky uses this to reach the container: ssh -p <port> <container-user>@localhost
+        connect: `ssh -p ${assigned.port} horde@localhost  # from do-host1`,
         warning: keyWritten ? null : 'authorized_keys write failed — admin must add key manually',
       });
     }
