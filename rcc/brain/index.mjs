@@ -4,10 +4,8 @@
  * The autonomous nervous system of Rocky Command Center.
  * Never gives up. Always making progress, even if slowly.
  *
- * Model fallback chain (in order):
- *   1. nvidia/azure/anthropic/claude-sonnet-4-6  (best quality)
- *   2. nvcf/meta/llama-3.3-70b-instruct          (fast fallback)
- *   3. nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5 (last resort)
+ * Routes all LLM calls through tokenhub (localhost:8090).
+ * Tokenhub handles model selection, failover, and rate limiting.
  */
 
 import { readFile, writeFile } from 'fs/promises';
@@ -16,85 +14,17 @@ import { EventEmitter } from 'events';
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-// Prefer tokenhub for all LLM calls — routes to local vLLM (Boris/Sweden nodes) or NVIDIA NIM.
-// Falls back to direct NVIDIA inference-api if tokenhub is not configured.
-const TOKENHUB_URL    = process.env.TOKENHUB_URL   || '';
-const TOKENHUB_KEY    = process.env.TOKENHUB_AGENT_KEY || '';
-const NVIDIA_API_BASE = (TOKENHUB_URL ? `${TOKENHUB_URL}/v1` : null) || process.env.NVIDIA_API_BASE || 'https://inference-api.nvidia.com/v1';
-const NVIDIA_API_KEY  = (TOKENHUB_URL && TOKENHUB_KEY) ? TOKENHUB_KEY : (process.env.NVIDIA_API_KEY || '');
-const STATE_PATH      = process.env.BRAIN_STATE_PATH || './brain-state.json';
-const TICK_MS         = parseInt(process.env.BRAIN_TICK_MS || '30000', 10);
-
-const MODEL_CHAIN = [
-  {
-    id: 'nvidia/azure/anthropic/claude-sonnet-4-6',
-    maxTokensPerMin: 60000,    // conservative — actual limit is higher but we share with agents
-    maxRequestsPerMin: 20,
-    label: 'Claude Sonnet',
-  },
-  {
-    id: 'nvcf/meta/llama-3.3-70b-instruct',
-    maxTokensPerMin: 100000,
-    maxRequestsPerMin: 60,
-    label: 'Llama 70B',
-  },
-  {
-    id: 'nvidia/nvidia/llama-3.3-nemotron-super-49b-v1.5',
-    maxTokensPerMin: 80000,
-    maxRequestsPerMin: 40,
-    label: 'Nemotron 49B',
-  },
-];
-
-// ── Leaky Bucket Rate Limiter ──────────────────────────────────────────────
-
-class LeakyBucket {
-  constructor({ maxTokensPerMin, maxRequestsPerMin }) {
-    this.maxTokensPerMin = maxTokensPerMin;
-    this.maxRequestsPerMin = maxRequestsPerMin;
-    this.tokenCount = 0;
-    this.requestCount = 0;
-    this.windowStart = Date.now();
-  }
-
-  _tick() {
-    const now = Date.now();
-    if (now - this.windowStart > 60000) {
-      this.tokenCount = 0;
-      this.requestCount = 0;
-      this.windowStart = now;
-    }
-  }
-
-  canSend(estimatedTokens = 1000) {
-    this._tick();
-    return (
-      this.tokenCount + estimatedTokens <= this.maxTokensPerMin &&
-      this.requestCount + 1 <= this.maxRequestsPerMin
-    );
-  }
-
-  record(tokensUsed) {
-    this._tick();
-    this.tokenCount += tokensUsed;
-    this.requestCount += 1;
-  }
-
-  waitMs(estimatedTokens = 1000) {
-    this._tick();
-    const elapsed = Date.now() - this.windowStart;
-    const remaining = 60000 - elapsed;
-    if (this.canSend(estimatedTokens)) return 0;
-    return remaining + 100; // wait until next window + small buffer
-  }
-}
+const TOKENHUB_URL     = process.env.TOKENHUB_URL     || 'http://localhost:8090';
+const TOKENHUB_API_KEY = process.env.TOKENHUB_API_KEY || 'tokenhub_043600a238032da1027087eae20d95bf41340176d1b4d870c4826bf72dfc7812';
+const STATE_PATH       = process.env.BRAIN_STATE_PATH || './brain-state.json';
+const TICK_MS          = parseInt(process.env.BRAIN_TICK_MS || '30000', 10);
 
 // ── Brain State ───────────────────────────────────────────────────────────
 
 const DEFAULT_STATE = {
   queue: [],         // pending LLM requests
   completed: [],     // last 100 completed requests
-  modelStatus: {},   // per-model health: { lastSuccess, lastError, consecutiveErrors }
+  modelStatus: {},   // health tracking (kept for schema compat)
   lastTick: null,
   tickCount: 0,
 };
@@ -150,19 +80,18 @@ export function createRequest({ messages, maxTokens = 1024, priority = 'normal',
 
 // ── Model Call ────────────────────────────────────────────────────────────
 
-async function callModel(model, messages, maxTokens, timeoutMs = 30000) {
+async function callModel(messages, maxTokens, timeoutMs = 30000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
   try {
-    const resp = await fetch(`${NVIDIA_API_BASE}/chat/completions`, {
+    const resp = await fetch(`${TOKENHUB_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${NVIDIA_API_KEY}`,
+        'Authorization': `Bearer ${TOKENHUB_API_KEY}`,
       },
       body: JSON.stringify({
-        model: model.id,
         messages,
         max_tokens: maxTokens,
       }),
@@ -170,11 +99,6 @@ async function callModel(model, messages, maxTokens, timeoutMs = 30000) {
     });
 
     clearTimeout(timer);
-
-    if (resp.status === 429) {
-      const retryAfter = parseInt(resp.headers.get('retry-after') || '30', 10);
-      throw Object.assign(new Error('Rate limited'), { code: 'RATE_LIMITED', retryAfterMs: retryAfter * 1000 });
-    }
 
     if (!resp.ok) {
       throw Object.assign(new Error(`HTTP ${resp.status}`), { code: 'HTTP_ERROR', status: resp.status });
@@ -201,7 +125,6 @@ export class Brain extends EventEmitter {
     super();
     this.statePath = statePath || STATE_PATH;
     this.state = null;
-    this.buckets = Object.fromEntries(MODEL_CHAIN.map(m => [m.id, new LeakyBucket(m)]));
     this.running = false;
     this._tickTimer = null;
   }
@@ -230,19 +153,12 @@ export class Brain extends EventEmitter {
   getStatus() {
     return {
       ok: true,
+      backend: 'tokenhub',
+      url: TOKENHUB_URL,
       queueDepth: this.state.queue.length,
       completedCount: this.state.completed.length,
       lastTick: this.state.lastTick,
       tickCount: this.state.tickCount,
-      models: MODEL_CHAIN.map(m => ({
-        id: m.id,
-        label: m.label,
-        status: this.state.modelStatus[m.id] || { consecutiveErrors: 0 },
-        bucket: {
-          requests: this.buckets[m.id].requestCount,
-          tokens: this.buckets[m.id].tokenCount,
-        },
-      })),
     };
   }
 
@@ -299,85 +215,36 @@ export class Brain extends EventEmitter {
   async _processRequest(request) {
     request.status = 'in-progress';
 
-    // Determine which models to try (skip models with too many consecutive errors)
-    const availableModels = MODEL_CHAIN.filter(m => {
-      const s = this.state.modelStatus[m.id] || {};
-      return (s.consecutiveErrors || 0) < 5; // skip after 5 consecutive failures
-    });
+    const attemptTs = new Date().toISOString();
+    try {
+      console.log(`[brain] ${request.id} → tokenhub`);
+      const { text, tokensUsed } = await callModel(request.messages, request.maxTokens);
 
-    if (availableModels.length === 0) {
-      console.warn('[brain] All models degraded. Marking request as failed temporarily.');
-      request.status = 'pending'; // keep in queue, try again next tick
-      return;
-    }
+      request.attempts.push({ model: 'tokenhub', ts: attemptTs, tokensUsed });
+      request.status = 'completed';
+      request.result = text;
+      request.completedAt = new Date().toISOString();
 
-    for (const model of availableModels) {
-      const bucket = this.buckets[model.id];
-      const estimatedTokens = request.maxTokens + Math.ceil(
-        request.messages.reduce((n, m) => n + m.content.length, 0) / 4
-      );
+      // Move to completed
+      this.state.queue = this.state.queue.filter(r => r.id !== request.id);
+      this.state.completed.push(request);
 
-      if (!bucket.canSend(estimatedTokens)) {
-        const wait = bucket.waitMs(estimatedTokens);
-        console.log(`[brain] ${model.label} rate-limited. Next window in ${Math.ceil(wait/1000)}s. Trying next model.`);
-        continue;
+      this.emit('completed', request);
+      console.log(`[brain] ${request.id} completed via tokenhub (${tokensUsed} tokens)`);
+
+      // Fire callback if requested
+      if (request.callbackUrl) {
+        this._fireCallback(request).catch(err =>
+          console.warn(`[brain] Callback failed for ${request.id}: ${err.message}`)
+        );
       }
 
-      const attemptTs = new Date().toISOString();
-      try {
-        console.log(`[brain] ${request.id} → ${model.label}`);
-        const { text, tokensUsed } = await callModel(model, request.messages, request.maxTokens);
-
-        bucket.record(tokensUsed);
-        this.state.modelStatus[model.id] = {
-          consecutiveErrors: 0,
-          lastSuccess: attemptTs,
-        };
-
-        request.attempts.push({ model: model.id, ts: attemptTs, tokensUsed });
-        request.status = 'completed';
-        request.result = text;
-        request.completedAt = new Date().toISOString();
-
-        // Move to completed
-        this.state.queue = this.state.queue.filter(r => r.id !== request.id);
-        this.state.completed.push(request);
-
-        this.emit('completed', request);
-        console.log(`[brain] ${request.id} completed via ${model.label} (${tokensUsed} tokens)`);
-
-        // Fire callback if requested
-        if (request.callbackUrl) {
-          this._fireCallback(request).catch(err =>
-            console.warn(`[brain] Callback failed for ${request.id}: ${err.message}`)
-          );
-        }
-
-        return; // done — exit model loop
-
-      } catch (err) {
-        const ms = this.state.modelStatus[model.id] || {};
-        ms.consecutiveErrors = (ms.consecutiveErrors || 0) + 1;
-        ms.lastError = attemptTs;
-        ms.lastErrorMessage = err.message;
-        this.state.modelStatus[model.id] = ms;
-
-        request.attempts.push({ model: model.id, ts: attemptTs, error: err.message, code: err.code });
-
-        if (err.code === 'RATE_LIMITED') {
-          console.warn(`[brain] ${model.label} rate limited (retry after ${err.retryAfterMs}ms). Trying next.`);
-        } else if (err.code === 'TIMEOUT') {
-          console.warn(`[brain] ${model.label} timed out. Trying next.`);
-        } else {
-          console.warn(`[brain] ${model.label} error: ${err.message}. Trying next.`);
-        }
-      }
+    } catch (err) {
+      request.attempts.push({ model: 'tokenhub', ts: attemptTs, error: err.message, code: err.code });
+      console.warn(`[brain] ${request.id} tokenhub error: ${err.message}. Will retry next tick.`);
+      // Put back as pending — retry next tick
+      request.status = 'pending';
     }
-
-    // All models failed this round — put back as pending, will retry next tick
-    console.warn(`[brain] ${request.id}: all models failed this round. Will retry next tick.`);
-    request.status = 'pending';
-    request.attempts.push({ ts: new Date().toISOString(), note: 'All models failed, queued for retry' });
   }
 
   async _fireCallback(request) {

@@ -26,13 +26,8 @@ import { createHash } from 'crypto';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const MILVUS_ADDRESS  = process.env.MILVUS_ADDRESS || 'localhost:19530';
-// Prefer tokenhub for embeddings — it aggregates all inference backends (NVIDIA NIM, Boris, etc.)
-// Falls back to direct NVIDIA inference-api if tokenhub is not configured.
-const TOKENHUB_URL    = process.env.TOKENHUB_URL || '';
-const TOKENHUB_KEY    = process.env.TOKENHUB_AGENT_KEY || '';
-const _embedBase      = TOKENHUB_URL || process.env.NVIDIA_API_BASE || 'https://inference-api.nvidia.com/v1';
-const EMBED_API_URL   = process.env.NVIDIA_EMBED_URL || `${_embedBase}/embeddings`;
-const EMBED_API_KEY   = (TOKENHUB_URL && TOKENHUB_KEY) ? TOKENHUB_KEY : (process.env.NVIDIA_API_KEY || process.env.OPENAI_API_KEY || '');
+const EMBED_API_URL   = process.env.NVIDIA_EMBED_URL || 'http://localhost:8090/v1/embeddings';
+const EMBED_API_KEY   = process.env.TOKENHUB_API_KEY || process.env.NVIDIA_API_KEY || process.env.OPENAI_API_KEY || '';
 const EMBED_MODEL     = process.env.EMBED_MODEL || 'text-embedding-3-large';
 const EMBED_DIM       = parseInt(process.env.EMBED_DIM || '3072', 10);
 // Note: azure/openai/text-embedding-3-large via NVIDIA gateway = 3072-dim vectors
@@ -200,7 +195,7 @@ async function embedBatchLocal(texts) {
  */
 async function embedRemote(text) {
   if (!EMBED_API_KEY) {
-    throw new Error('[vector] NVIDIA_API_KEY not set — cannot generate embeddings');
+    throw new Error('[vector] TOKENHUB_API_KEY not set — cannot generate embeddings');
   }
 
   const resp = await fetch(EMBED_API_URL, {
@@ -230,7 +225,7 @@ async function embedRemote(text) {
  * Respects NIM batch limits (chunks of 16).
  */
 async function embedBatchRemote(texts, batchSize = 16) {
-  if (!EMBED_API_KEY) throw new Error('[vector] NVIDIA_API_KEY not set');
+  if (!EMBED_API_KEY) throw new Error('[vector] TOKENHUB_API_KEY not set');
   const results = [];
   for (let i = 0; i < texts.length; i += batchSize) {
     const chunk = texts.slice(i, i + batchSize);
