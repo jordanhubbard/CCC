@@ -50,17 +50,17 @@ const TUNNEL_PORT_START  = parseInt(process.env.TUNNEL_PORT_START || '18080', 10
 
 // ── Services map ───────────────────────────────────────────────────────────
 const SERVICES_CATALOG = [
-  { id: 'rcc-dashboard',    name: 'RCC Dashboard',      url: 'http://146.190.134.110:8789/projects', desc: 'Agent work queue + project tracker',      host: 'do-host1' },
-  { id: 'services-map',     name: 'Services Map',       url: 'http://146.190.134.110:8789/services', desc: 'This page — live status of all services',  host: 'do-host1' },
-  { id: 'squirrelchat',     name: 'SquirrelChat',       url: 'http://146.190.134.110:8790/',          desc: 'Self-hosted team chat (Slack replacement)', host: 'do-host1' },
-  { id: 'tokenhub-admin',   name: 'Tokenhub Admin',     url: 'http://146.190.134.110:8090/admin/',    desc: 'LLM router — provider health + config',     host: 'do-host1' },
-  { id: 'squirrelbus',      name: 'SquirrelBus Viewer', url: 'http://146.190.134.110:8788/bus',       desc: 'Inter-agent message bus',                  host: 'do-host1' },
-  { id: 'boris-vllm',       name: 'Boris vLLM',         url: 'http://127.0.0.1:18080/v1/models',      desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',       host: 'boris'    },
-  { id: 'whisper-api',      name: 'Whisper API',        url: 'http://100.87.229.125:8792',            desc: 'Speech-to-text (sparky GB10)',              host: 'sparky'   },
-  { id: 'agentfs',          name: 'AgentFS',            url: 'http://100.87.229.125:8791',            desc: 'Content-addressed WASM module store',       host: 'sparky'   },
-  { id: 'usdagent',         name: 'usdagent',           url: 'http://100.87.229.125:8000',            desc: 'LLM-backed USD 3D asset generator',         host: 'sparky'   },
-  { id: 'milvus',           name: 'Milvus',             url: 'http://100.89.199.14:9091/healthz',     desc: 'Vector database (do-host1)',                host: 'do-host1' },
-  { id: 'ollama',           name: 'Ollama',             url: 'http://100.87.229.125:11434',           desc: 'Local LLM inference',                      host: 'sparky'   },
+  { id: 'rcc-dashboard',    name: 'RCC Dashboard',      url: 'http://146.190.134.110:8789/projects',  desc: 'Agent work queue + project tracker',       host: 'do-host1' },
+  { id: 'services-map',     name: 'Services Map',       url: 'http://146.190.134.110:8789/services',  desc: 'This page — live status of all services',  host: 'do-host1' },
+  { id: 'squirrelchat',     name: 'SquirrelChat',       url: 'http://146.190.134.110:8790/',           desc: 'Self-hosted team chat (Slack replacement)', host: 'do-host1' },
+  { id: 'tokenhub-admin',   name: 'Tokenhub Admin',     url: 'http://146.190.134.110:8090/admin/',     desc: 'LLM router — provider health + config',    host: 'do-host1' },
+  { id: 'squirrelbus',      name: 'SquirrelBus',        url: 'http://146.190.134.110:8789/api/bus/stream', desc: 'Inter-agent message bus (SSE stream)',   host: 'do-host1' },
+  { id: 'boris-vllm',       name: 'Boris vLLM',         url: 'http://127.0.0.1:18080/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'boris'    },
+  { id: 'whisper-api',      name: 'Whisper API',        url: 'http://100.87.229.125:8792',             desc: 'Speech-to-text (sparky GB10)',              host: 'sparky'   },
+  { id: 'agentfs',          name: 'AgentFS',            url: 'http://100.87.229.125:8791',             desc: 'Content-addressed WASM module store',      host: 'sparky'   },
+  { id: 'usdagent',         name: 'usdagent',           url: 'http://100.87.229.125:8000',             desc: 'LLM-backed USD 3D asset generator',        host: 'sparky'   },
+  { id: 'milvus',           name: 'Milvus',             url: 'http://100.89.199.14:9091/healthz',      desc: 'Vector database (do-host1)',               host: 'do-host1' },
+  { id: 'ollama',           name: 'Ollama',             url: 'http://100.87.229.125:11434',            desc: 'Local LLM inference',                     host: 'sparky'   },
 ];
 const SERVICES_CACHE = { data: null, ts: 0 };
 const SERVICES_CACHE_TTL = 30_000; // 30 seconds
@@ -83,10 +83,29 @@ function probeService(rawUrl) {
   });
 }
 
+let _probing = false;
 async function getServicesStatus() {
+  // If cache is fresh, return immediately
   if (SERVICES_CACHE.data && (Date.now() - SERVICES_CACHE.ts) < SERVICES_CACHE_TTL) {
     return SERVICES_CACHE.data;
   }
+  // If stale cache exists, return it immediately and re-probe in background
+  if (SERVICES_CACHE.data && !_probing) {
+    _probing = true;
+    Promise.all(
+      SERVICES_CATALOG.map(async (svc) => {
+        const { online, latency_ms } = await probeService(svc.url);
+        return { ...svc, online, latency_ms };
+      })
+    ).then(results => {
+      SERVICES_CACHE.data = results;
+      SERVICES_CACHE.ts = Date.now();
+      _probing = false;
+    }).catch(() => { _probing = false; });
+    return SERVICES_CACHE.data; // return stale immediately
+  }
+  // Cold start: must probe (first request ever)
+  _probing = true;
   const results = await Promise.all(
     SERVICES_CATALOG.map(async (svc) => {
       const { online, latency_ms } = await probeService(svc.url);
@@ -95,8 +114,12 @@ async function getServicesStatus() {
   );
   SERVICES_CACHE.data = results;
   SERVICES_CACHE.ts = Date.now();
+  _probing = false;
   return results;
 }
+
+// Warm the cache on startup so first browser request is instant
+setTimeout(() => getServicesStatus().catch(() => {}), 3000);
 
 // ── Semantic dedup: background indexer ────────────────────────────────────
 async function indexPendingQueueItems() {
@@ -153,7 +176,6 @@ const _busSSEClients  = new Set();
 const _busPresence    = {};
 const _busAcks        = new Map();   // messageId → ack entry
 const _busDeadLetters = [];          // [{...msg, _deadReason, _deadAt}]
-const _agentosMetricsHistory = [];   // ring buffer: up to 60 {ts, metrics:{...}} snapshots
 
 // Seed seq from log on startup (async, best-effort)
 (async () => {
@@ -237,47 +259,6 @@ async function notifyJkhCompletion(item, agent) {
     }).catch(e => console.warn('[notify-jkh] Slack DM failed:', e.message));
   } catch (e) {
     console.warn('[notify-jkh] error:', e.message);
-  }
-}
-
-// ── Workqueue completion webhooks ─────────────────────────────────────────
-const WEBHOOK_SECRET = process.env.RCC_WEBHOOK_SECRET || 'rcc-webhook-secret-changeme';
-
-async function fireWebhooks(item, agent) {
-  if (!item?.webhook_url) return;
-  const urls = Array.isArray(item.webhook_url) ? item.webhook_url : [item.webhook_url];
-  const payload = JSON.stringify({
-    id: item.id,
-    title: item.title,
-    status: item.status,
-    result: item.result || item.resolution || null,
-    completedAt: item.completedAt || new Date().toISOString(),
-    agent: agent || item.claimedBy || 'unknown',
-    assignee: item.assignee,
-    priority: item.priority,
-    tags: item.tags || [],
-    project: item.project || null,
-  });
-  // HMAC-SHA256 signature over raw payload body
-  const { createHmac } = await import('node:crypto');
-  const sig = createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex');
-  for (const url of urls) {
-    try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RCC-Signature': `sha256=${sig}`,
-          'X-RCC-Event': 'queue.item.completed',
-          'User-Agent': 'RCC-Webhook/1.0',
-        },
-        body: payload,
-        signal: AbortSignal.timeout(8000),
-      });
-      console.log(`[webhook] ${url} → HTTP ${resp.status}`);
-    } catch (e) {
-      console.warn(`[webhook] ${url} failed: ${e.message}`);
-    }
   }
 }
 
@@ -704,6 +685,369 @@ const HTML_STYLE = `
     .gh-fetched{font-size:.72rem;color:#484f58}
     .gh-error{color:#f85149;font-size:.82rem;padding:.4rem 0}
   </style>`;
+
+function dashboardHtml() {
+  return `<!DOCTYPE html><html lang="en"><head>${HTML_STYLE}
+  <style>
+    body{padding:0;overflow:hidden;height:100vh;display:flex;flex-direction:column}
+    .topbar{display:flex;align-items:center;gap:1rem;padding:.6rem 1.25rem;background:#010409;border-bottom:1px solid #21262d;flex-shrink:0}
+    .topbar-logo{font-weight:700;font-size:1rem;color:#e6edf3;display:flex;align-items:center;gap:.45rem}
+    .topbar-logo span{color:#58a6ff}
+    .tab-bar{display:flex;gap:.15rem;flex:1;overflow-x:auto}
+    .tab-bar::-webkit-scrollbar{height:3px}.tab-bar::-webkit-scrollbar-thumb{background:#30363d}
+    .tab{padding:.35rem .85rem;border-radius:6px;font-size:.85rem;color:#8b949e;cursor:pointer;white-space:nowrap;border:none;background:none;transition:background .15s,color .15s}
+    .tab:hover{background:#161b22;color:#e6edf3}
+    .tab.active{background:#161b22;color:#58a6ff;font-weight:600}
+    .topbar-links{display:flex;gap:.75rem;font-size:.82rem;flex-shrink:0}
+    .topbar-links a{color:#8b949e}.topbar-links a:hover{color:#58a6ff}
+    .content{flex:1;overflow:hidden;position:relative}
+    .pane{position:absolute;inset:0;overflow-y:auto;padding:1.5rem;display:none}
+    .pane.active{display:block}
+    /* Services pane */
+    .svc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem}
+    .svc-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1.1rem 1.3rem;display:flex;flex-direction:column;gap:.4rem}
+    .svc-card:hover{border-color:#58a6ff}
+    .svc-name{font-weight:700;font-size:.95rem}
+    .svc-desc{font-size:.82rem;color:#8b949e;line-height:1.4;flex:1}
+    .svc-footer{display:flex;align-items:center;justify-content:space-between;font-size:.78rem;margin-top:.2rem}
+    .svc-url a{color:#58a6ff;word-break:break-all}
+    .host-tag{background:#21262d;border:1px solid #30363d;border-radius:4px;padding:.1rem .4rem;font-size:.7rem;color:#8b949e}
+    .status-dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;margin-right:.3rem}
+    .s-online{background:#3fb950}.s-offline{background:#f85149}.s-unknown{background:#8b949e}
+    .s-badge-online{color:#3fb950;font-size:.76rem;font-weight:600}
+    .s-badge-offline{color:#f85149;font-size:.76rem;font-weight:600}
+    .s-badge-unknown{color:#8b949e;font-size:.76rem}
+    .latency{color:#8b949e;font-size:.7rem;margin-left:.2rem}
+    /* Queue pane */
+    .queue-toolbar{display:flex;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+    .queue-filter{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:.3rem .7rem;color:#e6edf3;font-size:.82rem}
+    .q-list{display:flex;flex-direction:column;gap:.5rem}
+    .q-item{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:.75rem 1rem}
+    .q-item:hover{border-color:#388bfd55}
+    .q-title{font-weight:600;font-size:.9rem;margin-bottom:.3rem}
+    .q-meta{display:flex;gap:.6rem;flex-wrap:wrap;font-size:.76rem;color:#8b949e;align-items:center}
+    /* Agents pane */
+    .agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem}
+    .agent-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1rem 1.2rem}
+    .agent-card.online{border-color:#3fb95044}
+    .agent-card.away{border-color:#e3b34144}
+    .agent-card.offline{border-color:#f8514933;opacity:.75}
+    .agent-name{font-weight:700;font-size:.95rem;margin-bottom:.3rem}
+    .agent-meta{font-size:.78rem;color:#8b949e;line-height:1.6}
+    .agent-badge{display:inline-block;font-size:.7rem;border-radius:3px;padding:.1rem .4rem;margin-right:.3rem}
+    .b-gpu{background:#6e40c922;color:#a371f7;border:1px solid #6e40c955}
+    .b-vllm{background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb55}
+    /* Bus pane */
+    .bus-toolbar{display:flex;gap:.75rem;margin-bottom:.75rem;align-items:center}
+    .bus-status{font-size:.78rem;color:#8b949e}
+    .bus-status.live{color:#3fb950}
+    .bus-log{font-family:'SF Mono',Consolas,monospace;font-size:.78rem;background:#010409;border:1px solid #21262d;border-radius:6px;padding:.75rem 1rem;height:calc(100vh - 200px);overflow-y:auto;display:flex;flex-direction:column;gap:.3rem}
+    .bus-entry{display:flex;gap:.75rem;padding:.25rem 0;border-bottom:1px solid #21262d22}
+    .bus-ts{color:#484f58;min-width:6rem;flex-shrink:0}
+    .bus-type{color:#a371f7;min-width:7rem;flex-shrink:0}
+    .bus-from{color:#58a6ff;min-width:6rem;flex-shrink:0}
+    .bus-body{color:#8b949e;white-space:pre-wrap;word-break:break-all}
+    /* Logs pane */
+    .log-stream{font-family:'SF Mono',Consolas,monospace;font-size:.78rem;background:#010409;border:1px solid #21262d;border-radius:6px;padding:.75rem 1rem;height:calc(100vh - 180px);overflow-y:auto}
+    .log-line{padding:.15rem 0;border-bottom:1px solid #21262d22;display:flex;gap:.75rem}
+    .log-ts{color:#484f58;min-width:5rem;flex-shrink:0}
+    .log-src{min-width:5rem;flex-shrink:0;font-weight:600}
+    .log-msg{color:#8b949e;word-break:break-all}
+    .src-rcc{color:#58a6ff}.src-brain{color:#a371f7}.src-queue{color:#3fb950}.src-agent{color:#e3b341}
+    /* Shared */
+    h1{font-size:1.4rem;font-weight:700;margin-bottom:.25rem}
+    .subtitle{color:#8b949e;font-size:.875rem;margin-bottom:1.25rem}
+    .section-title{font-size:1rem;font-weight:600;color:#8b949e;margin:1.25rem 0 .6rem}
+    .spinner{color:#8b949e;font-size:.9rem}
+    .err{color:#f85149;font-size:.875rem}
+    .refresh-btn{background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:.2rem .6rem;font-size:.76rem;cursor:pointer}
+    .refresh-btn:hover{border-color:#58a6ff;color:#58a6ff}
+    .empty{color:#8b949e;font-size:.875rem;padding:.5rem 0}
+  </style>
+  <title>Rocky Command Center</title>
+</head><body>
+  <div class="topbar">
+    <div class="topbar-logo">🐿️ <span>RCC</span> Rocky Command Center</div>
+    <div class="tab-bar" id="tabs">
+      <button class="tab active" data-pane="services">Services</button>
+      <button class="tab" data-pane="queue">Queue</button>
+      <button class="tab" data-pane="agents">Agents</button>
+      <button class="tab" data-pane="projects">Projects</button>
+      <button class="tab" data-pane="bus">SquirrelBus</button>
+      <button class="tab" data-pane="logs">Logs</button>
+    </div>
+    <div class="topbar-links">
+      <a href="http://146.190.134.110:8790/" target="_blank">💬 Chat</a>
+      <a href="http://146.190.134.110:8090/admin/" target="_blank">🔀 Tokenhub</a>
+    </div>
+  </div>
+  <div class="content">
+    <!-- SERVICES -->
+    <div class="pane active" id="pane-services">
+      <h1>Services</h1>
+      <p class="subtitle">Live health — probed on load</p>
+      <div id="svc-root"><p class="spinner">Probing…</p></div>
+    </div>
+    <!-- QUEUE -->
+    <div class="pane" id="pane-queue">
+      <h1>Work Queue</h1>
+      <p class="subtitle">All items across all agents</p>
+      <div class="queue-toolbar">
+        <select class="queue-filter" id="q-status-filter">
+          <option value="active,pending">Active &amp; Pending</option>
+          <option value="pending">Pending only</option>
+          <option value="active">Active only</option>
+          <option value="failed">Failed</option>
+          <option value="">All (incl. completed)</option>
+        </select>
+        <select class="queue-filter" id="q-agent-filter"><option value="">All agents</option></select>
+        <button class="refresh-btn" onclick="loadQueue()">↻ Refresh</button>
+        <span id="q-count" style="font-size:.78rem;color:#8b949e"></span>
+      </div>
+      <div class="q-list" id="q-root"><p class="spinner">Loading…</p></div>
+    </div>
+    <!-- AGENTS -->
+    <div class="pane" id="pane-agents">
+      <h1>Agents</h1>
+      <p class="subtitle">Heartbeat status across the fleet</p>
+      <button class="refresh-btn" onclick="loadAgents()" style="margin-bottom:1rem">↻ Refresh</button>
+      <div class="agents-grid" id="agents-root"><p class="spinner">Loading…</p></div>
+    </div>
+    <!-- PROJECTS -->
+    <div class="pane" id="pane-projects">
+      <h1>Projects</h1>
+      <p class="subtitle">Registered repos tracked by RCC</p>
+      <div id="proj-root"><p class="spinner">Loading…</p></div>
+    </div>
+    <!-- BUS -->
+    <div class="pane" id="pane-bus">
+      <h1>SquirrelBus</h1>
+      <div class="bus-toolbar">
+        <span class="bus-status" id="bus-status">connecting…</span>
+        <button class="refresh-btn" onclick="reconnectBus()">↻ Reconnect</button>
+      </div>
+      <div class="bus-log" id="bus-log"></div>
+    </div>
+    <!-- LOGS -->
+    <div class="pane" id="pane-logs">
+      <h1>Activity Log</h1>
+      <p class="subtitle">Recent events across RCC</p>
+      <button class="refresh-btn" onclick="loadLogs()" style="margin-bottom:.75rem">↻ Refresh</button>
+      <div class="log-stream" id="log-root"><p class="spinner">Loading…</p></div>
+    </div>
+  </div>
+  <script>
+    function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function timeAgo(ds){if(!ds)return'never';const s=Math.floor((Date.now()-new Date(ds))/1000);if(s<5)return'just now';if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+
+    // ── Tab routing ──────────────────────────────────────────────────────
+    const paneLoaders = {};
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
+      document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-'+name));
+      location.hash = name;
+      if (paneLoaders[name]) paneLoaders[name]();
+    }
+    document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.pane)));
+
+    // ── SERVICES ─────────────────────────────────────────────────────────
+    function renderServices(svcs) {
+      const root = document.getElementById('svc-root');
+      if (!root) return;
+      root.innerHTML = '<div class="svc-grid">' + svcs.map(s => {
+        const ok = s.online, lat = ok && s.latency_ms != null ? '<span class="latency">' + s.latency_ms + 'ms</span>' : '';
+        const dot = ok === null ? 's-unknown' : ok ? 's-online' : 's-offline';
+        const badge = ok === null ? 's-badge-unknown' : ok ? 's-badge-online' : 's-badge-offline';
+        const label = ok === null ? 'unknown' : ok ? 'online' : 'offline';
+        return \`<div class="svc-card">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <span class="svc-name">\${esc(s.name)}</span>
+            <span class="\${badge}"><span class="status-dot \${dot}"></span>\${label}\${lat}</span>
+          </div>
+          <div class="svc-desc">\${esc(s.desc)}</div>
+          <div class="svc-footer">
+            <div class="svc-url"><a href="\${esc(s.url)}" target="_blank">\${esc(s.url)}</a></div>
+            <span class="host-tag">\${esc(s.host)}</span>
+          </div>
+        </div>\`;
+      }).join('') + '</div>';
+    }
+    function loadServices() {
+      const root = document.getElementById('svc-root');
+      if (!root) return;
+      root.innerHTML = '<p class="spinner">Probing… (takes ~2s on cold load)</p>';
+      fetch('/api/services/status')
+        .then(r => r.json())
+        .then(svcs => renderServices(svcs))
+        .catch(e => {
+          const root2 = document.getElementById('svc-root');
+          if (root2) root2.innerHTML = '<p class="err">Failed: ' + esc(e.message) + '</p><button class="refresh-btn" onclick="loadServices()" style="margin-top:.75rem">↻ Retry</button>';
+        });
+    }
+    paneLoaders['services'] = loadServices;
+
+    // ── QUEUE ─────────────────────────────────────────────────────────────
+    let _queueData = [];
+    function renderQueue() {
+      const sf = document.getElementById('q-status-filter').value;
+      const af = document.getElementById('q-agent-filter').value;
+      let items = _queueData;
+      if (sf) {
+        const statuses = sf.split(',');
+        items = items.filter(i => statuses.includes(i.status));
+      }
+      if (af) items = items.filter(i=>i.assignee===af||i.agent===af);
+      document.getElementById('q-count').textContent = items.length + ' item' + (items.length!==1?'s':'');
+      if (!items.length) { document.getElementById('q-root').innerHTML='<p class="empty">No items.</p>'; return; }
+      const statusClass = s => ({'pending':'status-pending','active':'status-active','completed':'status-completed','failed':'status-failed','cancelled':'status-cancelled'}[s]||'');
+      document.getElementById('q-root').innerHTML = items.slice(0,100).map(i=>\`
+        <div class="q-item">
+          <div class="q-title">\${esc(i.title)}</div>
+          <div class="q-meta">
+            <span class="status-badge \${statusClass(i.status)}">\${esc(i.status)}</span>
+            \${i.priority?'<span>⚡ '+esc(i.priority)+'</span>':''}
+            \${(i.assignee||i.agent)?'<span>👤 '+esc(i.assignee||i.agent)+'</span>':''}
+            \${i.createdAt?'<span>'+timeAgo(i.createdAt)+'</span>':''}
+            \${i.description?'<span style="color:#c9d1d9;font-size:.78rem;white-space:normal">'+esc(i.description.slice(0,120))+'</span>':''}
+          </div>
+        </div>\`).join('');
+    }
+    function loadQueue() {
+      document.getElementById('q-root').innerHTML='<p class="spinner">Loading…</p>';
+      fetch('/api/queue').then(r=>r.json()).then(data=>{
+        _queueData = Array.isArray(data) ? data : (data.items||data.queue||[]);
+        // Populate agent filter
+        const agents = [...new Set(_queueData.map(i=>i.assignee||i.agent).filter(Boolean))];
+        const af = document.getElementById('q-agent-filter');
+        af.innerHTML = '<option value="">All agents</option>' + agents.map(a=>\`<option value="\${esc(a)}">\${esc(a)}</option>\`).join('');
+        renderQueue();
+      }).catch(e=>{document.getElementById('q-root').innerHTML='<p class="err">Failed: '+esc(e.message)+'</p>';});
+    }
+    document.getElementById('q-status-filter').addEventListener('change', renderQueue);
+    document.getElementById('q-agent-filter').addEventListener('change', renderQueue);
+    paneLoaders['queue'] = loadQueue;
+
+    // ── AGENTS ────────────────────────────────────────────────────────────
+    function loadAgents() {
+      document.getElementById('agents-root').innerHTML='<p class="spinner">Loading…</p>';
+      fetch('/api/heartbeats').then(r=>r.json()).then(data=>{
+        const agents = Array.isArray(data) ? data : (data.agents || Object.values(data) || []);
+        if (!agents.length) { document.getElementById('agents-root').innerHTML='<p class="empty">No agents.</p>'; return; }
+        // Sort: online first, then away, then offline
+        const statusRank = s => s==='online'?0:s==='away'?1:2;
+        const sorted = [...agents].sort((a,b) => {
+          const sa = a.online ? 'online' : ((Date.now()-new Date(a.lastSeen||a.ts||0))/1000 < 600 ? 'away' : 'offline');
+          const sb = b.online ? 'online' : ((Date.now()-new Date(b.lastSeen||b.ts||0))/1000 < 600 ? 'away' : 'offline');
+          return statusRank(sa) - statusRank(sb);
+        });
+        document.getElementById('agents-root').innerHTML = sorted.map(a=>{
+          // Use server-computed online field when present; fall back to lastSeen age
+          const seen = new Date(a.lastSeen || a.ts || 0);
+          const age = (Date.now() - seen) / 1000;
+          const status = a.online === true ? 'online' : a.online === false ? (age < 600 ? 'away' : 'offline') : (age < 120 ? 'online' : age < 600 ? 'away' : 'offline');
+          const statusLabel = status === 'online' ? '● Online' : status === 'away' ? '◐ Away' : '○ Offline';
+          const statusStyle = status === 'online' ? 'color:#3fb950;font-weight:700' : status === 'away' ? 'color:#e3b341;font-weight:600' : 'color:#f85149;font-weight:600';
+          const badges = (a.gpu?'<span class="agent-badge b-gpu">GPU</span>':'')+(a.vllm?'<span class="agent-badge b-vllm">vLLM</span>':'');
+          const decom = a.decommissioned ? '<span style="color:#f85149;font-size:.72rem"> [decommissioned]</span>' : '';
+          return \`<div class="agent-card \${status}" style="\${a.decommissioned?'opacity:.45':''}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
+              <span class="agent-name">\${esc(a.name||a.agent||'?')}\${decom}</span>
+              <span style="\${statusStyle};font-size:.8rem">\${statusLabel}</span>
+            </div>
+            <div class="agent-meta">
+              \${badges}
+              \${a.host?'<div>🖥 '+esc(a.host)+'</div>':''}
+              \${a.status&&a.status!=='online'?'<div>'+esc(a.status)+'</div>':''}
+              <div style="color:#6e7681;font-size:.75rem">last seen: \${timeAgo(a.lastSeen||a.ts)}</div>
+            </div>
+          </div>\`;
+        }).join('');
+      }).catch(e=>{document.getElementById('agents-root').innerHTML='<p class="err">Failed: '+esc(e.message)+'</p>';});
+    }
+    paneLoaders['agents'] = loadAgents;
+
+    // ── PROJECTS ──────────────────────────────────────────────────────────
+    function loadProjects() {
+      document.getElementById('proj-root').innerHTML='<p class="spinner">Loading…</p>';
+      fetch('/api/projects').then(r=>r.json()).then(projects=>{
+        if (!projects.length) { document.getElementById('proj-root').innerHTML='<p class="empty">No projects.</p>'; return; }
+        const renderCard = p => \`<a href="/projects/\${encodeURIComponent(p.id)}" style="text-decoration:none;display:block" target="_blank">
+          <div class="project-card" style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1.1rem;margin-bottom:.6rem;cursor:pointer">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.35rem">
+              <strong style="font-size:.95rem">\${esc(p.display_name||p.id)}</strong>
+              <span class="badge \${p.kind||''}">\${esc(p.kind||'project')}</span>
+            </div>
+            <div style="font-size:.82rem;color:#8b949e;line-height:1.4">\${esc(p.description||'')}</div>
+          </div></a>\`;
+        document.getElementById('proj-root').innerHTML = projects.map(renderCard).join('');
+      }).catch(e=>{document.getElementById('proj-root').innerHTML='<p class="err">Failed: '+esc(e.message)+'</p>';});
+    }
+    paneLoaders['projects'] = loadProjects;
+
+    // ── BUS ───────────────────────────────────────────────────────────────
+    let _busEs = null;
+    function appendBusEntry(msg) {
+      const log = document.getElementById('bus-log');
+      const div = document.createElement('div');
+      div.className = 'bus-entry';
+      const ts = msg.ts ? new Date(msg.ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+      div.innerHTML = \`<span class="bus-ts">\${esc(ts)}</span><span class="bus-type">\${esc(msg.type||'message')}</span><span class="bus-from">\${esc(msg.from||'?')}</span><span class="bus-body">\${esc(typeof msg.body==='object'?JSON.stringify(msg.body):msg.body||'')}</span>\`;
+      log.appendChild(div);
+      if (log.children.length > 500) log.removeChild(log.firstChild);
+      log.scrollTop = log.scrollHeight;
+    }
+    function reconnectBus() {
+      if (_busEs) { _busEs.close(); _busEs = null; }
+      const status = document.getElementById('bus-status');
+      status.textContent = 'connecting…'; status.className = 'bus-status';
+      document.getElementById('bus-log').innerHTML = '';
+      _busEs = new EventSource('/api/bus/stream');
+      _busEs.onopen = () => { status.textContent = '● live'; status.className = 'bus-status live'; };
+      _busEs.onerror = () => { status.textContent = '✗ disconnected'; status.className = 'bus-status'; };
+      _busEs.onmessage = e => { try { appendBusEntry(JSON.parse(e.data)); } catch {} };
+    }
+    paneLoaders['bus'] = () => { if (!_busEs || _busEs.readyState === 2) reconnectBus(); };
+
+    // ── LOGS ──────────────────────────────────────────────────────────────
+    function loadLogs() {
+      document.getElementById('log-root').innerHTML='<p class="spinner">Loading…</p>';
+      // Pull from queue activity + heartbeat stream as a synthetic log
+      Promise.all([
+        fetch('/api/queue').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/heartbeats').then(r=>r.json()).catch(()=>[]),
+      ]).then(([qRaw, hbRaw]) => {
+        const q = Array.isArray(qRaw) ? qRaw : (qRaw.items||qRaw.queue||[]);
+        const hb = Array.isArray(hbRaw) ? hbRaw : (hbRaw.agents||Object.values(hbRaw)||[]);
+        const lines = [];
+        q.slice(0,40).forEach(i => {
+          if (i.updatedAt||i.createdAt) lines.push({ts:new Date(i.updatedAt||i.createdAt),src:'queue',msg:\`[\${i.status}] \${i.title||''}\`});
+        });
+        hb.forEach(a => {
+          if (a.ts||a.lastSeen) lines.push({ts:new Date(a.ts||a.lastSeen),src:'agent',msg:\`heartbeat from \${a.name||a.agent||'?'} (\${a.status||'online'})\`});
+        });
+        lines.sort((a,b)=>b.ts-a.ts);
+        if (!lines.length) { document.getElementById('log-root').innerHTML='<p class="empty">No recent activity.</p>'; return; }
+        document.getElementById('log-root').innerHTML = lines.slice(0,100).map(l=>\`
+          <div class="log-line">
+            <span class="log-ts">\${l.ts.toLocaleTimeString()}</span>
+            <span class="log-src src-\${l.src}">\${esc(l.src)}</span>
+            <span class="log-msg">\${esc(l.msg)}</span>
+          </div>\`).join('');
+      });
+    }
+    paneLoaders['logs'] = loadLogs;
+
+    // ── Init: switch to default tab AFTER all loaders are registered ────
+    const initTab = (location.hash||'').replace('#','') || 'services';
+    switchTab(initTab);
+
+    // Auto-refresh services every 30s when on that pane
+    setInterval(() => {
+      if (document.getElementById('pane-services').classList.contains('active')) loadServices();
+    }, 30000);
+  </script>
+</body></html>`;
+}
 
 function projectsListHtml() {
   return `<!DOCTYPE html><html lang="en"><head>${HTML_STYLE}<title>Projects — RCC</title></head><body>
@@ -1386,8 +1730,8 @@ async function handleRequest(req, res) {
 
     // ── GET / — redirect to services map (public landing page) ──────────
     if (method === 'GET' && path === '/') {
-      res.writeHead(302, { 'Location': '/services', 'Access-Control-Allow-Origin': '*' });
-      return res.end();
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      return res.end(dashboardHtml());
     }
 
     if (method === 'GET' && path === '/health') {
@@ -2633,6 +2977,75 @@ curl -s -X POST "\$RCC_URL/api/heartbeat/\$AGENT_NAME" \\
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 10.5 — MINIO MEMORY SYNC SETUP (container/vllm-worker only)
+# ═══════════════════════════════════════════════════════════════════════════════
+if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
+  echo "┌─────────────────────────────────────────────────────────┐"
+  echo "│  Phase 10.5: MinIO Memory Sync                         │"
+  echo "└─────────────────────────────────────────────────────────┘"
+  echo "→ Configuring MinIO memory sync (container persistence layer)..."
+
+  # Install mc CLI if not present
+  if ! command -v mc &>/dev/null; then
+    echo "  → Installing mc (MinIO client)..."
+    curl -s https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc 2>/dev/null || \\
+      curl -s https://dl.min.io/client/mc/release/linux-arm64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc 2>/dev/null || \\
+      echo "  ⚠️  mc install failed — manual install required"
+  fi
+
+  # Configure mc alias for do-host1 MinIO
+  MINIO_ENDPOINT="http://100.89.199.14:9000"
+  mc alias set do-host1 "\$MINIO_ENDPOINT" rocky2197fb96dde4618aa17f e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1 2>/dev/null && \\
+    echo "  ✅ mc alias configured (do-host1 MinIO)" || echo "  ⚠️  mc alias setup failed"
+
+  # Install memory sync script
+  SYNC_SCRIPT="\$HOME/.rcc/scripts/memory-sync.sh"
+  mkdir -p "\$HOME/.rcc/scripts"
+  cat > "\$SYNC_SCRIPT" << 'SYNCEOF'
+#!/bin/bash
+# OpenClaw memory sync — push/pull MEMORY.md + memory/*.md to/from MinIO
+MINIO_ALIAS="\${MINIO_ALIAS:-do-host1}"
+MINIO_BUCKET="\${MINIO_BUCKET:-agents}"
+AGENT_NAME="\${AGENT_NAME:-\$(hostname)}"
+WORKSPACE="\${OPENCLAW_WORKSPACE:-\$HOME/.openclaw/workspace}"
+MC="\${MC_PATH:-mc}"
+
+push_memory() {
+  "\$MC" cp "\$WORKSPACE/MEMORY.md" "\$MINIO_ALIAS/\$MINIO_BUCKET/\$AGENT_NAME/MEMORY.md" 2>/dev/null
+  [ -d "\$WORKSPACE/memory" ] && "\$MC" cp --recursive "\$WORKSPACE/memory/" "\$MINIO_ALIAS/\$MINIO_BUCKET/\$AGENT_NAME/memory/" 2>/dev/null
+  echo "[memory-sync] pushed \$AGENT_NAME memory to MinIO"
+}
+
+pull_memory() {
+  if [ ! -f "\$WORKSPACE/MEMORY.md" ] || [ \$((\$(date +%s) - \$(stat -c %Y "\$WORKSPACE/MEMORY.md" 2>/dev/null || echo 0))) -gt 3600 ]; then
+    mkdir -p "\$WORKSPACE" "\$WORKSPACE/memory"
+    "\$MC" cp "\$MINIO_ALIAS/\$MINIO_BUCKET/\$AGENT_NAME/MEMORY.md" "\$WORKSPACE/MEMORY.md" 2>/dev/null
+    "\$MC" cp --recursive "\$MINIO_ALIAS/\$MINIO_BUCKET/\$AGENT_NAME/memory/" "\$WORKSPACE/memory/" 2>/dev/null
+    echo "[memory-sync] pulled \$AGENT_NAME memory from MinIO"
+  fi
+}
+
+case "\${1:-pull}" in push) push_memory ;; pull) pull_memory ;; *) echo "Usage: \$0 [push|pull]" ;; esac
+SYNCEOF
+  chmod +x "\$SYNC_SCRIPT"
+
+  # Add memory sync to openclaw supervisord conf (pre/post hooks)
+  SUPCONF_OC="\$HOME/.config/supervisord.d/openclaw-gateway.conf"
+  if [ -f "\$SUPCONF_OC" ]; then
+    # Update existing conf to add memory sync on start/stop
+    sed -i 's|^command=.*openclaw.*|command=bash -c "\\$HOME/.rcc/scripts/memory-sync.sh pull \\&\\& openclaw gateway start --foreground; \\$HOME/.rcc/scripts/memory-sync.sh push"|' "\$SUPCONF_OC" 2>/dev/null && \\
+      supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
+      echo "  ✅ Memory sync wired into openclaw-gateway supervisord conf"
+  fi
+
+  # Do an initial pull if MinIO has data
+  if command -v mc &>/dev/null; then
+    "\$HOME/.rcc/scripts/memory-sync.sh" pull 2>/dev/null && echo "  ✅ Initial memory pull complete" || echo "  ℹ️  No prior memory found in MinIO (first run)"
+  fi
+  echo ""
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 11 — VERIFICATION
 # ═══════════════════════════════════════════════════════════════════════════════
 echo "┌─────────────────────────────────────────────────────────┐"
@@ -3288,7 +3701,7 @@ loadPackages();
       if (!q.completed) q.completed = [];
       q.completed.push(item);
       await writeQueue(q);
-      notifyJkhCompletion(item, agent); fireWebhooks(item, agent); // fire-and-forget
+      notifyJkhCompletion(item, agent); // fire-and-forget
       // Fan-out to project channel
       if (item.project) {
         const resolution = (item.resolution || item.result || '').slice(0, 200);
@@ -3358,7 +3771,7 @@ loadPackages();
       const q = await readQueue();
       const item = q.items?.find(i => i.id === id);
       if (!item) return json(res, 404, { error: 'Item not found' });
-      const allowed = ['title','description','priority','assignee','status','notes','choices','claimedBy','claimedAt','result','completedAt','type','blockedBy','blocks','needsHuman','needsHumanAt','needsHumanReason','webhook_url'];
+      const allowed = ['title','description','priority','assignee','status','notes','choices','claimedBy','claimedAt','result','completedAt','type','blockedBy','blocks','needsHuman','needsHumanAt','needsHumanReason'];
       const now = new Date().toISOString();
       const changed = [];
       for (const field of allowed) {
@@ -3376,7 +3789,7 @@ loadPackages();
           q.items = q.items.filter(i => i.id !== item.id);
           if (!q.completed) q.completed = [];
           q.completed.push(item);
-          if (item.status === 'completed') { notifyJkhCompletion(item, body._author); fireWebhooks(item, body._author); } // fire-and-forget
+          if (item.status === 'completed') notifyJkhCompletion(item, body._author); // fire-and-forget
         }
         await writeQueue(q);
       }
@@ -3698,7 +4111,7 @@ loadPackages();
       item.itemVersion = (item.itemVersion || 0) + 1;
       if (body?.result) item.result = body.result;
       await writeQueue(q);
-      notifyJkhCompletion(item, body?._author || body?.agent); fireWebhooks(item, body?._author || body?.agent); // fire-and-forget
+      notifyJkhCompletion(item, body?._author || body?.agent); // fire-and-forget
 
       // ── requestId linkage: resolve matching delegation on parent ticket ──
       if (item.requestId) {
@@ -4963,8 +5376,9 @@ loadPackages();
       const envelope = { ...payload, sig };
 
       // Broadcast on SquirrelBus (best-effort)
-      const BUS_URL   = process.env.SQUIRRELBUS_URL || 'http://localhost:8788';
-      const BUS_TOKEN = SQUIRRELBUS_TOKEN;
+      // Use RCC's own /bus/send endpoint (8789) — dashboard proxy (8788) has different auth
+      const BUS_URL   = process.env.SQUIRRELBUS_URL || `http://localhost:${process.env.RCC_PORT || 8789}`;
+      const BUS_TOKEN = process.env.RCC_AGENT_TOKEN || SQUIRRELBUS_TOKEN;
       let busSent = false;
       try {
         const busResp = await fetch(`${BUS_URL}/bus/send`, {
@@ -5706,113 +6120,6 @@ loadPackages();
       return json(res, 200, result);
     }
 
-    // ── GET /api/agentos/metrics — Prometheus text exposition format ─────────────
-    if (method === 'GET' && path === '/api/agentos/metrics') {
-      // Fetch slot data (has 30s cache already)
-      let slots = [];
-      let watchdogMisses = 0;
-      let gpuQueueDepth = 0;
-      let vibeActive = 0;
-      let vibeIdle = 0;
-      let vibeTotal = 0;
-      let agentPoolTotal = 8;
-      let agentPoolAvailable = 8;
-      try {
-        const slotResp = await fetch('http://127.0.0.1:8789/api/agentos/slots', {
-          headers: { authorization: req.headers.authorization || '' },
-        });
-        if (slotResp.ok) {
-          const d = await slotResp.json();
-          slots = d.vibe_engine?.slots || [];
-          vibeActive = d.vibe_engine?.swap_slots?.active || 0;
-          vibeIdle   = d.vibe_engine?.swap_slots?.idle   || 0;
-          vibeTotal  = d.vibe_engine?.swap_slots?.total  || 4;
-          agentPoolTotal     = d.agent_pool?.total_workers || 8;
-          agentPoolAvailable = d.agent_pool?.available    || 8;
-        }
-      } catch (_) {}
-
-      // Fetch mesh for watchdog + GPU data
-      try {
-        const meshResp = await fetch('http://127.0.0.1:8789/api/mesh', {
-          headers: { authorization: req.headers.authorization || '' },
-        });
-        if (meshResp.ok) {
-          const m = await meshResp.json();
-          // Look for sparky node
-          const sparky = (m.nodes || []).find(n => n.id === 'natasha' || n.host === 'sparky');
-          if (sparky) {
-            watchdogMisses = sparky.watchdog_misses || 0;
-            gpuQueueDepth  = sparky.gpu_queue_depth || 0;
-          }
-        }
-      } catch (_) {}
-
-      const now = Date.now();
-      const lines = [
-        '# HELP agentos_vibe_slots_active Number of active VibeEngine WASM swap slots',
-        '# TYPE agentos_vibe_slots_active gauge',
-        `agentos_vibe_slots_active{host="sparky"} ${vibeActive}`,
-        '',
-        '# HELP agentos_vibe_slots_idle Number of idle VibeEngine WASM swap slots',
-        '# TYPE agentos_vibe_slots_idle gauge',
-        `agentos_vibe_slots_idle{host="sparky"} ${vibeIdle}`,
-        '',
-        '# HELP agentos_vibe_slots_total Total VibeEngine WASM swap slot capacity',
-        '# TYPE agentos_vibe_slots_total gauge',
-        `agentos_vibe_slots_total{host="sparky"} ${vibeTotal}`,
-        '',
-        '# HELP agentos_gpu_queue_depth GPU scheduler pending task queue depth',
-        '# TYPE agentos_gpu_queue_depth gauge',
-        `agentos_gpu_queue_depth{host="sparky"} ${gpuQueueDepth}`,
-        '',
-        '# HELP agentos_watchdog_miss_total Cumulative watchdog heartbeat misses detected',
-        '# TYPE agentos_watchdog_miss_total counter',
-        `agentos_watchdog_miss_total{host="sparky"} ${watchdogMisses}`,
-        '',
-        '# HELP agentos_agent_pool_total Total agent pool worker slots',
-        '# TYPE agentos_agent_pool_total gauge',
-        `agentos_agent_pool_total{host="sparky"} ${agentPoolTotal}`,
-        '',
-        '# HELP agentos_agent_pool_available Available (non-running) agent pool worker slots',
-        '# TYPE agentos_agent_pool_available gauge',
-        `agentos_agent_pool_available{host="sparky"} ${agentPoolAvailable}`,
-        '',
-        '# HELP agentos_scrape_timestamp_seconds Unix timestamp of last metrics scrape',
-        '# TYPE agentos_scrape_timestamp_seconds gauge',
-        `agentos_scrape_timestamp_seconds{host="sparky"} ${(now/1000).toFixed(3)}`,
-        '',
-      ];
-
-      // Per-slot metrics
-      lines.push('# HELP agentos_slot_state VibeEngine slot state (1=active, 0=idle)');
-      lines.push('# TYPE agentos_slot_state gauge');
-      for (const slot of slots) {
-        lines.push(`agentos_slot_state{host="sparky",slot="${slot.id}"} ${slot.state === 'active' ? 1 : 0}`);
-      }
-      lines.push('');
-
-      res.writeHead(200, {
-        'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
-        'Cache-Control': 'no-cache',
-      });
-      res.end(lines.join('\n'));
-      return;
-    }
-
-    // ── GET /api/agentos/metrics/history — ring buffer of last 60 snapshots ─────
-    if (method === 'GET' && path === '/api/agentos/metrics/history') {
-      const snapshots = _agentosMetricsHistory.map(s => ({
-        ts:                   s.ts,
-        vibe_active:          s.metrics.vibe_active          ?? 0,
-        vibe_idle:            s.metrics.vibe_idle            ?? 0,
-        gpu_queue_depth:      s.metrics.gpu_queue_depth      ?? 0,
-        watchdog_miss_total:  s.metrics.watchdog_miss_total  ?? 0,
-        agent_pool_available: s.metrics.agent_pool_available ?? 0,
-      }));
-      return json(res, 200, { snapshots, count: snapshots.length });
-    }
-
     // ── GET /api/mesh — agentOS distributed mesh topology + slot health ────────
     if (method === 'GET' && path === '/api/mesh') {
       const now = Date.now();
@@ -6453,55 +6760,6 @@ async function reloadAgentTokens() {
   }
 }
 
-// ── SquirrelBus → agentOS metrics subscriber ───────────────────────────────
-function connectAgentOSMetricsBus() {
-  const BUS_URL = process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
-  const TOKEN   = process.env.RCC_AUTH_TOKEN  || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
-  let backoff = 1_000;
-  const MAX_BACKOFF = 30_000;
-
-  async function connect() {
-    try {
-      const resp = await fetch(`${BUS_URL}/bus/stream`, {
-        headers: { Authorization: `Bearer ${TOKEN}` },
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      backoff = 1_000;
-      console.log('[agentos-bus] Connected to SquirrelBus SSE stream');
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          const raw = line.slice(5).trim();
-          try {
-            const msg = JSON.parse(raw);
-            if (msg.type === 'agentos.metrics' && msg.payload) {
-              _agentosMetricsHistory.push({ ts: msg.ts || new Date().toISOString(), metrics: msg.payload });
-              if (_agentosMetricsHistory.length > 60) _agentosMetricsHistory.shift();
-            }
-          } catch {}
-        }
-      }
-    } catch (e) {
-      console.warn(`[agentos-bus] SSE disconnected: ${e.message} — reconnecting in ${backoff}ms`);
-    }
-    const delay = backoff;
-    backoff = Math.min(backoff * 2, MAX_BACKOFF);
-    setTimeout(connect, delay);
-  }
-
-  connect();
-}
-
 // ── LLM Registry init ──────────────────────────────────────────────────────
 async function initLLMRegistry() {
   const p = new URL(LLM_REGISTRY_PATH, import.meta.url).pathname;
@@ -6550,8 +6808,6 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
       issuesModule.startPeriodicSync(15 * 60 * 1000);
       // Background: index existing pending queue items into rcc_queue_dedup (once at startup, best-effort)
       setTimeout(() => indexPendingQueueItems(), 30_000);
-      // Subscribe to SquirrelBus for agentOS metrics push stream
-      connectAgentOSMetricsBus();
     });
   process.on('SIGTERM', () => process.exit(0));
   process.on('SIGINT',  () => process.exit(0));
