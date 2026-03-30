@@ -30,14 +30,20 @@ jobs:
       # with Tailscale kernel routing. tailscale ping works (userspace) but TCP
       # connections time out. do-host1 is confirmed reachable from sparky LAN.
       - name: Set up SSH keys
+        env:
+          ROCKY_HOST: ${{ secrets.ROCKY_HOST }}
+          ROCKY_SSH_KEY: ${{ secrets.ROCKY_SSH_KEY }}
+          SPARKY_SSH_KEY: ${{ secrets.SPARKY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.ROCKY_SSH_KEY }}" > ~/.ssh/rocky_key
-          echo "${{ secrets.SPARKY_SSH_KEY }}" > ~/.ssh/sparky_key
+          printf '%s\n' "$ROCKY_SSH_KEY" > ~/.ssh/rocky_key
+          printf '%s\n' "$SPARKY_SSH_KEY" > ~/.ssh/sparky_key
           chmod 600 ~/.ssh/rocky_key ~/.ssh/sparky_key
+
+          # Write SSH config using env var (not inline secret — GHA redacts those in heredocs)
           cat >> ~/.ssh/config << EOF
           Host do-host1
-            HostName ${{ secrets.ROCKY_HOST }}
+            HostName $ROCKY_HOST
             User jkh
             IdentityFile ~/.ssh/rocky_key
             StrictHostKeyChecking no
@@ -52,7 +58,7 @@ jobs:
             ProxyJump do-host1
           EOF
 
-          # Verify proxy hop works
+          # Verify each hop
           ssh do-host1 "echo 'Rocky: OK'"
           ssh sparky-lan "echo 'sparky: OK via ProxyJump'"
 
