@@ -149,6 +149,7 @@ const _busSSEClients  = new Set();
 const _busPresence    = {};
 const _busAcks        = new Map();   // messageId → ack entry
 const _busDeadLetters = [];          // [{...msg, _deadReason, _deadAt}]
+const _agentosMetricsHistory = [];   // ring buffer: up to 60 {ts, metrics:{...}} snapshots
 
 // Seed seq from log on startup (async, best-effort)
 (async () => {
@@ -5748,6 +5749,19 @@ loadPackages();
       return;
     }
 
+    // ── GET /api/agentos/metrics/history — ring buffer of last 60 snapshots ─────
+    if (method === 'GET' && path === '/api/agentos/metrics/history') {
+      const snapshots = _agentosMetricsHistory.map(s => ({
+        ts:                   s.ts,
+        vibe_active:          s.metrics.vibe_active          ?? 0,
+        vibe_idle:            s.metrics.vibe_idle            ?? 0,
+        gpu_queue_depth:      s.metrics.gpu_queue_depth      ?? 0,
+        watchdog_miss_total:  s.metrics.watchdog_miss_total  ?? 0,
+        agent_pool_available: s.metrics.agent_pool_available ?? 0,
+      }));
+      return json(res, 200, { snapshots, count: snapshots.length });
+    }
+
     // ── GET /api/mesh — agentOS distributed mesh topology + slot health ────────
     if (method === 'GET' && path === '/api/mesh') {
       const now = Date.now();
@@ -6388,6 +6402,55 @@ async function reloadAgentTokens() {
   }
 }
 
+// ── SquirrelBus → agentOS metrics subscriber ───────────────────────────────
+function connectAgentOSMetricsBus() {
+  const BUS_URL = process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
+  const TOKEN   = process.env.RCC_AUTH_TOKEN  || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+  let backoff = 1_000;
+  const MAX_BACKOFF = 30_000;
+
+  async function connect() {
+    try {
+      const resp = await fetch(`${BUS_URL}/bus/stream`, {
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      backoff = 1_000;
+      console.log('[agentos-bus] Connected to SquirrelBus SSE stream');
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trim();
+          try {
+            const msg = JSON.parse(raw);
+            if (msg.type === 'agentos.metrics' && msg.payload) {
+              _agentosMetricsHistory.push({ ts: msg.ts || new Date().toISOString(), metrics: msg.payload });
+              if (_agentosMetricsHistory.length > 60) _agentosMetricsHistory.shift();
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn(`[agentos-bus] SSE disconnected: ${e.message} — reconnecting in ${backoff}ms`);
+    }
+    const delay = backoff;
+    backoff = Math.min(backoff * 2, MAX_BACKOFF);
+    setTimeout(connect, delay);
+  }
+
+  connect();
+}
+
 // ── LLM Registry init ──────────────────────────────────────────────────────
 async function initLLMRegistry() {
   const p = new URL(LLM_REGISTRY_PATH, import.meta.url).pathname;
@@ -6436,6 +6499,8 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
       issuesModule.startPeriodicSync(15 * 60 * 1000);
       // Background: index existing pending queue items into rcc_queue_dedup (once at startup, best-effort)
       setTimeout(() => indexPendingQueueItems(), 30_000);
+      // Subscribe to SquirrelBus for agentOS metrics push stream
+      connectAgentOSMetricsBus();
     });
   process.on('SIGTERM', () => process.exit(0));
   process.on('SIGINT',  () => process.exit(0));

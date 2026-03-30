@@ -1,0 +1,14 @@
+[Unit]
+Description=agentOS Metrics Push — stream PD metrics to SquirrelBus
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /home/jkh/Src/rockyandfriends/rcc/scripts/agentfs-metrics-push.mjs
+Restart=always
+RestartSec=10
+Environment=RCC_AUTH_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+Environment=SQUIRRELBUS_URL=http://100.89.199.14:8788
+
+[Install]
+WantedBy=multi-user.target
