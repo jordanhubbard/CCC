@@ -5403,6 +5403,11 @@ loadPackages();
         const authKeyEntry = `restrict,port-forwarding,permitopen="localhost:${port}" ${pubkeyTrimmed} ${comment}\n`;
         try {
           await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry, 'utf8');
+          // Fix ownership so sshd accepts the file (must be owned by tunnel user)
+          try {
+            const { execSync } = await import('child_process');
+            execSync(`sudo chown tunnel:tunnel ${TUNNEL_AUTH_KEYS} && sudo chmod 600 ${TUNNEL_AUTH_KEYS}`, { stdio: 'ignore' });
+          } catch {}
           keyWritten = true;
           console.log(`[rcc-api] Tunnel key added for ${agent} on port ${port}`);
         } catch (authErr) {
@@ -5420,6 +5425,10 @@ loadPackages();
         const authKeyEntry = `restrict,port-forwarding,permitopen="localhost:${assigned.port}" ${pubkeyTrimmed} ${comment}\n`;
         try {
           await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry, 'utf8');
+          try {
+            const { execSync } = await import('child_process');
+            execSync(`sudo chown tunnel:tunnel ${TUNNEL_AUTH_KEYS} && sudo chmod 600 ${TUNNEL_AUTH_KEYS}`, { stdio: 'ignore' });
+          } catch {}
           keyWritten = true;
           console.log(`[rcc-api] Tunnel key rotated for ${agent} on port ${assigned.port}`);
         } catch (authErr) {
