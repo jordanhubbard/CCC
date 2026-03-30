@@ -1,0 +1,24 @@
+[Unit]
+Description=Reverse SSH tunnel from sparky to do-host1 (CI access)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jkh
+ExecStart=/usr/bin/ssh \
+    -N \
+    -R 2222:localhost:22 \
+    -o ServerAliveInterval=60 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=no \
+    -i /home/jkh/.ssh/id_ed25519 \
+    rocky@do-host1.tail407856.ts.net
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
