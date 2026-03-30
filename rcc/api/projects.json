@@ -252,5 +252,22 @@
     "status": "active",
     "createdAt": "2026-03-29T07:59:04.942Z",
     "updatedAt": "2026-03-29T07:59:04.942Z"
+  },
+  {
+    "id": "proj-1774815488252",
+    "name": "opencode (→ crush)",
+    "description": "Terminal-based AI coding agent. Original repo opencode-ai/opencode archived; continued as charmbracelet/crush by original author + Charm team. Tracked here for potential RCC integration, enhancements, and web UI front-end for coding sessions.",
+    "repoUrl": null,
+    "slackChannels": [],
+    "tags": [
+      "coding-agent",
+      "terminal",
+      "tui",
+      "opencode",
+      "crush"
+    ],
+    "status": "active",
+    "createdAt": "2026-03-29T20:18:08.252Z",
+    "updatedAt": "2026-03-29T20:18:08.252Z"
   }
 ]

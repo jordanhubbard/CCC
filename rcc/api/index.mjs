@@ -847,6 +847,201 @@ loadRegistry();
 </body></html>`;
 }
 
+function playgroundHtml() {
+  return `<!DOCTYPE html><html lang="en"><head>${HTML_STYLE}
+  <style>
+    .playground-layout{display:grid;grid-template-columns:1fr 1fr;gap:1rem;height:calc(100vh - 140px)}
+    @media(max-width:700px){.playground-layout{grid-template-columns:1fr;height:auto}}
+    .editor-pane,.output-pane{display:flex;flex-direction:column;gap:.5rem}
+    .pane-label{font-size:.8rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+    textarea#src{flex:1;font-family:monospace;font-size:.9rem;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:1rem;resize:none;min-height:300px;outline:none;tab-size:2}
+    textarea#src:focus{border-color:#58a6ff}
+    #out{flex:1;font-family:monospace;font-size:.85rem;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:1rem;overflow:auto;white-space:pre-wrap;min-height:300px}
+    #out.has-error{color:#f85149;border-color:#f85149}
+    #out.has-success{color:#3fb950}
+    .run-bar{display:flex;align-items:center;gap:.75rem}
+    #run-btn{padding:.45rem 1.2rem;background:#238636;border:none;border-radius:6px;color:#fff;font-size:.9rem;font-weight:600;cursor:pointer}
+    #run-btn:hover{background:#2ea043}
+    #run-btn:disabled{opacity:.5;cursor:not-allowed}
+    .status{font-size:.8rem;color:#8b949e}
+    .example-bar{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.25rem}
+    .example-btn{padding:.2rem .6rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:.78rem;cursor:pointer}
+    .example-btn:hover{border-color:#58a6ff;color:#58a6ff}
+    .share-btn{padding:.2rem .6rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:.78rem;cursor:pointer;margin-left:auto}
+  </style>
+</head><body>
+<div class="nav"><a href="/">← RCC</a> &nbsp;·&nbsp; <a href="/packages">Packages</a> &nbsp;·&nbsp; <a href="/services">Services</a></div>
+<h1>🎮 nanolang Playground</h1>
+<p style="color:#8b949e;font-size:.9rem;margin-bottom:.75rem">Write and run nanolang programs in your browser — no install required.</p>
+<div class="example-bar">
+  <span style="font-size:.78rem;color:#8b949e;align-self:center">Examples:</span>
+  <button class="example-btn" data-ex="hello">Hello World</button>
+  <button class="example-btn" data-ex="fib">Fibonacci</button>
+  <button class="example-btn" data-ex="fact">Factorial</button>
+  <button class="example-btn" data-ex="list">Lists</button>
+  <button class="example-btn" data-ex="match">Pattern Match</button>
+</div>
+<div class="run-bar">
+  <button id="run-btn">▶ Run</button>
+  <span class="status" id="status"></span>
+  <button class="share-btn" id="share-btn">🔗 Share</button>
+</div>
+<div class="playground-layout">
+  <div class="editor-pane">
+    <div class="pane-label">nano source</div>
+    <textarea id="src" spellcheck="false" placeholder="Write your nano program here..."></textarea>
+  </div>
+  <div class="output-pane">
+    <div class="pane-label">output</div>
+    <div id="out">Click ▶ Run to execute your program.</div>
+  </div>
+</div>
+<script>
+const EXAMPLES = {
+  hello: \`fn main() -> int {
+    (println "Hello from nanolang!")
+    (println "The answer is: 42")
+    return 0
+}\`,
+  fib: \`fn fib(n: int) -> int {
+    if (< n 2) { return n }
+    return (+ (fib (- n 1)) (fib (- n 2)))
+}
+
+fn main() -> int {
+    let i: int = 0
+    while (< i 10) {
+        (print (fib i))
+        (print " ")
+        set i = (+ i 1)
+    }
+    (println "")
+    return 0
+}\`,
+  fact: \`fn factorial(n: int) -> int {
+    if (<= n 1) { return 1 }
+    return (* n (factorial (- n 1)))
+}
+
+fn main() -> int {
+    (println (factorial 10))
+    (println (factorial 5))
+    return 0
+}\`,
+  list: \`fn sum(lst: [int]) -> int {
+    let acc: int = 0
+    let i: int = 0
+    while (< i (list_length lst)) {
+        set acc = (+ acc (list_get lst i))
+        set i = (+ i 1)
+    }
+    return acc
+}
+
+fn main() -> int {
+    let nums: [int] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    (println (sum nums))
+    return 0
+}\`,
+  match: \`fn describe(n: int) -> string {
+    match n {
+        0 => "zero",
+        1 => "one",
+        _ => "many"
+    }
+}
+
+fn main() -> int {
+    (println (describe 0))
+    (println (describe 1))
+    (println (describe 99))
+    return 0
+}\`
+};
+
+const src = document.getElementById('src');
+const out = document.getElementById('out');
+const runBtn = document.getElementById('run-btn');
+const status = document.getElementById('status');
+
+// Load from URL hash or default to hello
+function loadFromHash() {
+  const hash = location.hash.slice(1);
+  if (hash) {
+    try { src.value = decodeURIComponent(atob(hash)); return; } catch(e) {}
+  }
+  src.value = EXAMPLES.hello;
+}
+loadFromHash();
+
+// Example buttons
+document.querySelectorAll('.example-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    src.value = EXAMPLES[btn.dataset.ex] || '';
+    out.textContent = 'Click ▶ Run to execute your program.';
+    out.className = '';
+    location.hash = '';
+  });
+});
+
+// Share button
+document.getElementById('share-btn').addEventListener('click', () => {
+  const encoded = btoa(encodeURIComponent(src.value));
+  location.hash = encoded;
+  navigator.clipboard?.writeText(location.href);
+  status.textContent = 'Link copied!';
+  setTimeout(() => { status.textContent = ''; }, 2000);
+});
+
+// Tab key support in textarea
+src.addEventListener('keydown', e => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const s = src.selectionStart, end = src.selectionEnd;
+    src.value = src.value.substring(0, s) + '  ' + src.value.substring(end);
+    src.selectionStart = src.selectionEnd = s + 2;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    runBtn.click();
+  }
+});
+
+// Run
+runBtn.addEventListener('click', async () => {
+  runBtn.disabled = true;
+  status.textContent = 'Compiling…';
+  out.className = '';
+  out.textContent = '';
+  const t0 = Date.now();
+  try {
+    const resp = await fetch('/api/playground/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: src.value })
+    });
+    const data = await resp.json();
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+    if (data.error) {
+      out.textContent = data.error;
+      out.className = 'has-error';
+      status.textContent = 'Error';
+    } else {
+      out.textContent = data.stdout || '(no output)';
+      if (data.stderr) out.textContent += '\\n--- stderr ---\\n' + data.stderr;
+      out.className = data.exit_code === 0 ? 'has-success' : 'has-error';
+      status.textContent = \`Done in \${elapsed}s (exit \${data.exit_code})\`;
+    }
+  } catch(e) {
+    out.textContent = 'Network error: ' + e.message;
+    out.className = 'has-error';
+    status.textContent = 'Failed';
+  }
+  runBtn.disabled = false;
+});
+</script>
+</body></html>`;
+}
+
 function servicesHtml() {
   return `<!DOCTYPE html><html lang="en"><head>${HTML_STYLE}
   <style>
@@ -1492,6 +1687,77 @@ async function handleRequest(req, res) {
     if (method === 'GET' && path === '/packages') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
       res.end(packagesHtml());
+      return;
+    }
+
+    // ── UI: GET /playground — nanolang browser playground ────────────────
+    if (method === 'GET' && path === '/playground') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      res.end(playgroundHtml());
+      return;
+    }
+
+    // ── API: POST /api/playground/run — compile + run nano source ────────
+    if (method === 'POST' && path === '/api/playground/run') {
+      let body = '';
+      req.on('data', d => { body += d; });
+      req.on('end', () => {
+        try {
+          const { source } = JSON.parse(body);
+          if (!source || typeof source !== 'string') {
+            return json(res, 400, { error: 'source field required' });
+          }
+          if (source.length > 32768) {
+            return json(res, 400, { error: 'Source too large (max 32KB)' });
+          }
+          const { execFile, exec: execCmd } = await import('child_process');
+          const { writeFileSync, unlinkSync, mkdtempSync } = await import('fs');
+          const { join: pathJoin, tmpdir } = await import('path');
+
+          const tmpDir = mkdtempSync(pathJoin(tmpdir(), 'nano-playground-'));
+          const srcPath = pathJoin(tmpDir, 'prog.nano');
+          const binPath = pathJoin(tmpDir, 'prog');
+          writeFileSync(srcPath, source, 'utf8');
+
+          const NANOC = process.env.NANOC_BIN || '/home/jkh/Src/nanolang/bin/nanoc';
+          const TIMEOUT_MS = 10000;
+
+          // Compile
+          const compileResult = await new Promise(resolve => {
+            execFile(NANOC, [srcPath, '-o', binPath], { timeout: TIMEOUT_MS }, (err, stdout, stderr) => {
+              resolve({ err, stdout, stderr, code: err?.code ?? 0 });
+            });
+          });
+
+          if (compileResult.err && !require('fs').existsSync(binPath)) {
+            // Compile error
+            try { unlinkSync(srcPath); } catch(_) {}
+            try { require('fs').rmdirSync(tmpDir, { recursive: true }); } catch(_) {}
+            const errMsg = (compileResult.stderr || compileResult.stdout || compileResult.err?.message || 'Compilation failed').trim();
+            return json(res, 200, { error: errMsg, exit_code: compileResult.code || 1, stdout: '', stderr: errMsg });
+          }
+
+          // Run with timeout
+          const runResult = await new Promise(resolve => {
+            execFile(binPath, [], { timeout: TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+              resolve({ err, stdout: stdout || '', stderr: stderr || '', code: err?.code ?? 0 });
+            });
+          });
+
+          // Cleanup
+          try { unlinkSync(srcPath); } catch(_) {}
+          try { unlinkSync(binPath); } catch(_) {}
+          try { require('fs').rmdirSync(tmpDir, { recursive: true }); } catch(_) {}
+
+          return json(res, 200, {
+            stdout: runResult.stdout.slice(0, 65536),
+            stderr: runResult.stderr.slice(0, 4096),
+            exit_code: runResult.code
+          });
+        } catch (e) {
+          return json(res, 500, { error: String(e?.message || e) });
+        }
+      });
       return;
     }
 
