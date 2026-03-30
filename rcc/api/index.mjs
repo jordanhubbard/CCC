@@ -2084,12 +2084,8 @@ set -u
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PHASE 5 — OPENCLAW (skipped for vllm-worker / container roles)
+# PHASE 5 — OPENCLAW INSTALL + SUPERVISORD SETUP (all roles including vllm-worker)
 # ═══════════════════════════════════════════════════════════════════════════════
-if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
-echo "→ Skipping OpenClaw install (vllm-worker role — pure GPU compute node)"
-echo ""
-else
 echo "┌─────────────────────────────────────────────────────────┐"
 echo "│  Phase 5: OpenClaw Install                              │"
 echo "└─────────────────────────────────────────────────────────┘"
@@ -2119,6 +2115,11 @@ if command -v openclaw &>/dev/null; then
     " 2>/dev/null || true
   fi
   openclaw config set gateway.mode local 2>/dev/null || true
+  if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
+    echo "→ vllm-worker: configuring openclaw in poll-only mode (no inbound port needed)"
+    openclaw config set gateway.pollOnly true 2>/dev/null || true
+    openclaw config set heartbeat.interval 60 2>/dev/null || true
+  fi
   openclaw gateway restart 2>/dev/null || openclaw gateway start
 else
   echo "→ Installing openclaw..."
@@ -2127,10 +2128,41 @@ else
   npm --version || { echo "ERROR: npm missing"; exit 1; }
   sudo npm install -g openclaw || { echo "ERROR: npm install -g openclaw failed"; exit 1; }
   openclaw config set gateway.mode local 2>/dev/null || true
+  if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
+    echo "→ vllm-worker: configuring openclaw in poll-only mode"
+    openclaw config set gateway.pollOnly true 2>/dev/null || true
+    openclaw config set heartbeat.interval 60 2>/dev/null || true
+  fi
   openclaw gateway start
 fi
 echo ""
-fi  # end PHASE 5 (skipped for vllm-worker)
+
+# For vllm-worker containers: wire openclaw-gateway into supervisord so it survives restarts
+if [ "\$AGENT_ROLE" = "vllm-worker" ] && command -v supervisorctl &>/dev/null; then
+  echo "→ Wiring openclaw-gateway into supervisord..."
+  OPENCLAW_BIN=\$(command -v openclaw)
+  SUPCONF_OC="\$HOME/.config/supervisord.d/openclaw-gateway.conf"
+  mkdir -p "\$(dirname \$SUPCONF_OC)"
+  cat > "\$SUPCONF_OC" << OCEOF
+[program:openclaw-gateway]
+command=\${OPENCLAW_BIN} gateway start --foreground
+autostart=true
+autorestart=true
+startsecs=5
+startretries=999
+environment=HOME="\$(echo \$HOME)",RCC_AGENT_TOKEN="\$RCC_AGENT_TOKEN"
+stdout_logfile=\$HOME/.rcc/logs/openclaw-gateway.log
+stderr_logfile=\$HOME/.rcc/logs/openclaw-gateway.log
+OCEOF
+  mkdir -p "\$HOME/.rcc/logs"
+  supervisorctl reread 2>/dev/null && supervisorctl update 2>/dev/null && \\
+    echo "  ✅ openclaw-gateway registered with supervisord" || \\
+    echo "  ⚠️  supervisorctl update failed — manual restart required"
+elif [ "\$AGENT_ROLE" = "vllm-worker" ] && ! command -v supervisorctl &>/dev/null; then
+  echo "→ supervisord not found — openclaw-gateway will not persist across container restarts"
+  echo "  Consider: apt-get install -y supervisor  then re-run onboard"
+fi
+echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 6 — REGISTRATION
@@ -2191,8 +2223,8 @@ echo "┌───────────────────────�
 echo "│  Phase 7: vLLM Setup                                    │"
 echo "└─────────────────────────────────────────────────────────┘"
 
-VLLM_MODEL_ID="nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
-VLLM_MODEL_DIR="/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+VLLM_MODEL_ID="Qwen/Qwen2.5-72B-Instruct-AWQ"
+VLLM_MODEL_DIR="/tmp/models/Qwen/Qwen2.5-72B-Instruct-AWQ"
 VLLM_PORT=8080
 VLLM_SERVED_MODEL_NAME="nemotron"
 
@@ -2213,7 +2245,7 @@ deactivate
 echo "  ✅ vLLM installed in \$VLLM_VENV"
 
 # Model download (peer-to-peer with HuggingFace fallback)
-echo "→ Acquiring model: \$VLLM_MODEL_ID (~128 GB FP8)"
+echo "→ Acquiring model: \$VLLM_MODEL_ID (~38GB AWQ, fits 49GB L40)"
 mkdir -p "\$VLLM_MODEL_DIR"
 
 if [ -f "\$VLLM_MODEL_DIR/config.json" ]; then
@@ -2274,7 +2306,7 @@ print(' '.join(seeders))
     source "\$VLLM_VENV/bin/activate"
     python3 -c "
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id='nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8',
+snapshot_download(repo_id='Qwen/Qwen2.5-72B-Instruct-AWQ',
   local_dir='\$VLLM_MODEL_DIR', local_dir_use_symlinks=False, resume_download=True)
 print('Download complete')
 "
@@ -2288,7 +2320,7 @@ echo "→ Setting up model seeder (port 18081)..."
 SEEDER_SCRIPT="\$HOME/.rcc/model-seeder.sh"
 cat > "\$SEEDER_SCRIPT" << 'SEEDEOF'
 #!/usr/bin/env bash
-MODEL_DIR="/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+MODEL_DIR="/tmp/models/Qwen/Qwen2.5-72B-Instruct-AWQ"
 PORT=18081
 PID_FILE="\$HOME/.rcc/model-seeder.pid"
 if [ -f "\$PID_FILE" ] && kill -0 "\$(cat \$PID_FILE)" 2>/dev/null; then
@@ -2424,11 +2456,11 @@ echo "│  Phase 9: vLLM Service                                  │"
 echo "└─────────────────────────────────────────────────────────┘"
 
 VLLM_VENV="\$HOME/.vllm-venv"
-VLLM_MODEL_DIR="/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+VLLM_MODEL_DIR="/tmp/models/Qwen/Qwen2.5-72B-Instruct-AWQ"
 TP_SIZE=\$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 1)
 
 # Container-aware vLLM service setup: systemd user > supervisord > nohup
-VLLM_START_CMD="\$VLLM_VENV/bin/python3 -m vllm.entrypoints.openai.api_server --model \$VLLM_MODEL_DIR --served-model-name nemotron --port 8080 --tensor-parallel-size \$TP_SIZE --max-model-len 262144 --enforce-eager --trust-remote-code"
+VLLM_START_CMD="\$VLLM_VENV/bin/python3 -m vllm.entrypoints.openai.api_server --model \$VLLM_MODEL_DIR --served-model-name qwen2.5-72b --port 8080 --tensor-parallel-size \$TP_SIZE --max-model-len 262144 --enforce-eager --trust-remote-code"
 
 # Re-use HAS_SYSTEMD / HAS_SUPERVISORD detected in phase 8 (or re-detect)
 if [ -z "\${HAS_SYSTEMD:-}" ]; then
