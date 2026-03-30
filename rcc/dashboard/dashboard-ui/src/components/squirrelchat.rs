@@ -480,6 +480,10 @@ pub fn SquirrelChat() -> impl IntoView {
     let (sidebar_open, set_sidebar_open) = create_signal(false);
     // Presence map — polled every 30s
     let (presence, set_presence) = create_signal(ScPresenceMap::default());
+    // Per-agent voice config
+    let (voice_configs, set_voice_configs) = create_signal(default_voice_config());
+    // Voice config panel visibility
+    let (show_voice_config, set_show_voice_config) = create_signal(false);
     // Typing indicators: channel_id → set of agent names currently typing (excluding self)
     let (typing_users, set_typing_users) = create_signal(std::collections::HashMap::<String, std::collections::HashSet<String>>::new());
     // WebSocket handle for sending client frames
@@ -665,6 +669,20 @@ pub fn SquirrelChat() -> impl IntoView {
                             // Check if current user is @mentioned in this message
                             let my_id = identity.get_untracked().id.clone();
                             let my_name = identity.get_untracked().name.clone();
+
+                            // Auto-play TTS if configured for this sender
+                            {
+                                let sender = message.from_agent.as_deref().unwrap_or("").to_lowercase();
+                                let vcfg = voice_configs.get_untracked();
+                                if let Some(cfg) = vcfg.get(&sender) {
+                                    if cfg.auto_play {
+                                        let text = message.text.as_deref().unwrap_or("").to_string();
+                                        if !text.is_empty() && text.len() < 500 {
+                                            play_tts_with_label(&text, &sender, cfg);
+                                        }
+                                    }
+                                }
+                            }
                             let msg_text = message.text.as_deref().unwrap_or("");
                             let is_mention = message.mentions.iter().any(|m| {
                                 m == &my_id || m == &my_name
@@ -1369,6 +1387,13 @@ pub fn SquirrelChat() -> impl IntoView {
                                             view! { <span class="conn-badge conn-waiting">"○ offline"</span> }.into_view()
                                         }}
                                     </span>
+                                    // Voice config button
+                                    <button
+                                        class="sc-voice-config-btn"
+                                        class:sc-voice-config-active=move || show_voice_config.get()
+                                        title="Voice settings"
+                                        on:click=move |_| set_show_voice_config.update(|v| *v = !*v)
+                                    >"🎙️"</button>
                                     // Pins toggle button
                                     <button
                                         class="sc-pins-btn"
@@ -1382,6 +1407,25 @@ pub fn SquirrelChat() -> impl IntoView {
                                         }}
                                     </button>
                                 </div>
+
+                                // Voice config panel
+                                {move || if show_voice_config.get() {
+                                    let agent_names: Vec<String> = agents.get().iter()
+                                        .map(|a| a.name.clone().to_lowercase())
+                                        .collect();
+                                    let names = if agent_names.is_empty() {
+                                        FALLBACK_AGENT_NAMES.iter().map(|s| s.to_lowercase()).collect()
+                                    } else {
+                                        agent_names
+                                    };
+                                    view! {
+                                        <VoiceConfigPanel
+                                            voice_configs=voice_configs
+                                            set_voice_configs=set_voice_configs
+                                            agents=names
+                                        />
+                                    }.into_view()
+                                } else { ().into_view() }}
 
                                 // Pinned messages panel
                                 {move || if show_pins_panel.get() {
