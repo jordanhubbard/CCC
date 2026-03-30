@@ -22,118 +22,133 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Join tailnet. Plain pre-auth key (reusable + ephemeral, no tags needed).
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v3
+      # Route: CI runner → do-host1/Rocky (146.190.134.110, ROCKY_HOST) → sparky LAN (10.11.100.116)
+      #
+      # Why ProxyJump instead of Tailscale direct:
+      # sparky has GlobalProtect VPN (gpd0, pangp policy routing) that conflicts with
+      # Tailscale's kernel routing table. `tailscale ping` uses userspace and works,
+      # but kernel TCP (including tailscale nc and direct SSH) hits the pangp rules
+      # and times out. do-host1 is on the same LAN and can reach sparky:22 directly.
+      - name: Run build on sparky via SSH (ProxyJump through do-host1)
+        uses: appleboy/ssh-action@v1
         with:
-          authkey: ${{ secrets.TS_AUTHKEY }}
-          args: "--ephemeral --accept-routes"
+          host: 10.11.100.116
+          username: jkh
+          key: ${{ secrets.SPARKY_SSH_KEY }}
+          timeout: 300s
+          proxy_host: ${{ secrets.ROCKY_HOST }}
+          proxy_username: jkh
+          proxy_key: ${{ secrets.ROCKY_SSH_KEY }}
+          proxy_timeout: 30s
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+            source "$HOME/.cargo/env"
 
-      # Set up SSH key and config with tailscale nc ProxyCommand.
-      # sparky has GlobalProtect VPN that conflicts with Tailscale's kernel routing —
-      # direct TCP to 100.87.229.125:22 times out. tailscale nc uses Tailscale's own
-      # userspace path, bypassing the VPN entirely. Tailscale SSH is enabled on sparky.
-      - name: Set up SSH via tailscale nc
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SPARKY_SSH_KEY }}" > ~/.ssh/sparky_key
-          chmod 600 ~/.ssh/sparky_key
-          SPARKY_TS_IP="100.87.229.125"
-          cat >> ~/.ssh/config << EOF
-          Host sparky
-            HostName $SPARKY_TS_IP
-            User jkh
-            IdentityFile ~/.ssh/sparky_key
-            StrictHostKeyChecking no
-            ProxyCommand tailscale nc %h %p
-          EOF
-          # Debug: confirm tailscale joined and can see sparky
-          echo "Tailscale status:"
-          tailscale status | grep -E "sparky|100.87" || echo "(sparky not visible yet)"
-          echo "Testing tailscale nc to $SPARKY_TS_IP:22..."
-          timeout 10 tailscale nc "$SPARKY_TS_IP" 22 < /dev/null && echo "nc OK" || echo "nc failed (exit $?)"
-          # Verify SSH
-          ssh sparky "echo '✓ SSH via tailscale nc working'"
+            echo "=== sparky WASM build ==="
+            echo "Commit: ${{ github.sha }}"
+            echo "Rust: $(rustc --version)"
+            echo "trunk: $(trunk --version)"
+            echo "sccache: $(sccache --version)"
 
-      - name: Run build on sparky
-        run: |
-          # Note: no quotes on REMOTE heredoc so ${{ github.sha }} expands on the runner
-          ssh sparky << REMOTE
-          set -euo pipefail
-          export PATH="\$HOME/.cargo/bin:\$HOME/.local/bin:\$PATH"
-          source "\$HOME/.cargo/env"
+            cd ~/.openclaw/workspace
+            git fetch origin main
+            git checkout ${{ github.sha }} -- rcc/dashboard/
 
-          echo "=== sparky WASM build ==="
-          echo "Rust: \$(rustc --version)"
-          echo "trunk: \$(trunk --version)"
-          echo "sccache: \$(sccache --version)"
+            cd rcc/dashboard/dashboard-ui
 
-          cd ~/.openclaw/workspace
-          git fetch origin main
-          git checkout ${{ github.sha }} -- rcc/dashboard/
+            # Build (sccache warm = ~9s, cold ~26s)
+            RUSTC_WRAPPER=sccache trunk build --release 2>&1
 
-          cd rcc/dashboard/dashboard-ui
-          RUSTC_WRAPPER=sccache trunk build --release 2>&1
-
-          echo "=== Build complete ==="
-          du -sh ../dist/
-          REMOTE
+            echo "=== Build complete ==="
+            du -sh ../dist/
 
       - name: Package and publish dist artifact to MinIO
-        run: |
-          ssh sparky << 'REMOTE'
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 10.11.100.116
+          username: jkh
+          key: ${{ secrets.SPARKY_SSH_KEY }}
+          timeout: 60s
+          proxy_host: ${{ secrets.ROCKY_HOST }}
+          proxy_username: jkh
+          proxy_key: ${{ secrets.ROCKY_SSH_KEY }}
+          proxy_timeout: 30s
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.local/bin:$PATH"
 
-          DIST="$HOME/.openclaw/workspace/rcc/dashboard/dist"
-          TARBALL="/tmp/wasm-dist-latest.tar.gz"
+            DIST="$HOME/.openclaw/workspace/rcc/dashboard/dist"
+            TARBALL="/tmp/wasm-dist-${{ github.sha }}.tar.gz"
 
-          tar -czf "$TARBALL" -C "$DIST" .
-          echo "Artifact: $(du -sh $TARBALL)"
+            tar -czf "$TARBALL" -C "$DIST" .
+            echo "Artifact: $(du -sh $TARBALL)"
 
-          python3 << 'PYEOF'
-          import urllib.request, hmac, hashlib, datetime, sys
+            # Upload to MinIO via S3 API
+            python3 << 'PYEOF'
+            import urllib.request, json, hmac, hashlib, datetime, os, sys
 
-          payload = open("/tmp/wasm-dist-latest.tar.gz", "rb").read()
-          endpoint = "http://100.89.199.14:9000"
-          access_key = "rocky2197fb96dde4618aa17f"
-          secret_key = "e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1"
-          bucket = "agents"
+            sha_file = open("/tmp/wasm-dist-${{ github.sha }}.tar.gz", "rb").read()
+            payload = sha_file
 
-          def sign(k, msg):
-              return hmac.new(k, msg.encode(), hashlib.sha256).digest()
-          def get_key(secret, date, region, service):
-              return sign(sign(sign(sign(("AWS4"+secret).encode(), date), region), service), "aws4_request")
-          def put_object(k, data):
-              now = datetime.datetime.utcnow()
-              amz_date = now.strftime("%Y%m%dT%H%M%SZ")
-              date_stamp = now.strftime("%Y%m%d")
-              region, service, host = "us-east-1", "s3", "100.89.199.14:9000"
-              content_type = "application/gzip"
-              payload_hash = hashlib.sha256(data).hexdigest()
-              canon_headers = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
-              signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
-              canon_req = f"PUT\n/{bucket}/{k}\n\n{canon_headers}\n{signed_headers}\n{payload_hash}"
-              cred_scope = f"{date_stamp}/{region}/{service}/aws4_request"
-              string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{cred_scope}\n{hashlib.sha256(canon_req.encode()).hexdigest()}"
-              sig = hmac.new(get_key(secret_key, date_stamp, region, service), string_to_sign.encode(), hashlib.sha256).hexdigest()
-              auth = f"AWS4-HMAC-SHA256 Credential={access_key}/{cred_scope}, SignedHeaders={signed_headers}, Signature={sig}"
-              req = urllib.request.Request(f"{endpoint}/{bucket}/{k}", data=data, method="PUT")
-              req.add_header("Content-Type", content_type); req.add_header("x-amz-date", amz_date)
-              req.add_header("x-amz-content-sha256", payload_hash); req.add_header("Authorization", auth)
-              urllib.request.urlopen(req)
-              print(f"Published: {k} ({len(data)} bytes)")
+            endpoint = "http://100.89.199.14:9000"
+            access_key = "rocky2197fb96dde4618aa17f"
+            secret_key = "e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1"
+            bucket = "agents"
+            key = "natasha/wasm-dist-latest.tar.gz"
+            key_sha = "natasha/wasm-dist-${{ github.sha }}.tar.gz"
 
-          put_object("natasha/wasm-dist-latest.tar.gz", payload)
-          PYEOF
-          REMOTE
+            def sign(k, msg):
+                return hmac.new(k, msg.encode(), hashlib.sha256).digest()
+            def get_key(secret, date, region, service):
+                return sign(sign(sign(sign(("AWS4"+secret).encode(), date), region), service), "aws4_request")
+
+            def put_object(k, data):
+                now = datetime.datetime.utcnow()
+                amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+                date_stamp = now.strftime("%Y%m%d")
+                region, service = "us-east-1", "s3"
+                host = "100.89.199.14:9000"
+                content_type = "application/gzip"
+                payload_hash = hashlib.sha256(data).hexdigest()
+                canon_headers = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
+                signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+                canon_req = f"PUT\n/{bucket}/{k}\n\n{canon_headers}\n{signed_headers}\n{payload_hash}"
+                cred_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+                string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{cred_scope}\n{hashlib.sha256(canon_req.encode()).hexdigest()}"
+                sig_key = get_key(secret_key, date_stamp, region, service)
+                sig = hmac.new(sig_key, string_to_sign.encode(), hashlib.sha256).hexdigest()
+                auth = f"AWS4-HMAC-SHA256 Credential={access_key}/{cred_scope}, SignedHeaders={signed_headers}, Signature={sig}"
+                req = urllib.request.Request(f"{endpoint}/{bucket}/{k}", data=data, method="PUT")
+                req.add_header("Content-Type", content_type)
+                req.add_header("x-amz-date", amz_date)
+                req.add_header("x-amz-content-sha256", payload_hash)
+                req.add_header("Authorization", auth)
+                try:
+                    urllib.request.urlopen(req)
+                    print(f"Published: {k} ({len(data)} bytes)")
+                except Exception as e:
+                    print(f"Upload failed for {k}: {e}", file=sys.stderr)
+                    sys.exit(1)
+
+            put_object(key, payload)      # latest
+            put_object(key_sha, payload)  # immutable by SHA
+            PYEOF
 
       - name: Run dashboard-server unit tests on sparky
-        run: |
-          ssh sparky << 'REMOTE'
-          set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          source "$HOME/.cargo/env"
-          cd ~/.openclaw/workspace/rcc/dashboard
-          cargo test --package dashboard-server 2>&1 | tail -5
-          REMOTE
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 10.11.100.116
+          username: jkh
+          key: ${{ secrets.SPARKY_SSH_KEY }}
+          timeout: 120s
+          proxy_host: ${{ secrets.ROCKY_HOST }}
+          proxy_username: jkh
+          proxy_key: ${{ secrets.ROCKY_SSH_KEY }}
+          proxy_timeout: 30s
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.cargo/bin:$PATH"
+            source "$HOME/.cargo/env"
+            cd ~/.openclaw/workspace/rcc/dashboard
+            cargo test --package dashboard-server 2>&1 | tail -5
