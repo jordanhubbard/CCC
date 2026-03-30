@@ -88,12 +88,12 @@ jobs:
             curl -sf -X PUT \
               -H 'Content-Type: application/octet-stream' \
               --data-binary @\"\$TARBALL\" \
-              'http://100.89.199.14:9000/agents/natasha/wasm-dist-latest.tar.gz' \
+              'http://146.190.134.110:9000/agents/natasha/wasm-dist-latest.tar.gz' \
               -u 'rocky2197fb96dde4618aa17f:e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1'
             curl -sf -X PUT \
               -H 'Content-Type: application/octet-stream' \
               --data-binary @\"\$TARBALL\" \
-              'http://100.89.199.14:9000/agents/natasha/wasm-dist-$GITHUB_SHA.tar.gz' \
+              'http://146.190.134.110:9000/agents/natasha/wasm-dist-$GITHUB_SHA.tar.gz' \
               -u 'rocky2197fb96dde4618aa17f:e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1'
             echo 'Published to MinIO'
           "
