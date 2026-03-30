@@ -92,6 +92,7 @@ jobs:
           # Instead, SSH to Rocky and have Rocky scp from sparky tunnel port.
           ssh do-host1 GITHUB_SHA="$GITHUB_SHA" "
             set -euo pipefail
+            export PATH=\"\$HOME/bin:\$HOME/.local/bin:\$PATH\"
             TARBALL=\"/tmp/wasm-dist-\$GITHUB_SHA.tar.gz\"
             scp -i ~/.ssh/id_ed25519_sparky_ci -o StrictHostKeyChecking=no -P 2222 jkh@127.0.0.1:\$TARBALL \$TARBALL
             echo \"Fetched: \$(du -sh \$TARBALL)\"
