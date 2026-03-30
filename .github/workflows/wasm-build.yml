@@ -22,6 +22,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # CI path: runner -> do-host1 (ROCKY_HOST) -> 127.0.0.1:2222 -> sparky sshd
+      # sparky's GlobalProtect VPN blocks all inbound TCP to :22.
+      # Fix: persistent reverse SSH tunnel from sparky -> do-host1 exposes :2222.
       - name: Set up SSH keys and ProxyJump config
         env:
           ROCKY_HOST: ${{ secrets.ROCKY_HOST }}
@@ -32,7 +35,6 @@ jobs:
           printf '%s\n' "$ROCKY_SSH_KEY" > ~/.ssh/rocky_key
           printf '%s\n' "$SPARKY_SSH_KEY" > ~/.ssh/sparky_key
           chmod 600 ~/.ssh/rocky_key ~/.ssh/sparky_key
-
           cat >> ~/.ssh/config << EOF
           Host do-host1
             HostName $ROCKY_HOST
@@ -40,7 +42,6 @@ jobs:
             IdentityFile ~/.ssh/rocky_key
             StrictHostKeyChecking no
             ConnectTimeout 15
-
           Host sparky-tunnel
             HostName 127.0.0.1
             Port 2222
@@ -50,80 +51,53 @@ jobs:
             ConnectTimeout 30
             ProxyJump do-host1
           EOF
-
           ssh do-host1 "echo 'Rocky: OK'"
           ssh sparky-tunnel "echo 'sparky: OK via reverse tunnel'"
 
       - name: Run build on sparky
-        run: |
-          ssh sparky-tunnel << 'REMOTE'
-          set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-          source "$HOME/.cargo/env"
-          echo "=== sparky WASM build ==="
-          echo "Rust: $(rustc --version)"
-          echo "trunk: $(trunk --version)"
-          echo "sccache: $(sccache --version)"
-          cd ~/.openclaw/workspace
-          git fetch origin main
-          git checkout $GITHUB_SHA -- rcc/dashboard/
-          cd rcc/dashboard/dashboard-ui
-          RUSTC_WRAPPER=sccache trunk build --release 2>&1
-          echo "=== Build complete ==="
-          du -sh ../dist/
-          REMOTE
         env:
           GITHUB_SHA: ${{ github.sha }}
+        run: |
+          ssh sparky-tunnel "
+            set -euo pipefail
+            export PATH=\"\$HOME/.cargo/bin:\$HOME/.local/bin:\$PATH\"
+            source \"\$HOME/.cargo/env\"
+            echo '=== sparky WASM build ==='
+            echo 'Rust:' \$(rustc --version)
+            echo 'trunk:' \$(trunk --version)
+            echo 'sccache:' \$(sccache --version)
+            cd \$HOME/.openclaw/workspace
+            git fetch origin main
+            git checkout $GITHUB_SHA -- rcc/dashboard/
+            cd rcc/dashboard/dashboard-ui
+            RUSTC_WRAPPER=sccache trunk build --release
+            echo '=== Build complete ==='
+            du -sh ../dist/
+          "
 
       - name: Package and publish dist artifact to MinIO
-        run: |
-          TARBALL="/tmp/wasm-dist-${{ github.sha }}.tar.gz"
-          ssh sparky-tunnel TARBALL="$TARBALL" << 'REMOTE'
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          DIST="$HOME/.openclaw/workspace/rcc/dashboard/dist"
-          tar -czf "$TARBALL" -C "$DIST" .
-          echo "Artifact: $(du -sh $TARBALL)"
-          python3 - << 'PYEOF'
-import urllib.request, hmac, hashlib, datetime, os, sys
-tarball = os.environ["TARBALL"]
-sha = os.environ.get("GITHUB_SHA", "unknown")
-payload = open(tarball, "rb").read()
-endpoint = "http://100.89.199.14:9000"
-access_key = "rocky2197fb96dde4618aa17f"
-secret_key = "e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1"
-bucket = "agents"
-keys = ["natasha/wasm-dist-latest.tar.gz", f"natasha/wasm-dist-{sha}.tar.gz"]
-def sign(k, msg): return hmac.new(k, msg.encode(), hashlib.sha256).digest()
-def get_key(s, d, r, svc): return sign(sign(sign(sign(("AWS4"+s).encode(), d), r), svc), "aws4_request")
-def put(k, data):
-    now = datetime.datetime.utcnow()
-    ad = now.strftime("%Y%m%dT%H%M%SZ"); ds = now.strftime("%Y%m%d")
-    host = "100.89.199.14:9000"; ct = "application/gzip"
-    ph = hashlib.sha256(data).hexdigest()
-    ch = f"content-type:{ct}\nhost:{host}\nx-amz-content-sha256:{ph}\nx-amz-date:{ad}\n"
-    sh = "content-type;host;x-amz-content-sha256;x-amz-date"
-    cr = f"PUT\n/{bucket}/{k}\n\n{ch}\n{sh}\n{ph}"
-    cs = f"{ds}/us-east-1/s3/aws4_request"
-    s2s = f"AWS4-HMAC-SHA256\n{ad}\n{cs}\n{hashlib.sha256(cr.encode()).hexdigest()}"
-    sig = hmac.new(get_key(secret_key, ds, "us-east-1", "s3"), s2s.encode(), hashlib.sha256).hexdigest()
-    auth = f"AWS4-HMAC-SHA256 Credential={access_key}/{cs}, SignedHeaders={sh}, Signature={sig}"
-    req = urllib.request.Request(f"{endpoint}/{bucket}/{k}", data=data, method="PUT")
-    req.add_header("Content-Type", ct); req.add_header("x-amz-date", ad)
-    req.add_header("x-amz-content-sha256", ph); req.add_header("Authorization", auth)
-    urllib.request.urlopen(req); print(f"Published: {k} ({len(data)} bytes)")
-for k in keys: put(k, payload)
-PYEOF
-          REMOTE
         env:
           GITHUB_SHA: ${{ github.sha }}
+        run: |
+          ssh sparky-tunnel "
+            set -euo pipefail
+            export PATH=\"\$HOME/.local/bin:\$PATH\"
+            DIST=\"\$HOME/.openclaw/workspace/rcc/dashboard/dist\"
+            TARBALL=\"/tmp/wasm-dist-$GITHUB_SHA.tar.gz\"
+            tar -czf \"\$TARBALL\" -C \"\$DIST\" .
+            echo \"Artifact: \$(du -sh \$TARBALL)\"
+            mc alias set minio http://100.89.199.14:9000 rocky2197fb96dde4618aa17f e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1 2>/dev/null || true
+            mc cp \"\$TARBALL\" minio/agents/natasha/wasm-dist-latest.tar.gz
+            mc cp \"\$TARBALL\" minio/agents/natasha/wasm-dist-$GITHUB_SHA.tar.gz
+            echo 'Published to MinIO'
+          "
 
       - name: Run dashboard-server unit tests on sparky
         run: |
-          ssh sparky-tunnel << 'REMOTE'
-          set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          source "$HOME/.cargo/env"
-          cd ~/.openclaw/workspace/rcc/dashboard
-          cargo test --package dashboard-server 2>&1 | tail -5
-          REMOTE
+          ssh sparky-tunnel "
+            set -euo pipefail
+            export PATH=\"\$HOME/.cargo/bin:\$PATH\"
+            source \"\$HOME/.cargo/env\"
+            cd \$HOME/.openclaw/workspace/rcc/dashboard
+            cargo test --package dashboard-server 2>&1 | tail -5
+          "
