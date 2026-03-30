@@ -368,6 +368,59 @@
   cursor: not-allowed;
 }
 
+.sc-mic-btn {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sc-mic-btn:hover {
+  background: var(--surface3);
+  border-color: var(--accent);
+}
+
+.sc-mic-recording {
+  background: #3a0a0a;
+  border-color: #c0392b;
+  color: #fff;
+}
+
+.sc-mic-recording:hover {
+  background: #4a1010;
+}
+
+.sc-recording-indicator {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sc-transcribing {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  animation: sc-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ── Project panel ───────────────────────────────────────────────────────── */
 
 .sc-project-panel {

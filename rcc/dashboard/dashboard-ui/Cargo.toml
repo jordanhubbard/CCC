@@ -39,6 +39,15 @@ web-sys = { version = "0.3", features = [
     "Response",
     "ReadableStream",
     "ReadableStreamDefaultReader",
+    "Blob",
+    "BlobEvent",
+    "FormData",
+    "MediaDevices",
+    "MediaRecorder",
+    "MediaStream",
+    "MediaStreamConstraints",
+    "MediaStreamTrack",
+    "Navigator",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

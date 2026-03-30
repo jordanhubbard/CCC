@@ -71,6 +71,8 @@ pub fn build_router(state: SharedState) -> Router {
         // Unread counts / read cursors
         .route("/api/unread", get(get_unread))
         .route("/api/channels/:id/read", post(mark_read))
+        // Voice transcription proxy
+        .route("/api/voice/transcribe", post(voice_transcribe))
         .layer(Extension(state))
 }
 
@@ -628,6 +630,50 @@ async fn mark_read(
     let counts = state.db.get_unread_counts(&body.user)?;
     state.hub.broadcast(&ServerFrame::UnreadUpdate { counts });
     Ok(Json(json!({ "ok": true })))
+}
+
+// ── Voice transcription proxy ─────────────────────────────────────────────────
+
+async fn voice_transcribe(
+    mut multipart: axum::extract::Multipart,
+) -> Response {
+    let mut audio_bytes: Option<Vec<u8>> = None;
+    let mut filename = "audio.webm".to_string();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("file") {
+            filename = field.file_name().unwrap_or("audio.webm").to_string();
+            if let Ok(bytes) = field.bytes().await {
+                audio_bytes = Some(bytes.to_vec());
+            }
+        }
+    }
+
+    let bytes = match audio_bytes {
+        Some(b) => b,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "no file field"}))).into_response(),
+    };
+
+    let client = reqwest::Client::new();
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(filename);
+    let part = match part.mime_str("audio/webm") {
+        Ok(p) => p,
+        Err(_) => reqwest::multipart::Part::bytes(vec![]),
+    };
+    let form = reqwest::multipart::Form::new().part("file", part);
+
+    match client
+        .post("http://sparky.tail407856.ts.net:8792/inference")
+        .multipart(form)
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+            Err(_) => (StatusCode::BAD_GATEWAY, Json(json!({"error": "invalid STT response"}))).into_response(),
+        },
+        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "STT unavailable"}))).into_response(),
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

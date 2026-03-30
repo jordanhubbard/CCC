@@ -535,6 +535,12 @@ pub fn SquirrelChat() -> impl IntoView {
     let (show_help, set_show_help) = create_signal(false);
     let (switcher_query, set_switcher_query) = create_signal(String::new());
 
+    // Voice-to-text recording state
+    let (recording, set_recording) = create_signal(false);
+    let (transcribing, set_transcribing) = create_signal(false);
+    let media_recorder_ref = store_value(Option::<web_sys::MediaRecorder>::None);
+    let media_stream_ref = store_value(Option::<web_sys::MediaStream>::None);
+
     // ── Bootstrap identity + channels on load ─────────────────────────────────
     spawn_local(async move {
         let id = fetch_sc_identity().await;
@@ -1882,6 +1888,217 @@ pub fn SquirrelChat() -> impl IntoView {
                                                 </span>
                                             }.into_view()
                                         } else { ().into_view() }}
+
+                                        // ── Mic button (voice-to-text) ──────────
+                                        {move || {
+                                            if transcribing.get() {
+                                                view! { <span class="sc-transcribing">"✨ Transcribing…"</span> }.into_view()
+                                            } else {
+                                                view! {
+                                                    <button
+                                                        class="sc-mic-btn"
+                                                        class:sc-mic-recording=move || recording.get()
+                                                        title=move || if recording.get() { "Stop recording" } else { "Voice input" }
+                                                        on:click=move |_| {
+                                                            if recording.get_untracked() {
+                                                                // — Stop recording —
+                                                                media_recorder_ref.with_value(|r| {
+                                                                    if let Some(rec) = r {
+                                                                        let _ = rec.stop();
+                                                                    }
+                                                                });
+                                                                media_stream_ref.with_value(|s| {
+                                                                    if let Some(stream) = s {
+                                                                        let tracks = stream.get_audio_tracks();
+                                                                        for i in 0..tracks.length() {
+                                                                            let track: web_sys::MediaStreamTrack =
+                                                                                tracks.get(i).unchecked_into();
+                                                                            track.stop();
+                                                                        }
+                                                                    }
+                                                                });
+                                                                set_recording.set(false);
+                                                                set_transcribing.set(true);
+                                                            } else {
+                                                                // — Start recording —
+                                                                spawn_local(async move {
+                                                                    use std::rc::Rc;
+                                                                    use std::cell::RefCell;
+
+                                                                    let window = match web_sys::window() {
+                                                                        Some(w) => w,
+                                                                        None => return,
+                                                                    };
+                                                                    let media_devices = match window.navigator().media_devices() {
+                                                                        Ok(d) => d,
+                                                                        Err(_) => return,
+                                                                    };
+                                                                    let constraints = web_sys::MediaStreamConstraints::new();
+                                                                    constraints.set_audio(&wasm_bindgen::JsValue::TRUE);
+                                                                    constraints.set_video(&wasm_bindgen::JsValue::FALSE);
+                                                                    let stream_promise = match media_devices
+                                                                        .get_user_media_with_constraints(&constraints)
+                                                                    {
+                                                                        Ok(p) => p,
+                                                                        Err(_) => return,
+                                                                    };
+                                                                    let stream_js = match wasm_bindgen_futures::JsFuture::from(
+                                                                        stream_promise,
+                                                                    )
+                                                                    .await
+                                                                    {
+                                                                        Ok(s) => s,
+                                                                        Err(_) => return,
+                                                                    };
+                                                                    let stream: web_sys::MediaStream =
+                                                                        match stream_js.dyn_into() {
+                                                                            Ok(s) => s,
+                                                                            Err(_) => return,
+                                                                        };
+                                                                    let recorder =
+                                                                        match web_sys::MediaRecorder::new_with_media_stream(
+                                                                            &stream,
+                                                                        ) {
+                                                                            Ok(r) => r,
+                                                                            Err(_) => return,
+                                                                        };
+
+                                                                    let chunks: Rc<RefCell<Vec<web_sys::Blob>>> =
+                                                                        Rc::new(RefCell::new(Vec::new()));
+                                                                    let chunks_data = chunks.clone();
+                                                                    let chunks_stop = chunks.clone();
+
+                                                                    let on_data = wasm_bindgen::closure::Closure::wrap(
+                                                                        Box::new(move |ev: web_sys::BlobEvent| {
+                                                                            if let Some(blob) = ev.data() {
+                                                                                chunks_data.borrow_mut().push(blob);
+                                                                            }
+                                                                        })
+                                                                            as Box<dyn FnMut(web_sys::BlobEvent)>,
+                                                                    );
+                                                                    recorder.set_ondataavailable(Some(
+                                                                        on_data.as_ref().unchecked_ref(),
+                                                                    ));
+                                                                    on_data.forget();
+
+                                                                    let on_stop =
+                                                                        wasm_bindgen::closure::Closure::once(move || {
+                                                                            let arr = js_sys::Array::new();
+                                                                            {
+                                                                                let blobs = chunks_stop.borrow();
+                                                                                for b in blobs.iter() {
+                                                                                    arr.push(b.as_ref());
+                                                                                }
+                                                                            }
+                                                                            let combined =
+                                                                                match web_sys::Blob::new_with_blob_sequence(
+                                                                                    &arr,
+                                                                                ) {
+                                                                                    Ok(b) => b,
+                                                                                    Err(_) => {
+                                                                                        set_transcribing.set(false);
+                                                                                        return;
+                                                                                    }
+                                                                                };
+                                                                            spawn_local(async move {
+                                                                                let form = match web_sys::FormData::new() {
+                                                                                    Ok(f) => f,
+                                                                                    Err(_) => {
+                                                                                        set_transcribing.set(false);
+                                                                                        return;
+                                                                                    }
+                                                                                };
+                                                                                if form
+                                                                                    .append_with_blob("file", &combined)
+                                                                                    .is_err()
+                                                                                {
+                                                                                    set_transcribing.set(false);
+                                                                                    return;
+                                                                                }
+                                                                                let opts =
+                                                                                    web_sys::RequestInit::new();
+                                                                                opts.set_method("POST");
+                                                                                opts.set_body(form.as_ref());
+                                                                                let req = match web_sys::Request::new_with_str_and_init(
+                                                                                    "/sc/api/voice/transcribe",
+                                                                                    &opts,
+                                                                                ) {
+                                                                                    Ok(r) => r,
+                                                                                    Err(_) => {
+                                                                                        set_transcribing.set(false);
+                                                                                        return;
+                                                                                    }
+                                                                                };
+                                                                                let win = match web_sys::window() {
+                                                                                    Some(w) => w,
+                                                                                    None => {
+                                                                                        set_transcribing.set(false);
+                                                                                        return;
+                                                                                    }
+                                                                                };
+                                                                                let resp =
+                                                                                    wasm_bindgen_futures::JsFuture::from(
+                                                                                        win.fetch_with_request(&req),
+                                                                                    )
+                                                                                    .await;
+                                                                                if let Ok(resp_js) = resp {
+                                                                                    if let Ok(response) = resp_js
+                                                                                        .dyn_into::<web_sys::Response>()
+                                                                                    {
+                                                                                        if response.ok() {
+                                                                                            if let Ok(p) = response.json() {
+                                                                                                if let Ok(v) =
+                                                                                                    wasm_bindgen_futures::JsFuture::from(p).await
+                                                                                                {
+                                                                                                    if let Ok(s) =
+                                                                                                        js_sys::JSON::stringify(&v)
+                                                                                                    {
+                                                                                                        let s: String = s.into();
+                                                                                                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&s) {
+                                                                                                            if let Some(text) = val["text"].as_str() {
+                                                                                                                let t = text.to_string();
+                                                                                                                set_input_text.update(|cur| {
+                                                                                                                    if cur.is_empty() {
+                                                                                                                        *cur = t;
+                                                                                                                    } else {
+                                                                                                                        cur.push(' ');
+                                                                                                                        cur.push_str(&t);
+                                                                                                                    }
+                                                                                                                });
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                                set_transcribing.set(false);
+                                                                            });
+                                                                        });
+                                                                    recorder.set_onstop(Some(
+                                                                        on_stop.as_ref().unchecked_ref(),
+                                                                    ));
+                                                                    on_stop.forget();
+
+                                                                    let _ = recorder.start();
+                                                                    media_stream_ref.set_value(Some(stream));
+                                                                    media_recorder_ref.set_value(Some(recorder));
+                                                                    set_recording.set(true);
+                                                                });
+                                                            }
+                                                        }
+                                                    >
+                                                        {move || if recording.get() {
+                                                            view! { <span class="sc-recording-indicator">"🔴 Recording…"</span> }.into_view()
+                                                        } else {
+                                                            view! { "🎤" }.into_view()
+                                                        }}
+                                                    </button>
+                                                }.into_view()
+                                            }
+                                        }}
+
                                         <button
                                             class="sc-send-btn"
                                             class:sc-sending=move || sending.get()
