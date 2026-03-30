@@ -471,6 +471,12 @@ pub fn SquirrelChat() -> impl IntoView {
     let (sidebar_open, set_sidebar_open) = create_signal(false);
     // Presence map — polled every 30s
     let (presence, set_presence) = create_signal(ScPresenceMap::default());
+    // Typing indicators: channel_id → set of agent names currently typing (excluding self)
+    let (typing_users, set_typing_users) = create_signal(std::collections::HashMap::<String, std::collections::HashSet<String>>::new());
+    // WebSocket handle for sending client frames
+    let ws_handle = store_value(Option::<web_sys::WebSocket>::None);
+    // Debounce timer for stop-typing events (StoredValue is Copy — safe in reactive closures)
+    let typing_timeout = store_value(Option::<gloo_timers::callback::Timeout>::None);
 
     let chat_ref = create_node_ref::<leptos::html::Div>();
 
@@ -554,6 +560,7 @@ pub fn SquirrelChat() -> impl IntoView {
             .unwrap_or_else(|| "ws://localhost:8793/api/ws".to_string());
 
         if let Ok(ws) = web_sys::WebSocket::new(&ws_url) {
+            ws_handle.set_value(Some(ws.clone()));
             let ws_cleanup = ws.clone();
 
             // onopen — mark connected
@@ -651,6 +658,19 @@ pub fn SquirrelChat() -> impl IntoView {
                                 set_channels.update(|chs| {
                                     if !chs.iter().any(|c| c.id == channel.id) {
                                         chs.push(channel);
+                                    }
+                                });
+                            }
+                        }
+                        ScWsFrame::Typing { channel, agent, is_typing } => {
+                            let my_name = identity.get_untracked().name.clone();
+                            if agent != my_name {
+                                set_typing_users.update(|map| {
+                                    let set = map.entry(channel).or_default();
+                                    if is_typing {
+                                        set.insert(agent);
+                                    } else {
+                                        set.remove(&agent);
                                     }
                                 });
                             }
@@ -1543,6 +1563,26 @@ pub fn SquirrelChat() -> impl IntoView {
                                     }}
                                 </div>
 
+                                // Typing indicator
+                                {move || {
+                                    let ch = selected_channel.get();
+                                    let map = typing_users.get();
+                                    let mut typers: Vec<String> = map.get(&ch)
+                                        .map(|s| s.iter().cloned().collect())
+                                        .unwrap_or_default();
+                                    typers.sort();
+                                    if typers.is_empty() {
+                                        ().into_view()
+                                    } else {
+                                        let text = match typers.len() {
+                                            1 => format!("{} is typing…", typers[0]),
+                                            2 => format!("{} and {} are typing…", typers[0], typers[1]),
+                                            _ => "Several people are typing…".to_string(),
+                                        };
+                                        view! { <div class="sc-typing-indicator">{text}</div> }.into_view()
+                                    }
+                                }}
+
                                 <div class="sc-input-area">
                                     {move || {
                                         let suggestions = mention_suggestions.get();
@@ -1592,11 +1632,43 @@ pub fn SquirrelChat() -> impl IntoView {
                                                 } else {
                                                     set_mention_query.set(None);
                                                 }
+                                                // Typing indicator: send is_typing=true, debounce false
+                                                let my_name = identity.get_untracked().name.clone();
+                                                let ch = selected_channel.get_untracked();
+                                                let val_nonempty = !val.trim().is_empty();
+                                                ws_handle.with_value(|ws_opt| {
+                                                    if let Some(ws) = ws_opt {
+                                                        typing_timeout.update_value(|t| { *t = None; });
+                                                        if val_nonempty {
+                                                            let start_msg = serde_json::json!({"type":"typing","channel":ch,"agent":my_name,"is_typing":true}).to_string();
+                                                            let _ = ws.send_with_str(&start_msg);
+                                                            let ws_c = ws.clone();
+                                                            let ch_c = ch.clone();
+                                                            let name_c = my_name.clone();
+                                                            let timeout = gloo_timers::callback::Timeout::new(2000, move || {
+                                                                let stop = serde_json::json!({"type":"typing","channel":ch_c,"agent":name_c,"is_typing":false}).to_string();
+                                                                let _ = ws_c.send_with_str(&stop);
+                                                                typing_timeout.set_value(None);
+                                                            });
+                                                            typing_timeout.set_value(Some(timeout));
+                                                        }
+                                                    }
+                                                });
                                                 set_input_text.set(val);
                                             }
                                             on:keydown=move |ev: web_sys::KeyboardEvent| {
                                                 if ev.key() == "Enter" && ev.ctrl_key() {
                                                     ev.prevent_default();
+                                                    // Cancel typing and send stop before sending
+                                                    typing_timeout.update_value(|t| { *t = None; });
+                                                    let my_name = identity.get_untracked().name.clone();
+                                                    let ch = selected_channel.get_untracked();
+                                                    ws_handle.with_value(|ws_opt| {
+                                                        if let Some(ws) = ws_opt {
+                                                            let stop = serde_json::json!({"type":"typing","channel":ch,"agent":my_name,"is_typing":false}).to_string();
+                                                            let _ = ws.send_with_str(&stop);
+                                                        }
+                                                    });
                                                     trigger_send(
                                                         input_text, set_input_text,
                                                         selected_channel, set_messages,
@@ -1654,6 +1726,16 @@ pub fn SquirrelChat() -> impl IntoView {
                                             class="sc-send-btn"
                                             class:sc-sending=move || sending.get()
                                             on:click=move |_| {
+                                                // Cancel typing indicator on send
+                                                typing_timeout.update_value(|t| { *t = None; });
+                                                let my_name = identity.get_untracked().name.clone();
+                                                let ch = selected_channel.get_untracked();
+                                                ws_handle.with_value(|ws_opt| {
+                                                    if let Some(ws) = ws_opt {
+                                                        let stop = serde_json::json!({"type":"typing","channel":ch,"agent":my_name,"is_typing":false}).to_string();
+                                                        let _ = ws.send_with_str(&stop);
+                                                    }
+                                                });
                                                 // If there's an attachment, send message first then upload
                                                 if let Some((fname, mime, b64)) = attach_data.get_untracked() {
                                                     // Send the message text (or empty placeholder)

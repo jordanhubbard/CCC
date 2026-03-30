@@ -1531,3 +1531,26 @@ button:focus-visible {
   margin-left: auto;
   opacity: 0.85;
 }
+
+/* ── Typing indicator ──────────────────────────────────────────────────────── */
+
+.sc-typing-indicator {
+  padding: 2px 16px 0;
+  min-height: 18px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--subtext0, #a6adc8);
+}
+
+.sc-typing-indicator::after {
+  content: '';
+  display: inline-block;
+  animation: sc-ellipsis 1.4s infinite;
+}
+
+@keyframes sc-ellipsis {
+  0%   { content: ''; }
+  33%  { content: '.'; }
+  66%  { content: '..'; }
+  100% { content: '...'; }
+}

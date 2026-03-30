@@ -103,6 +103,9 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
                             let online = status != "offline";
                             state.hub.broadcast(&SF::Presence { agent, online });
                         }
+                        Ok(ClientFrame::Typing { channel, agent, is_typing }) => {
+                            state.hub.broadcast(&SF::Typing { channel, agent, is_typing });
+                        }
                         Err(e) => {
                             warn!("unknown client frame: {} — {:?}", text, e);
                         }

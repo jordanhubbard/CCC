@@ -226,6 +226,8 @@ pub enum ScWsFrame {
     Channel { action: String, channel: ScChannel },
     /// Initial connection confirmation
     Connected { session_id: String },
+    /// Transient typing indicator
+    Typing { channel: String, agent: String, is_typing: bool },
 }
 
 // ─── Project ─────────────────────────────────────────────────────────────────

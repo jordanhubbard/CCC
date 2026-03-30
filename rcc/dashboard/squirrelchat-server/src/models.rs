@@ -153,6 +153,8 @@ pub enum ServerFrame {
     Channel { action: String, channel: Channel },
     /// Connection confirmed
     Connected { session_id: String },
+    /// Transient typing indicator relay
+    Typing { channel: String, agent: String, is_typing: bool },
 }
 
 // ── WS frames (client → server) ───────────────────────────────────────────────
@@ -162,4 +164,5 @@ pub enum ServerFrame {
 pub enum ClientFrame {
     Ping,
     Heartbeat { agent: String, status: String },
+    Typing { channel: String, agent: String, is_typing: bool },
 }
