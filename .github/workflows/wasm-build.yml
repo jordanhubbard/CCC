@@ -78,23 +78,25 @@ jobs:
       - name: Package and publish dist artifact to MinIO
         env:
           GITHUB_SHA: ${{ github.sha }}
+          MINIO_HOST: ${{ secrets.MINIO_HOST }}
+          MINIO_CREDS: ${{ secrets.MINIO_CREDS }}
         run: |
-          ssh sparky-tunnel "
+          ssh sparky-tunnel MINIO_HOST="$MINIO_HOST" MINIO_CREDS="$MINIO_CREDS" GITHUB_SHA="$GITHUB_SHA" "
             set -euo pipefail
             DIST=\"\$HOME/.openclaw/workspace/rcc/dashboard/dist\"
-            TARBALL=\"/tmp/wasm-dist-$GITHUB_SHA.tar.gz\"
+            TARBALL=\"/tmp/wasm-dist-\$GITHUB_SHA.tar.gz\"
             tar -czf \"\$TARBALL\" -C \"\$DIST\" .
             echo \"Artifact: \$(du -sh \$TARBALL)\"
             curl -sf -X PUT \
               -H 'Content-Type: application/octet-stream' \
               --data-binary @\"\$TARBALL\" \
-              'http://146.190.134.110:9000/agents/natasha/wasm-dist-latest.tar.gz' \
-              -u 'rocky2197fb96dde4618aa17f:e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1'
+              \"http://\$MINIO_HOST/agents/natasha/wasm-dist-latest.tar.gz\" \
+              -u \"\$MINIO_CREDS\"
             curl -sf -X PUT \
               -H 'Content-Type: application/octet-stream' \
               --data-binary @\"\$TARBALL\" \
-              'http://146.190.134.110:9000/agents/natasha/wasm-dist-$GITHUB_SHA.tar.gz' \
-              -u 'rocky2197fb96dde4618aa17f:e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1'
+              \"http://\$MINIO_HOST/agents/natasha/wasm-dist-\$GITHUB_SHA.tar.gz\" \
+              -u \"\$MINIO_CREDS\"
             echo 'Published to MinIO'
           "
 
