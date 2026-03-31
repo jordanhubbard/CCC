@@ -31,9 +31,16 @@ fn json_error(status: StatusCode, msg: &str) -> Response<Body> {
         .unwrap()
 }
 
+// POST paths exempt from Bearer auth (safe public/dev endpoints)
+const AUTH_EXEMPT_POSTS: &[&str] = &[
+    "/api/playground/run",
+    "/api/brain/request",
+];
+
 // --- Auth middleware for mutating endpoints ---
 // Reads Authorization: Bearer <token> from request headers.
 // Allows GETs through. Blocks POST/PATCH/DELETE without valid token.
+// Some POST paths are exempt (see AUTH_EXEMPT_POSTS).
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
     req: Request,
@@ -43,16 +50,22 @@ async fn auth_middleware(
     let is_mutating = matches!(method, Method::POST | Method::PATCH | Method::DELETE | Method::PUT);
 
     if is_mutating && !state.agent_token.is_empty() {
-        let auth_ok = req
-            .headers()
-            .get("Authorization")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .map(|tok| tok.trim() == state.agent_token)
-            .unwrap_or(false);
+        let path = req.uri().path().to_string();
+        let is_exempt = method == Method::POST
+            && AUTH_EXEMPT_POSTS.iter().any(|p| path == *p);
 
-        if !auth_ok {
-            return json_error(StatusCode::UNAUTHORIZED, "valid Bearer token required for mutations");
+        if !is_exempt {
+            let auth_ok = req
+                .headers()
+                .get("Authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .map(|tok| tok.trim() == state.agent_token)
+                .unwrap_or(false);
+
+            if !auth_ok {
+                return json_error(StatusCode::UNAUTHORIZED, "valid Bearer token required for mutations");
+            }
         }
     }
 
