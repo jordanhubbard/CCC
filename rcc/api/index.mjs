@@ -6399,6 +6399,162 @@ loadPackages();
       return json(res, 200, { id, ackState, ack, deadReason: dead?._deadReason ?? null });
     }
 
+    // ── SquirrelBus message replay ──────────────────────────────────────────
+    //
+    // Agents that restart after a watchdog reset or migration may miss events
+    // published while they were offline.  The replay endpoints allow an agent
+    // to subscribe with a watermark (last_seq) and receive all missed messages.
+    //
+    // Watermark persistence: per-agent last-seen sequence numbers are stored
+    // in _busWatermarks (in-memory) and flushed to bus.watermarks.jsonl on ACK.
+    //
+    // Wire protocol:
+    //   GET  /bus/replay?agent=natasha&after_seq=42&channel=all&limit=100
+    //     → { ok, agent, after_seq, messages: [...], watermark: 99 }
+    //
+    //   POST /bus/subscribe { agent, channel?, after_seq? }
+    //     → { ok, agent, channel, after_seq, watermark, pending_count }
+    //     Registers agent watermark; returns count of pending messages.
+    //     Call before streaming /bus/stream to avoid race.
+    //
+    //   POST /bus/watermark { agent, seq }
+    //     → { ok, agent, seq }
+    //     Advance watermark (called after successfully processing a message).
+
+    // In-memory watermark store: { [agentId]: { seq, channel, ts } }
+    if (!global._busWatermarks) global._busWatermarks = {};
+
+    // GET /bus/replay — return missed messages since after_seq
+    if (method === 'GET' && path === '/bus/replay') {
+      const agent     = url.searchParams.get('agent') || 'unknown';
+      const afterSeqS = url.searchParams.get('after_seq');
+      const channel   = url.searchParams.get('channel') || null;
+      const limitS    = url.searchParams.get('limit');
+      const after_seq = afterSeqS ? parseInt(afterSeqS, 10) : (global._busWatermarks[agent]?.seq ?? 0);
+      const limit     = limitS    ? Math.min(parseInt(limitS, 10), 1000) : 100;
+
+      const msgs = [];
+      try {
+        if (existsSync(BUS_LOG_PATH)) {
+          const rl = createInterface({ input: createRS(BUS_LOG_PATH), crlfDelay: Infinity });
+          for await (const line of rl) {
+            try {
+              const m = JSON.parse(line);
+              if (typeof m.seq !== 'number' || m.seq <= after_seq) continue;
+              if (channel && channel !== 'all' && m.to !== channel && m.to !== 'all') continue;
+              msgs.push(m);
+              if (msgs.length >= limit) break;
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('[bus/replay] read error:', err.message);
+      }
+
+      const watermark = msgs.length ? msgs[msgs.length - 1].seq : after_seq;
+      return json(res, 200, {
+        ok: true,
+        agent,
+        after_seq,
+        messages: msgs,
+        count: msgs.length,
+        watermark,
+        ts: new Date().toISOString(),
+      });
+    }
+
+    // POST /bus/subscribe — register agent watermark, return pending count
+    if (method === 'POST' && path === '/bus/subscribe') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const agent     = body.agent || 'unknown';
+      const channel   = body.channel || 'all';
+      const after_seq = typeof body.after_seq === 'number'
+                        ? body.after_seq
+                        : (global._busWatermarks[agent]?.seq ?? 0);
+
+      // Count pending messages
+      let pending_count = 0;
+      const current_watermark = after_seq;
+      try {
+        if (existsSync(BUS_LOG_PATH)) {
+          const rl = createInterface({ input: createRS(BUS_LOG_PATH), crlfDelay: Infinity });
+          for await (const line of rl) {
+            try {
+              const m = JSON.parse(line);
+              if (typeof m.seq === 'number' && m.seq > after_seq) {
+                if (channel === 'all' || m.to === channel || m.to === 'all') {
+                  pending_count++;
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+
+      // Register/update watermark
+      global._busWatermarks[agent] = {
+        seq:       after_seq,
+        channel,
+        ts:        new Date().toISOString(),
+        agent,
+      };
+
+      console.log(`[bus/subscribe] ${agent} subscribed after_seq=${after_seq} pending=${pending_count}`);
+      return json(res, 200, {
+        ok: true,
+        agent,
+        channel,
+        after_seq,
+        watermark: current_watermark,
+        pending_count,
+        hint: pending_count > 0
+              ? `GET /bus/replay?agent=${agent}&after_seq=${after_seq} to fetch ${pending_count} missed messages`
+              : 'up-to-date',
+      });
+    }
+
+    // POST /bus/watermark — advance agent watermark after processing
+    if (method === 'POST' && path === '/bus/watermark') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const agent = body.agent || 'unknown';
+      const seq   = typeof body.seq === 'number' ? body.seq : null;
+      if (seq === null) return json(res, 400, { error: 'seq (number) required' });
+
+      if (!global._busWatermarks[agent]) global._busWatermarks[agent] = {};
+      // Only advance (never regress)
+      if (seq > (global._busWatermarks[agent].seq ?? -1)) {
+        global._busWatermarks[agent].seq = seq;
+        global._busWatermarks[agent].ts  = new Date().toISOString();
+        // Persist to disk (best-effort)
+        const wmPath = BUS_LOG_PATH.replace('bus.jsonl', 'bus.watermarks.jsonl');
+        try {
+          const wm = { agent, seq, ts: global._busWatermarks[agent].ts };
+          await appendFile(wmPath, JSON.stringify(wm) + '\n', 'utf8');
+        } catch {}
+      }
+
+      return json(res, 200, {
+        ok: true,
+        agent,
+        seq: global._busWatermarks[agent].seq,
+        ts:  global._busWatermarks[agent].ts,
+      });
+    }
+
+    // GET /bus/watermarks — list all known agent watermarks
+    if (method === 'GET' && path === '/bus/watermarks') {
+      return json(res, 200, {
+        ok: true,
+        watermarks: Object.entries(global._busWatermarks || {}).map(([k, v]) => ({
+          agent: k, ...v,
+        })),
+        bus_seq: _busSeq,
+        ts: new Date().toISOString(),
+      });
+    }
+
     // ── Missing API endpoints (ported from old Node dashboard) ────────────
 
     // ── GET /api/agentos/slots — VibeEngine slot health + swap metrics ──────────
