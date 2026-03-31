@@ -512,6 +512,45 @@ app.post('/api/messages', auth, async (req, res) => {
     client.write(`data: ${payload}\n\n`);
   }
 
+  // ── @agent mention → workqueue item ───────────────────────────────────────
+  // Pattern: @agentname <task description>
+  // Known agents: natasha, rocky, boris, bullwinkle, peabody, sherman, snidely, dudley
+  const KNOWN_AGENTS = ['natasha', 'rocky', 'boris', 'bullwinkle', 'peabody', 'sherman', 'snidely', 'dudley'];
+  const mentionMatch = text.match(/^@([a-z]+)\s+(.+)$/si);
+  if (mentionMatch) {
+    const mentionedAgent = mentionMatch[1].toLowerCase();
+    const taskText = mentionMatch[2].trim();
+    if (KNOWN_AGENTS.includes(mentionedAgent) && taskText.length >= 3) {
+      // Create a workqueue item assigned to the mentioned agent
+      try {
+        const wqRes = await rccFetch('/api/queue', {
+          method: 'POST',
+          body: {
+            title: taskText.slice(0, 120),
+            description: `From ${from} in #${channel} via SquirrelChat @mention.\n\nOriginal: ${text}`,
+            assignee: mentionedAgent,
+            priority: 'normal',
+            source: 'squirrelchat',
+            tags: ['squirrelchat', 'mention'],
+          },
+        });
+        if (wqRes.ok !== false && (wqRes.id || wqRes.item?.id)) {
+          const itemId = wqRes.id || wqRes.item?.id;
+          const bts = Date.now();
+          const botText = `📋 Created task for @${mentionedAgent}: **${taskText.slice(0, 80)}**\n\`${itemId}\``;
+          const br = db.prepare('INSERT INTO messages (ts, from_agent, text, channel) VALUES (?, ?, ?, ?)').run(
+            bts, 'squirrelbot', botText, channel
+          );
+          const mentionReply = formatMessage({ id: br.lastInsertRowid, ts: bts, from_agent: 'squirrelbot', text: botText, channel, mentions: null, thread_id: null, edited_at: null, created_at: bts, slash_result: null });
+          const mp = JSON.stringify({ type: 'message', data: mentionReply });
+          for (const client of sseClients) client.write(`data: ${mp}\n\n`);
+        }
+      } catch (err) {
+        console.warn('[squirrelchat] @mention wq create error:', err.message);
+      }
+    }
+  }
+
   // Handle slash commands
   let botReply = null;
   const trimmed = text.trim();
