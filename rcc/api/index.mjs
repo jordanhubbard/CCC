@@ -1728,10 +1728,10 @@ async function handleRequest(req, res) {
   try {
     // ── Public endpoints ────────────────────────────────────────────────
 
-    // ── GET / — redirect to services map (public landing page) ──────────
+    // ── GET / — redirect to Leptos WASM dashboard (canonical UI) ──────────
     if (method === 'GET' && path === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-      return res.end(dashboardHtml());
+      res.writeHead(302, { 'Location': 'http://146.190.134.110:8788/', 'Access-Control-Allow-Origin': '*' });
+      return res.end();
     }
 
     if (method === 'GET' && path === '/health') {
