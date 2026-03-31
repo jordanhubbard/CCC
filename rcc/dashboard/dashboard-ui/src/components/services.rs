@@ -1,181 +1,97 @@
-//! Services Directory — live health-checked cards for every RCC service.
+//! Services Directory — live health data from RCC /api/services/status (server-side probed).
+//! No client-side NoCors hacks — all probing is done server-side with real TCP checks.
 
 use leptos::*;
-use wasm_bindgen_futures::spawn_local;
+use serde::Deserialize;
+use wasm_bindgen::JsCast;
 
-#[derive(Clone, Debug)]
-struct ServiceDef {
-    name:        &'static str,
-    desc:        &'static str,
-    icon:        &'static str,
-    url:         &'static str,
-    health_url:  &'static str,
-    category:    &'static str,
+const RCC_API: &str = "http://146.190.134.110:8789";
+
+#[derive(Clone, Debug, Deserialize)]
+struct ServiceStatus {
+    id:         String,
+    name:       String,
+    url:        String,
+    desc:       String,
+    host:       String,
+    online:     bool,
+    latency_ms: Option<u32>,
 }
 
-const SERVICES: &[ServiceDef] = &[
-    ServiceDef {
-        name:       "RCC Dashboard",
-        desc:       "Main portal — WASM SPA, 9 tabs (incl. Services)",
-        icon:       "🐿️",
-        url:        "http://146.190.134.110:8789/",
-        health_url: "http://146.190.134.110:8789/health",
-        category:   "UI",
-    },
-    ServiceDef {
-        name:       "TokenHub Admin",
-        desc:       "Inference proxy — providers, models, routing, topology",
-        icon:       "🔑",
-        url:        "http://146.190.134.110:8090/admin",
-        health_url: "http://146.190.134.110:8090/health",
-        category:   "UI",
-    },
-    ServiceDef {
-        name:       "SquirrelChat",
-        desc:       "Team chat — channels, DMs, threads, reactions",
-        icon:       "💬",
-        url:        "http://146.190.134.110:8790/",
-        health_url: "http://146.190.134.110:8790/",
-        category:   "UI",
-    },
-    ServiceDef {
-        name:       "MinIO Console",
-        desc:       "S3-compatible object storage web console",
-        icon:       "🗄️",
-        url:        "http://146.190.134.110:9001/",
-        health_url: "http://146.190.134.110:9001/minio/health/live",
-        category:   "UI",
-    },
-    ServiceDef {
-        name:       "RCC API",
-        desc:       "Backend API — queue, heartbeats, secrets, bus",
-        icon:       "⚙️",
-        url:        "http://146.190.134.110:8789/health",
-        health_url: "http://146.190.134.110:8789/health",
-        category:   "API",
-    },
-    ServiceDef {
-        name:       "SquirrelChat API",
-        desc:       "Rust/Axum backend — channels, messages, WebSocket",
-        icon:       "🦀",
-        url:        "http://146.190.134.110:8793/health",
-        health_url: "http://146.190.134.110:8793/health",
-        category:   "API",
-    },
-    ServiceDef {
-        name:       "TokenHub API",
-        desc:       "OpenAI-compatible inference aggregation proxy",
-        icon:       "🤖",
-        url:        "http://146.190.134.110:8090/health",
-        health_url: "http://146.190.134.110:8090/health",
-        category:   "API",
-    },
-    ServiceDef {
-        name:       "MinIO S3 API",
-        desc:       "S3-compatible storage endpoint",
-        icon:       "📦",
-        url:        "http://146.190.134.110:9000/",
-        health_url: "http://146.190.134.110:9000/minio/health/live",
-        category:   "API",
-    },
-    ServiceDef {
-        name:       "Boris vLLM",
-        desc:       "Nemotron-3 120B FP8 — 4x L40, 262k ctx (tunneled)",
-        icon:       "🧠",
-        url:        "http://146.190.134.110:18080/v1/models",
-        health_url: "http://146.190.134.110:18080/health",
-        category:   "GPU",
-    },
-    ServiceDef {
-        name:       "SquirrelBus",
-        desc:       "Message bus SSE stream (embedded in dashboard)",
-        icon:       "🚌",
-        url:        "http://146.190.134.110:8789/bus/stream",
-        health_url: "http://146.190.134.110:8789/health",
-        category:   "API",
-    },
-];
-
-#[derive(Clone, PartialEq)]
-enum HealthStatus {
-    Unknown,
-    Checking,
-    Up,
-    Down,
-}
-
-impl HealthStatus {
-    fn dot_class(&self) -> &'static str {
-        match self {
-            HealthStatus::Unknown  => "svc-dot svc-dot-unknown",
-            HealthStatus::Checking => "svc-dot svc-dot-checking",
-            HealthStatus::Up       => "svc-dot svc-dot-up",
-            HealthStatus::Down     => "svc-dot svc-dot-down",
+impl ServiceStatus {
+    fn category(&self) -> &'static str {
+        match self.id.as_str() {
+            "rcc-dashboard" | "services-map" | "squirrelchat" | "tokenhub-admin" => "UI",
+            "boris-vllm" | "whisper-api" | "agentfs" | "usdagent" | "ollama"    => "GPU",
+            _                                                                     => "API",
         }
     }
-    fn label(&self) -> &'static str {
-        match self {
-            HealthStatus::Unknown  => "—",
-            HealthStatus::Checking => "…",
-            HealthStatus::Up       => "UP",
-            HealthStatus::Down     => "DOWN",
+
+    fn icon(&self) -> &'static str {
+        match self.id.as_str() {
+            "rcc-dashboard"  => "🐿️",
+            "services-map"   => "🗺️",
+            "squirrelchat"   => "💬",
+            "tokenhub-admin" => "🔑",
+            "squirrelbus"    => "🚌",
+            "boris-vllm"     => "🧠",
+            "whisper-api"    => "🎙️",
+            "agentfs"        => "📁",
+            "usdagent"       => "🎨",
+            "milvus"         => "🔍",
+            "ollama"         => "🦙",
+            _                => "⚙️",
         }
     }
 }
 
-async fn fetch_ok(url: String) -> bool {
-    use wasm_bindgen::JsCast;
-    let window = web_sys::window().unwrap();
-    let opts = web_sys::RequestInit::new();
-    opts.set_method("GET");
-    opts.set_mode(web_sys::RequestMode::NoCors);
-    let request = match web_sys::Request::new_with_str_and_init(&url, &opts) {
-        Ok(r) => r,
-        Err(_) => return false,
+async fn fetch_services() -> Vec<ServiceStatus> {
+    let url = format!("{}/api/services/status", RCC_API);
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None    => return vec![],
     };
-    let promise = window.fetch_with_request(&request);
-    match wasm_bindgen_futures::JsFuture::from(promise).await {
-        Ok(_) => true,
-        Err(_) => false,
-    }
-}
-
-fn run_health_checks(statuses: &[RwSignal<HealthStatus>]) {
-    for (i, svc) in SERVICES.iter().enumerate() {
-        let sig = statuses[i];
-        sig.set(HealthStatus::Checking);
-        let url = svc.health_url.to_string();
-        spawn_local(async move {
-            let ok = fetch_ok(url).await;
-            sig.set(if ok { HealthStatus::Up } else { HealthStatus::Down });
-        });
-    }
+    let resp_val = match wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(&url)).await {
+        Ok(v)  => v,
+        Err(_) => return vec![],
+    };
+    let resp: web_sys::Response = match resp_val.dyn_into::<web_sys::Response>() {
+        Ok(r)  => r,
+        Err(_) => return vec![],
+    };
+    let text_val = match wasm_bindgen_futures::JsFuture::from(match resp.text() {
+        Ok(p)  => p,
+        Err(_) => return vec![],
+    }).await {
+        Ok(v)  => v,
+        Err(_) => return vec![],
+    };
+    let text = match text_val.as_string() {
+        Some(t) => t,
+        None    => return vec![],
+    };
+    serde_json::from_str(&text).unwrap_or_default()
 }
 
 #[component]
 pub fn Services() -> impl IntoView {
-    let statuses: Vec<RwSignal<HealthStatus>> = SERVICES
-        .iter()
-        .map(|_| create_rw_signal(HealthStatus::Unknown))
-        .collect();
-
+    let (services, set_services) = create_signal(Vec::<ServiceStatus>::new());
+    let (loading, set_loading)   = create_signal(true);
     let (cat_filter, set_cat_filter) = create_signal("All".to_string());
 
-    // Initial health check on mount
-    {
-        let s = statuses.clone();
-        create_effect(move |_| {
-            run_health_checks(&s);
+    let load = move || {
+        set_loading.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            let data = fetch_services().await;
+            set_services.set(data);
+            set_loading.set(false);
         });
-    }
-
-    let statuses_view    = statuses.clone();
-    let statuses_recheck = statuses.clone();
-
-    let recheck = move |_| {
-        run_health_checks(&statuses_recheck);
     };
 
+    // Load on mount
+    create_effect(move |_| { load(); });
+
+    let recheck = move |_| { load(); };
     let categories = ["All", "UI", "API", "GPU"];
 
     view! {
@@ -199,46 +115,62 @@ pub fn Services() -> impl IntoView {
                         }).collect_view()}
                     </div>
                     <button class="svc-recheck-btn" on:click=recheck>
-                        "↻ Recheck"
+                        {move || if loading.get() { "⟳ Checking…" } else { "↻ Recheck" }}
                     </button>
                 </div>
             </div>
-            <div class="services-grid">
-                {SERVICES.iter().enumerate().map(|(i, svc)| {
-                    let sig = statuses_view[i];
-                    let cat = svc.category.to_string();
+            {move || if loading.get() && services.get().is_empty() {
+                view! { <div class="svc-loading">"Probing services…"</div> }.into_view()
+            } else {
+                let svcs = services.get();
+                let filter = cat_filter.get();
+                let cards = svcs.iter().filter(|s| {
+                    filter == "All" || s.category() == filter.as_str()
+                }).map(|s| {
+                    let online     = s.online;
+                    let latency    = s.latency_ms;
+                    let url        = s.url.clone();
+                    let host       = s.host.clone();
+                    let icon       = s.icon();
+                    let name       = s.name.clone();
+                    let desc       = s.desc.clone();
+                    let cat        = s.category();
+
+                    let dot_class  = if online { "svc-dot svc-dot-up" } else { "svc-dot svc-dot-down" };
+                    let status_lbl = if online { "UP" } else { "DOWN" };
+                    let latency_str = latency.map(|ms| format!(" {}ms", ms)).unwrap_or_default();
+
                     view! {
-                        <div
-                            class="svc-card"
-                            class:svc-card-hidden=move || {
-                                let f = cat_filter.get();
-                                f != "All" && f != cat
-                            }
-                        >
+                        <div class="svc-card">
                             <div class="svc-card-top">
-                                <span class="svc-icon">{svc.icon}</span>
+                                <span class="svc-icon">{icon}</span>
                                 <div class="svc-info">
-                                    <div class="svc-name">{svc.name}</div>
-                                    <div class="svc-desc">{svc.desc}</div>
+                                    <div class="svc-name">{name}</div>
+                                    <div class="svc-desc">{desc}</div>
+                                    <div class="svc-host">"host: "{host}</div>
                                 </div>
                                 <div class="svc-status">
-                                    <span class=move || sig.get().dot_class()></span>
-                                    <span class="svc-status-label">{move || sig.get().label()}</span>
+                                    <span class={dot_class}></span>
+                                    <span class="svc-status-label">
+                                        {status_lbl}{latency_str}
+                                    </span>
                                 </div>
                             </div>
                             <div class="svc-card-footer">
-                                <span class="svc-cat-badge">{svc.category}</span>
+                                <span class="svc-cat-badge">{cat}</span>
                                 <a
                                     class="svc-open-btn"
-                                    href={svc.url}
+                                    href={url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                 >"Open ↗"</a>
                             </div>
                         </div>
                     }
-                }).collect_view()}
-            </div>
+                }).collect_view();
+
+                view! { <div class="services-grid">{cards}</div> }.into_view()
+            }}
         </div>
     }
 }
