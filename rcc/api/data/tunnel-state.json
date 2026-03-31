@@ -1,5 +1,5 @@
 {
-  "nextPort": 18081,
+  "nextPort": 18085,
   "tunnels": {
     "boris": {
       "agent": "boris",
@@ -8,6 +8,34 @@
       "pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE0pHsdbeSJg2RaMZT/YpIPUkbBNlqWp1c6bCBkcroKz boris-sweden-vllm-tunnel",
       "status": "connected",
       "note": "confirmed live 2026-03-29"
+    },
+    "peabody": {
+      "agent": "peabody",
+      "label": "peabody-vllm-tunnel",
+      "port": 18081,
+      "pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEG2H1/ZUIuf8xgZepeU8jITnbRoPGiGaKI75AOJwCrt peabody-vllm-tunnel",
+      "addedAt": "2026-03-30T06:39:44.766Z"
+    },
+    "sherman": {
+      "agent": "sherman",
+      "label": "sherman-vllm-tunnel",
+      "port": 18082,
+      "pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIhwMqPw928vkyfwshla/FFoZrj/CL1Pe7QcMqVJKgkB sherman-vllm-tunnel",
+      "addedAt": "2026-03-30T07:04:19.205Z"
+    },
+    "snidely": {
+      "agent": "snidely",
+      "label": "snidely-vllm-tunnel",
+      "port": 18083,
+      "pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC9nGIE/XyXIf2pDYDakG78Lh1gSjcRy4YOm9tJi0vaC snidely-vllm-tunnel",
+      "addedAt": "2026-03-30T07:04:22.448Z"
+    },
+    "dudley": {
+      "agent": "dudley",
+      "label": "dudley-vllm-tunnel",
+      "port": 18084,
+      "pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPBXARCjDY9z6c2/QyxVyWBNxYlXT7nq58WH052nyCBG dudley-vllm-tunnel",
+      "addedAt": "2026-03-30T07:04:25.208Z"
     }
   }
 }

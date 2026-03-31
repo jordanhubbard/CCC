@@ -19,12 +19,142 @@
     "agent": "peabody",
     "role": "vllm-worker",
     "expiresAt": 1774937715462,
-    "used": false
+    "used": false,
+    "useCount": 1,
+    "lastUsedAt": "2026-03-30T06:16:37.664Z"
   },
   "rcc-bootstrap-sherman-9466c14d": {
     "agent": "sherman",
     "role": "vllm-worker",
     "expiresAt": 1774937715532,
+    "used": false,
+    "useCount": 1,
+    "lastUsedAt": "2026-03-30T06:16:37.164Z"
+  },
+  "rcc-bootstrap-peabody-31aca6ff": {
+    "agent": "peabody",
+    "role": "vllm-worker",
+    "expiresAt": 1774938691017,
+    "used": false,
+    "useCount": 1,
+    "lastUsedAt": "2026-03-30T06:33:40.514Z"
+  },
+  "rcc-bootstrap-sherman-6351c9ee": {
+    "agent": "sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774938691099,
+    "used": false,
+    "useCount": 1,
+    "lastUsedAt": "2026-03-30T06:40:29.974Z"
+  },
+  "rcc-bootstrap-dudley-1a926ce1": {
+    "agent": "dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774938691249,
+    "used": false,
+    "useCount": 1,
+    "lastUsedAt": "2026-03-30T06:46:28.487Z"
+  },
+  "rcc-bootstrap-boris-c58d0fe9": {
+    "agent": "boris",
+    "role": "vllm-worker",
+    "expiresAt": 1774917488557,
     "used": false
+  },
+  "rcc-bootstrap-peabody-de949242": {
+    "agent": "peabody",
+    "role": "vllm-worker",
+    "expiresAt": 1774917488575,
+    "used": false
+  },
+  "rcc-bootstrap-sherman-8d8455c1": {
+    "agent": "sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774917488590,
+    "used": false
+  },
+  "rcc-bootstrap-snidely-55b20b01": {
+    "agent": "snidely",
+    "role": "vllm-worker",
+    "expiresAt": 1774917488605,
+    "used": false
+  },
+  "rcc-bootstrap-dudley-434ae420": {
+    "agent": "dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774917488620,
+    "used": false
+  },
+  "rcc-bootstrap-boris-c89950ee": {
+    "agent": "boris",
+    "role": "vllm-worker",
+    "expiresAt": 1774917497793,
+    "used": false
+  },
+  "rcc-bootstrap-peabody-45f64537": {
+    "agent": "peabody",
+    "role": "vllm-worker",
+    "expiresAt": 1774917497852,
+    "used": true,
+    "useCount": 3,
+    "lastUsedAt": "2026-03-30T23:38:27.439Z"
+  },
+  "rcc-bootstrap-sherman-9a160587": {
+    "agent": "sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1774917497909,
+    "used": false
+  },
+  "rcc-bootstrap-snidely-86c32e10": {
+    "agent": "snidely",
+    "role": "vllm-worker",
+    "expiresAt": 1774917497980,
+    "used": false
+  },
+  "rcc-bootstrap-dudley-34d2e9c6": {
+    "agent": "dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1774917498072,
+    "used": false
+  },
+  "rcc-bootstrap-boris-2846073a": {
+    "agent": "boris",
+    "role": "vllm-worker",
+    "expiresAt": 1775000346447,
+    "used": true,
+    "useCount": 3,
+    "lastUsedAt": "2026-03-30T23:40:04.328Z"
+  },
+  "rcc-bootstrap-peabody-8a011e5d": {
+    "agent": "peabody",
+    "role": "vllm-worker",
+    "expiresAt": 1775000346598,
+    "used": true,
+    "useCount": 3,
+    "lastUsedAt": "2026-03-30T23:42:54.688Z"
+  },
+  "rcc-bootstrap-sherman-89a5a80f": {
+    "agent": "sherman",
+    "role": "vllm-worker",
+    "expiresAt": 1775000346738,
+    "used": false,
+    "useCount": 2,
+    "lastUsedAt": "2026-03-30T23:42:07.401Z"
+  },
+  "rcc-bootstrap-snidely-23fbfb59": {
+    "agent": "snidely",
+    "role": "vllm-worker",
+    "expiresAt": 1775000346866,
+    "used": false,
+    "useCount": 2,
+    "lastUsedAt": "2026-03-30T23:42:07.399Z"
+  },
+  "rcc-bootstrap-dudley-bf67f509": {
+    "agent": "dudley",
+    "role": "vllm-worker",
+    "expiresAt": 1775000346993,
+    "used": false,
+    "useCount": 2,
+    "lastUsedAt": "2026-03-30T23:42:07.410Z"
   }
 }

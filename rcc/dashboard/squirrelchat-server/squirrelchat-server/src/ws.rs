@@ -41,8 +41,7 @@ impl Hub {
 // ── WebSocket handler helper ──────────────────────────────────────────────────
 
 use axum::{
-    extract::{WebSocketUpgrade, ws::{WebSocket, Message as WsMsg}, Query as WsQuery},
-    http::StatusCode,
+    extract::{WebSocketUpgrade, ws::{WebSocket, Message as WsMsg}},
     response::IntoResponse,
 };
 use futures::{StreamExt, SinkExt};
@@ -50,34 +49,11 @@ use tracing::{info, warn};
 use crate::models::{ClientFrame, ServerFrame as SF};
 use crate::SharedState;
 
-#[derive(serde::Deserialize)]
-pub struct WsParams {
-    token: Option<String>,
-}
-
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
-    WsQuery(params): WsQuery<WsParams>,
     axum::extract::Extension(state): axum::extract::Extension<SharedState>,
 ) -> impl IntoResponse {
-    // Require a valid token as a query param: /api/ws?token=sc-xxxx
-    let token = match params.token.as_deref() {
-        Some(t) if !t.is_empty() => t.to_string(),
-        _ => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                "Authorization required: connect with ?token=<your-sc-token>",
-            ).into_response();
-        }
-    };
-
-    match state.db.get_user_by_token(&token) {
-        Ok(Some(_)) => ws.on_upgrade(move |socket| handle_socket(socket, state)).into_response(),
-        _ => (
-            StatusCode::UNAUTHORIZED,
-            "Invalid token",
-        ).into_response(),
-    }
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 async fn handle_socket(socket: WebSocket, state: SharedState) {

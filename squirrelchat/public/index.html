@@ -130,6 +130,7 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
       </div>
       <button id="pins-btn" style="margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;">Pins</button>
       <input class="search" id="search" placeholder="Search SquirrelChat" />
+      <span id="me-badge" style="font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer;" title="Click to sign out" onclick="signOut()">…</span>
     </header>
     <div class="messages" id="messages"></div>
     <div class="composer">
@@ -168,10 +169,11 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
 </div>
 <div class="modal-backdrop" id="login-modal" style="display:none;">
   <div class="modal">
-    <h2>Sign in</h2>
-    <input id="login-name" placeholder="Display name" />
-    <input id="login-token" placeholder="Token (optional)" />
-    <button class="primary" id="login-btn">Enter</button>
+    <h2>👋 Who are you?</h2>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px;">Enter your name to join the chat. You'll get a persistent token stored in your browser.</p>
+    <input id="login-name" placeholder="Your name (e.g. jkh)" autocomplete="off" />
+    <input id="login-token" placeholder="Token (optional — leave blank for name-claim)" autocomplete="off" />
+    <button class="primary" id="login-btn">Enter SquirrelChat →</button>
   </div>
 </div>
 <div class="hint-box" id="mention-box"></div>
@@ -230,13 +232,14 @@ function renderMessages(container = document.getElementById('messages'), message
     row.className = 'message';
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
-    avatar.style.background = avatarColor(msg.from_agent);
-    avatar.textContent = (msg.from_agent || '??').slice(0,2).toUpperCase();
+    const displayName = msg.from_name || msg.from_agent || 'unknown';
+    avatar.style.background = avatarColor(displayName);
+    avatar.textContent = displayName.slice(0,2).toUpperCase();
     const content = document.createElement('div');
     const header = document.createElement('div');
     header.className = 'message-header';
     const name = document.createElement('strong');
-    name.textContent = msg.from_agent || 'unknown';
+    name.textContent = displayName;
     const time = document.createElement('span');
     time.style.color = 'var(--muted)';
     time.style.fontSize = '12px';
@@ -251,13 +254,14 @@ function renderMessages(container = document.getElementById('messages'), message
     react.textContent = '😀';
     react.onclick = (e) => openEmojiPicker(e, msg);
     actions.appendChild(react);
-    if (msg.from_agent === state.user?.name) {
+    const myId = state.user?.id || state.user?.name;
+    if (msg.from_agent === myId) {
       const edit = document.createElement('span'); edit.textContent = '✎'; edit.onclick = () => editMessage(msg);
       const del = document.createElement('span'); del.textContent = '🗑'; del.onclick = () => deleteMessage(msg);
       actions.append(edit, del);
     }
     const pin = document.createElement('span'); pin.textContent = '📌'; pin.onclick = () => pinMessage(msg); actions.append(pin);
-    if (msg.from_agent !== state.user?.name) {
+    if (msg.from_agent !== myId) {
       const ttsBtn = document.createElement('button');
       ttsBtn.className = 'tts-btn';
       ttsBtn.textContent = '🔊';
@@ -333,6 +337,21 @@ async function loadInitialData() {
   renderAgents();
   state.projects = await api('/projects');
   renderProjects();
+  // Update identity badge
+  const badge = document.getElementById('me-badge');
+  if (badge && state.user) {
+    badge.textContent = '👤 ' + (state.user.name || state.user.id) + ' ×';
+    badge.title = 'Signed in as ' + (state.user.name || state.user.id) + ' — click to sign out';
+  }
+}
+function signOut() {
+  if (!confirm('Sign out of SquirrelChat?')) return;
+  localStorage.removeItem('sc_user');
+  localStorage.removeItem('sc_token');
+  state.user = null;
+  state.token = '';
+  document.getElementById('me-badge').textContent = '…';
+  document.getElementById('login-modal').style.display = 'flex';
 }
 async function selectChannel(id) {
   state.currentChannel = state.channels.find(c => c.id === id) || { id, name: id };
@@ -348,9 +367,13 @@ async function sendMessage(threadId = null) {
   const box = threadId ? document.getElementById('thread-input') : document.getElementById('composer');
   const text = box.value.trim();
   if (!text) return;
+  if (!state.user || !state.token) {
+    document.getElementById('login-modal').style.display = 'flex';
+    return;
+  }
   await api('/messages', {
     method: 'POST',
-    body: JSON.stringify({ from: state.user.name, text, channel: state.currentChannel.id, mentions: [], thread_id: threadId }),
+    body: JSON.stringify({ from: state.user.id || state.user.name, text, channel: state.currentChannel.id, mentions: [], thread_id: threadId }),
   });
   box.value = '';
 }
@@ -364,7 +387,7 @@ async function deleteMessage(msg) {
   await api(`/messages/${msg.id}`, { method: 'DELETE' });
 }
 async function pinMessage(msg) {
-  await api(`/channels/${state.currentChannel.id}/pins/${msg.id}`, { method: 'POST', body: JSON.stringify({ from: state.user.name }) });
+  await api(`/channels/${state.currentChannel.id}/pins/${msg.id}`, { method: 'POST', body: JSON.stringify({ from: state.user?.id || state.user?.name }) });
   state.pins = await api(`/channels/${state.currentChannel.id}/pins`);
   renderPins();
 }
@@ -380,7 +403,8 @@ function openEmojiPicker(event, msg) {
     const btn = document.createElement('button');
     btn.textContent = e;
     btn.onclick = async () => {
-      await api(`/messages/${msg.id}/react`, { method: 'POST', body: JSON.stringify({ emoji: e, from: state.user.name }) });
+      const uid = state.user?.id || state.user?.name;
+      await api(`/messages/${msg.id}/react`, { method: 'POST', body: JSON.stringify({ emoji: e, user_id: uid, from: uid }) });
       closeEmojiPicker();
     };
     picker.appendChild(btn);
@@ -450,16 +474,40 @@ function setupSSE() {
 function setupLogin() {
   const modal = document.getElementById('login-modal');
   if (!state.user || !state.token) modal.style.display = 'flex';
-  document.getElementById('login-btn').onclick = () => {
-    const name = document.getElementById('login-name').value.trim();
-    const token = document.getElementById('login-token').value.trim() || name || 'demo-token';
-    if (!name) return alert('Name required');
-    state.user = { name };
-    state.token = token;
-    localStorage.setItem('sc_user', JSON.stringify(state.user));
-    localStorage.setItem('sc_token', state.token);
-    modal.style.display = 'none';
-    init();
+  document.getElementById('login-btn').onclick = async () => {
+    const nameVal = document.getElementById('login-name').value.trim();
+    const tokenVal = document.getElementById('login-token').value.trim();
+    if (!nameVal) return alert('Name required');
+    try {
+      let token, user;
+      if (tokenVal) {
+        // Token provided — verify it against /api/me
+        const r = await fetch('/api/me', { headers: { Authorization: `Bearer ${tokenVal}` } });
+        const data = await r.json();
+        if (data.id === 'anonymous' || data.needs_name) throw new Error('Invalid token');
+        token = tokenVal;
+        user = data;
+      } else {
+        // Name-claim login
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: nameVal }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        token = data.token;
+        user = data.user;
+      }
+      state.user = user;
+      state.token = token;
+      localStorage.setItem('sc_user', JSON.stringify(user));
+      localStorage.setItem('sc_token', token);
+      modal.style.display = 'none';
+      init();
+    } catch (err) {
+      alert('Login failed: ' + err.message);
+    }
   };
 }
 function setupEvents() {
@@ -468,7 +516,7 @@ function setupEvents() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     if (e.key === 'Escape') { closeEmojiPicker(); hideMentionBox(); hideSlashBox(); }
     if (e.key === 'ArrowUp' && !e.shiftKey && !state.thread) {
-      const last = [...state.messages].reverse().find(m => m.from_agent === state.user?.name);
+      const last = [...state.messages].reverse().find(m => m.from_agent === (state.user?.id || state.user?.name));
       if (last) editMessage(last);
     }
   });

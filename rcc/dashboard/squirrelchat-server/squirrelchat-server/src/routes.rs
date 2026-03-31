@@ -2,7 +2,6 @@ use axum::{
     Router,
     extract::{Extension, Path, Query},
     http::StatusCode,
-    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, patch, post},
     Json,
@@ -30,50 +29,17 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 }
 type R<T> = Result<T, AppError>;
 
-// ── Auth middleware ───────────────────────────────────────────────────────────
-
-/// Middleware that requires a valid `Authorization: Bearer <sc-token>` header.
-/// Returns 401 if missing or invalid. Applied to all protected routes.
-async fn require_auth(
-    Extension(state): Extension<SharedState>,
-    req: axum::http::Request<axum::body::Body>,
-    next: Next,
-) -> Response {
-    let token = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|a| a.strip_prefix("Bearer ").or_else(|| a.strip_prefix("bearer ")));
-
-    match token {
-        Some(tok) => match state.db.get_user_by_token(tok) {
-            Ok(Some(_)) => next.run(req).await,
-            _ => (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "ok": false, "error": "invalid or missing token" })),
-            ).into_response(),
-        },
-        None => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "ok": false, "error": "Authorization: Bearer <token> required" })),
-        ).into_response(),
-    }
-}
-
 // ── Router ───────────────────────────────────────────────────────────────────
 
 pub fn build_router(state: SharedState) -> Router {
-    // Public routes — no auth required
-    let public = Router::new()
+    Router::new()
+        // Health
         .route("/health", get(health))
-        .route("/api/login", post(login))
-        .route("/api/ws", get(ws::ws_handler))
-        .route("/api/attachments/:id", get(get_attachment));
-
-    // Protected routes — require valid Bearer token
-    let protected = Router::new()
-        // Identity
+        // Identity / Auth
         .route("/api/me", get(get_me))
+        .route("/api/login", post(login))
+        // WebSocket
+        .route("/api/ws", get(ws::ws_handler))
         // Channels
         .route("/api/channels", get(list_channels).post(create_channel))
         .route("/api/channels/:id", delete(del_channel))
@@ -86,8 +52,9 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/messages/:id/reply", post(reply_message))
         // Reactions
         .route("/api/messages/:id/react", post(add_reaction).delete(del_reaction))
-        // Attachments (upload — get is public above)
+        // Attachments (file sharing)
         .route("/api/messages/:id/attachments", post(upload_attachment))
+        .route("/api/attachments/:id", get(get_attachment))
         // Search
         .route("/api/search", get(search_messages))
         // Pins
@@ -97,7 +64,7 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/dms", get(list_dms).post(open_dm))
         // Presence
         .route("/api/presence", get(get_presence))
-        // Agents / heartbeat
+        // Agents / Presence
         .route("/api/agents", get(list_agents))
         .route("/api/agents/:id/heartbeat", post(agent_heartbeat))
         // Projects
@@ -108,14 +75,9 @@ pub fn build_router(state: SharedState) -> Router {
         // Unread counts / read cursors
         .route("/api/unread", get(get_unread))
         .route("/api/channels/:id/read", post(mark_read))
-        // Voice + AI
+        // Voice transcription proxy
         .route("/api/voice/transcribe", post(voice_transcribe))
         .route("/api/ai/suggest", post(ai_suggest))
-        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
-
-    Router::new()
-        .merge(public)
-        .merge(protected)
         .layer(Extension(state))
 }
 

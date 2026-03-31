@@ -1,0 +1,180 @@
+name: Release — Multi-Platform Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v2.1.0)'
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.binary }} — ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── squirrelchat-server ───────────────────────────────────────────
+          - binary: squirrelchat-server
+            crate_dir: rcc/dashboard/squirrelchat-server
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: false
+
+          - binary: squirrelchat-server
+            crate_dir: rcc/dashboard/squirrelchat-server
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: true
+
+          - binary: squirrelchat-server
+            crate_dir: rcc/dashboard/squirrelchat-server
+            target: x86_64-apple-darwin
+            runner: macos-latest
+            cross: false
+
+          - binary: squirrelchat-server
+            crate_dir: rcc/dashboard/squirrelchat-server
+            target: aarch64-apple-darwin
+            runner: macos-latest
+            cross: false
+
+          # ── dashboard-server ─────────────────────────────────────────────
+          - binary: dashboard-server
+            crate_dir: rcc/dashboard/dashboard-server
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: false
+
+          - binary: dashboard-server
+            crate_dir: rcc/dashboard/dashboard-server
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: true
+
+          - binary: dashboard-server
+            crate_dir: rcc/dashboard/dashboard-server
+            target: x86_64-apple-darwin
+            runner: macos-latest
+            cross: false
+
+          - binary: dashboard-server
+            crate_dir: rcc/dashboard/dashboard-server
+            target: aarch64-apple-darwin
+            runner: macos-latest
+            cross: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.binary }}-${{ matrix.target }}
+          workspaces: ${{ matrix.crate_dir }} -> target
+
+      # ── Linux aarch64 cross-compilation deps ─────────────────────────────
+      - name: Install cross-compilation toolchain (Linux aarch64)
+        if: matrix.cross == true
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y gcc-aarch64-linux-gnu libclang-dev clang
+
+      # ── rusqlite bundled needs clang on Linux x86 too ────────────────────
+      - name: Install clang (Linux x86_64, for rusqlite bundled)
+        if: runner.os == 'Linux' && matrix.cross == false
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libclang-dev clang
+
+      - name: Build release binary
+        working-directory: ${{ matrix.crate_dir }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross == true && 'aarch64-linux-gnu-gcc' || '' }}
+        run: |
+          cargo build --release --target ${{ matrix.target }} --locked
+
+      - name: Strip binary (Linux/macOS)
+        working-directory: ${{ matrix.crate_dir }}
+        run: |
+          BIN="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          if [ -f "$BIN" ]; then
+            strip "$BIN" || true
+            echo "Stripped: $(du -sh $BIN)"
+          fi
+
+      - name: Package tarball
+        id: package
+        working-directory: ${{ matrix.crate_dir }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "refs/heads/main" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          fi
+          ARCHIVE="${{ matrix.binary }}-${VERSION}-${{ matrix.target }}.tar.gz"
+          tar -czf "/tmp/${ARCHIVE}" \
+            -C "target/${{ matrix.target }}/release" \
+            "${{ matrix.binary }}"
+          echo "archive=/tmp/${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "name=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "Packaged: $(du -sh /tmp/${ARCHIVE})"
+
+      - name: Upload artifact for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.archive }}
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "refs/heads/main" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "SquirrelChat + Dashboard ${{ steps.version.outputs.version }}"
+          generate_release_notes: true
+          files: artifacts/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

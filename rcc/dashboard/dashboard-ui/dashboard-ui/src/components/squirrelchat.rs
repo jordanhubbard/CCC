@@ -261,21 +261,6 @@ fn with_auth(req: gloo_net::http::RequestBuilder) -> gloo_net::http::RequestBuil
     }
 }
 
-/// Authenticated DELETE builder
-fn auth_delete(url: &str) -> gloo_net::http::RequestBuilder {
-    with_auth(gloo_net::http::Request::delete(url))
-}
-
-/// Authenticated PATCH builder
-fn auth_patch(url: &str) -> gloo_net::http::RequestBuilder {
-    with_auth(gloo_net::http::Request::patch(url))
-}
-
-/// Authenticated POST builder
-fn auth_post(url: &str) -> gloo_net::http::RequestBuilder {
-    with_auth(gloo_net::http::Request::post(url))
-}
-
 // ─── Async fetchers ───────────────────────────────────────────────────────────
 
 async fn fetch_sc_messages(channel: String) -> Vec<ScMessage> {
@@ -452,7 +437,7 @@ fn trigger_send(
         });
         // Post via /sc proxy
         {
-            let req_builder = auth_post("/sc/api/messages");
+            let req_builder = gloo_net::http::Request::post("/sc/api/messages");
             let req_builder = if let Some(tok) = &token {
                 req_builder.header("Authorization", &format!("Bearer {}", tok))
             } else {
@@ -690,16 +675,15 @@ pub fn SquirrelChat() -> impl IntoView {
     // WebSocket connects directly to squirrelchat-server (8793); dashboard-server
     // does not proxy WS upgrades. Uses wss:// when page is served over HTTPS.
     {
-        let ws_token = sc_token().unwrap_or_default();
         let ws_url = web_sys::window()
             .and_then(|w| {
                 let loc = w.location();
                 let proto = loc.protocol().ok()?;
                 let host = loc.hostname().ok()?;
                 let ws_proto = if proto == "https:" { "wss" } else { "ws" };
-                Some(format!("{}://{}:8793/api/ws?token={}", ws_proto, host, ws_token))
+                Some(format!("{}://{}:8793/api/ws", ws_proto, host))
             })
-            .unwrap_or_else(|| format!("ws://localhost:8793/api/ws?token={}", ws_token));
+            .unwrap_or_else(|| "ws://localhost:8793/api/ws".to_string());
 
         if let Ok(ws) = web_sys::WebSocket::new(&ws_url) {
             ws_handle.set_value(Some(ws.clone()));
@@ -1026,7 +1010,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                     let my_id = identity.get_untracked().id.clone();
                                     spawn_local(async move {
                                         let url = format!("/sc/api/channels/{}/read", ch);
-                                        let _ = auth_post(&url)
+                                        let _ = gloo_net::http::Request::post(&url)
                                             .json(&serde_json::json!({"user": my_id}))
                                             .map(|r| r.send());
                                     });
@@ -1199,7 +1183,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                     let to = agent_id.clone();
                                                     set_show_dm_picker.set(false);
                                                     spawn_local(async move {
-                                                        if let Ok(resp) = auth_post("/sc/api/dms")
+                                                        if let Ok(resp) = gloo_net::http::Request::post("/sc/api/dms")
                                                             .json(&serde_json::json!({"from": from, "to": to}))
                                                             .unwrap()
                                                             .send()
@@ -1263,7 +1247,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                         let my_id = identity.get_untracked().id.clone();
                                         spawn_local(async move {
                                             let url = format!("/sc/api/channels/{}/read", ch);
-                                            let _ = auth_post(&url)
+                                            let _ = gloo_net::http::Request::post(&url)
                                                 .json(&serde_json::json!({"user": my_id}))
                                                 .map(|r| r.send());
                                         });
@@ -1475,7 +1459,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                             "encoding": "base64",
                                                                         });
                                                                         if let Ok(req) =
-                                                                            auth_post(&url)
+                                                                            gloo_net::http::Request::post(&url)
                                                                                 .json(&payload)
                                                                         {
                                                                             let _ = req.send().await;
@@ -1508,7 +1492,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                         spawn_local(async move {
                                             let url = format!("/sc/api/projects/{}", pid);
                                             if let Ok(req) =
-                                                auth_delete(&url).build()
+                                                gloo_net::http::Request::delete(&url).build()
                                             {
                                                 let _ = req.send().await;
                                             }
@@ -1605,7 +1589,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                     let ch3 = ch2.clone();
                                                                     spawn_local(async move {
                                                                         let url = format!("/sc/api/channels/{}/pins/{}", ch3, mid);
-                                                                        if let Ok(req) = auth_delete(&url).build() {
+                                                                        if let Ok(req) = gloo_net::http::Request::delete(&url).build() {
                                                                             let _ = req.send().await;
                                                                         }
                                                                         // Refresh pins
@@ -1729,7 +1713,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                 let my_id = identity.get_untracked().id.clone();
                                                                 spawn_local(async move {
                                                                     let url = format!("/sc/api/channels/{}/pins/{}", ch, mid);
-                                                                    if let Ok(req) = auth_post(&url)
+                                                                    if let Ok(req) = gloo_net::http::Request::post(&url)
                                                                         .json(&serde_json::json!({"pinned_by": my_id})) {
                                                                         let _ = req.send().await;
                                                                     }
@@ -1750,7 +1734,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                 let mid = msg_id;
                                                                 spawn_local(async move {
                                                                     let url = format!("/sc/api/messages/{}", mid);
-                                                                    if let Ok(req) = auth_delete(&url).build() {
+                                                                    if let Ok(req) = gloo_net::http::Request::delete(&url).build() {
                                                                         let _ = req.send().await;
                                                                     }
                                                                 });
@@ -1776,7 +1760,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                             let new_text = edit_text.get_untracked();
                                                                             spawn_local(async move {
                                                                                 let url = format!("/sc/api/messages/{}", mid);
-                                                                                if let Ok(req) = auth_patch(&url)
+                                                                                if let Ok(req) = gloo_net::http::Request::patch(&url)
                                                                                     .json(&serde_json::json!({"text": new_text})) {
                                                                                     let _ = req.send().await;
                                                                                 }
@@ -1797,7 +1781,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                         let new_text = edit_text.get_untracked();
                                                                         spawn_local(async move {
                                                                             let url = format!("/sc/api/messages/{}", mid);
-                                                                            if let Ok(req) = auth_patch(&url)
+                                                                            if let Ok(req) = gloo_net::http::Request::patch(&url)
                                                                                 .json(&serde_json::json!({"text": new_text})) {
                                                                                 let _ = req.send().await;
                                                                             }
@@ -1870,7 +1854,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                                 "from": user,
                                                                                 "emoji": emoji_for_req,
                                                                             });
-                                                                            if let Ok(req) = auth_post(&url).json(&payload) {
+                                                                            if let Ok(req) = gloo_net::http::Request::post(&url).json(&payload) {
                                                                                 let _ = req.send().await;
                                                                             }
                                                                         });
@@ -1906,7 +1890,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                     "from": user,
                                                                     "emoji": emoji_for_req,
                                                                 });
-                                                                if let Ok(req) = auth_post(&url).json(&payload) {
+                                                                if let Ok(req) = gloo_net::http::Request::post(&url).json(&payload) {
                                                                     let _ = req.send().await;
                                                                 }
                                                             });
@@ -2106,7 +2090,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                 "text": msg_part,
                                                                 "deliver_at": time_part,
                                                             });
-                                                            if let Ok(req) = auth_post("/sc/api/messages/schedule").json(&payload) {
+                                                            if let Ok(req) = gloo_net::http::Request::post("/sc/api/messages/schedule").json(&payload) {
                                                                 if let Ok(resp) = req.send().await {
                                                                     if resp.status() == 200 {
                                                                         set_schedule_toast.set(Some(toast_msg));
@@ -2136,7 +2120,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                 "user_prompt": prompt,
                                                                 "message_count": 10
                                                             });
-                                                            match auth_post("/sc/api/ai/suggest")
+                                                            match gloo_net::http::Request::post("/sc/api/ai/suggest")
                                                                 .json(&payload)
                                                                 .and_then(|req| Ok(req))
                                                             {
@@ -2466,7 +2450,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                             "text": msg_text,
                                                             "channel": ch,
                                                         });
-                                                        if let Ok(req) = auth_post("/sc/api/messages").json(&payload) {
+                                                        if let Ok(req) = gloo_net::http::Request::post("/sc/api/messages").json(&payload) {
                                                             if let Ok(resp) = req.send().await {
                                                                 if let Ok(data) = resp.json::<serde_json::Value>().await {
                                                                     let msg_id = data["message"]["id"].as_i64();
@@ -2478,7 +2462,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                                                             "content_b64": b64,
                                                                         });
                                                                         let url = format!("/sc/api/messages/{}/attachments", mid);
-                                                                        if let Ok(req2) = auth_post(&url).json(&att_payload) {
+                                                                        if let Ok(req2) = gloo_net::http::Request::post(&url).json(&att_payload) {
                                                                             let _ = req2.send().await;
                                                                         }
                                                                     }
@@ -2545,7 +2529,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                             "tags": [],
                                             "assignee": assignee,
                                         });
-                                        if let Ok(req) = auth_post("/sc/api/projects")
+                                        if let Ok(req) = gloo_net::http::Request::post("/sc/api/projects")
                                             .json(&payload) {
                                             let _ = req.send().await;
                                         }
@@ -2582,7 +2566,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                         "from": sender,
                                         "text": text,
                                     });
-                                    let req_builder = auth_post(&url);
+                                    let req_builder = gloo_net::http::Request::post(&url);
                                     let req_builder = if let Some(tok) = &token {
                                         req_builder.header("Authorization", &format!("Bearer {}", tok))
                                     } else {
@@ -2623,7 +2607,7 @@ pub fn SquirrelChat() -> impl IntoView {
                                     "description": desc,
                                     "type": "public",
                                 });
-                                let req_builder = auth_post("/sc/api/channels");
+                                let req_builder = gloo_net::http::Request::post("/sc/api/channels");
                                 let req_builder = if let Some(tok) = &token {
                                     req_builder.header("Authorization", &format!("Bearer {}", tok))
                                 } else {

@@ -96,6 +96,20 @@ db.exec(`
 try { db.exec('ALTER TABLE messages ADD COLUMN thread_id INTEGER REFERENCES messages(id)'); } catch {}
 try { db.exec('ALTER TABLE messages ADD COLUMN edited_at INTEGER'); } catch {}
 
+// Additive migrations for users table
+try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT \'user\''); } catch {}
+// Rename users.token → users.token_hash if needed (backward compat — just add alias col)
+try { db.exec('ALTER TABLE users ADD COLUMN token_hash TEXT'); } catch {}
+
+// Additive migrations for channels table
+try { db.exec('ALTER TABLE channels ADD COLUMN last_message_at INTEGER'); } catch {}
+
+// Align reactions table — add user_id col if it only has from_agent
+try { db.exec('ALTER TABLE reactions ADD COLUMN user_id TEXT'); } catch {}
+// Backfill user_id from from_agent if exists
+try { db.exec('UPDATE reactions SET user_id = from_agent WHERE user_id IS NULL AND from_agent IS NOT NULL'); } catch {}
+
 // FTS5 for message search
 try {
   db.exec(`
@@ -147,9 +161,11 @@ if (channelCount.cnt === 0) {
 }
 
 // Seed default agent users
-const agentSeeds = ['rocky', 'bullwinkle', 'natasha', 'boris'];
+const agentSeeds = ['rocky', 'bullwinkle', 'natasha', 'boris', 'sparky', 'peabody', 'snidely', 'sherman', 'dudley'];
 const insertUser = db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)');
 for (const a of agentSeeds) insertUser.run(a, a.charAt(0).toUpperCase() + a.slice(1), 'agent');
+// Seed human users
+insertUser.run('jkh', 'jkh', 'admin');
 
 // SSE clients
 const sseClients = new Set();
@@ -176,11 +192,23 @@ app.use((req, res, next) => {
 });
 app.use(express.static(join(__dirname, 'public')));
 
-// Auth middleware
+// Auth middleware — accepts admin token OR any valid sc-token-<id>
 function auth(req, res, next) {
-  const token = (req.headers.authorization || '').replace('Bearer ', '');
-  if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
-  next();
+  const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  if (token === ADMIN_TOKEN) { req.userId = 'admin'; return next(); }
+  // sc-token-<user_id> format
+  const match = token.match(/^sc-token-(.+)$/);
+  if (match) {
+    const userId = match[1];
+    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+    if (user) { req.userId = userId; return next(); }
+    // Auto-create user on first login (new name-claim token)
+    db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, \'user\')').run(userId, userId);
+    req.userId = userId;
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized' });
 }
 
 // Helper: fetch from RCC
@@ -304,7 +332,7 @@ app.patch('/api/channels/:id', auth, (req, res) => {
 
 // Current user identity
 app.get('/api/me', (req, res) => {
-  const token = (req.headers.authorization || '').replace('Bearer ', '');
+  const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
   // Admin token — return admin identity
   if (token === ADMIN_TOKEN) {
     return res.json({ id: 'admin', name: 'Admin', role: 'admin', needs_name: false });
@@ -313,23 +341,46 @@ app.get('/api/me', (req, res) => {
   const match = token.match(/^sc-token-(.+)$/);
   if (match) {
     const userId = match[1];
-    const user = db.prepare('SELECT id, name, role, avatar_url FROM users WHERE id = ?').get(userId);
+    const user = db.prepare('SELECT id, name, role, COALESCE(avatar_url, \'\') as avatar_url FROM users WHERE id = ?').get(userId);
     if (user) {
       return res.json({ ...user, needs_name: false });
     }
+    // Unknown token but valid format — auto-create as guest
+    db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, \'user\')').run(userId, userId);
+    return res.json({ id: userId, name: userId, role: 'user', needs_name: false });
   }
   // No token or unknown — guest with set-name hint
   const name = req.query.name || null;
   res.json({ id: name || 'anonymous', name: name || 'anonymous', role: 'user', needs_name: !name });
 });
 
+// Login — name-claim: POST { name } → { token, user }
+// For jkh or other humans: claim a display name, get a persistent token
+app.post('/api/login', (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const id = name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const token = `sc-token-${id}`;
+  // Upsert user — preserve existing role if already in DB
+  const existing = db.prepare('SELECT id, name, role FROM users WHERE id = ?').get(id);
+  if (existing) {
+    db.prepare('UPDATE users SET name = ?, last_seen = ? WHERE id = ?').run(name, Date.now(), id);
+    _userNameCache[id] = name;
+    return res.json({ ok: true, token, user: { id, name, role: existing.role } });
+  }
+  db.prepare('INSERT INTO users (id, name, role) VALUES (?, ?, \'user\')').run(id, name);
+  _userNameCache[id] = name;
+  res.json({ ok: true, token, user: { id, name, role: 'user' } });
+});
+
 // Helper: build reactions map for a message (emoji → [user_ids])
 function getReactionsMap(messageId) {
-  const rows = db.prepare('SELECT emoji, user_id FROM reactions WHERE message_id = ? ORDER BY created_at ASC').all(messageId);
+  // Support both old (from_agent) and new (user_id) schemas
+  const rows = db.prepare('SELECT emoji, COALESCE(user_id, from_agent) as uid FROM reactions WHERE message_id = ? ORDER BY created_at ASC').all(messageId);
   const map = {};
   for (const r of rows) {
     if (!map[r.emoji]) map[r.emoji] = [];
-    map[r.emoji].push(r.user_id);
+    if (r.uid) map[r.emoji].push(r.uid);
   }
   return map;
 }
@@ -340,13 +391,24 @@ function getThreadCount(messageId) {
   return row ? row.cnt : 0;
 }
 
+// User name cache (populated lazily)
+const _userNameCache = {};
+function getUserName(id) {
+  if (!id) return id;
+  if (_userNameCache[id]) return _userNameCache[id];
+  const u = db.prepare('SELECT name FROM users WHERE id = ?').get(id);
+  if (u) { _userNameCache[id] = u.name; return u.name; }
+  return id;
+}
+
 // Helper: format a message row for the wire
 function formatMessage(r) {
+  const fromAgent = r.from_agent;
   return {
     id: r.id,
     ts: r.ts,
-    from: r.from_agent,
-    from_name: null, // TODO: join with users table for display name
+    from: fromAgent,
+    from_name: getUserName(fromAgent),
     text: r.text,
     channel: r.channel,
     thread_id: r.thread_id || null,
@@ -494,14 +556,21 @@ app.get('/api/messages/:id/reactions', (req, res) => {
 
 // Users
 app.get('/api/users', (req, res) => {
-  const users = db.prepare('SELECT id, name, role, avatar_url, status, last_seen FROM users ORDER BY name ASC').all();
+  const users = db.prepare('SELECT id, name, COALESCE(role, \'user\') as role, COALESCE(avatar_url, \'\') as avatar_url, status, last_seen FROM users ORDER BY name ASC').all();
   res.json(users);
 });
 
 app.post('/api/users/register', auth, (req, res) => {
   const { id, name, avatar_url, role = 'user' } = req.body;
   if (!id || !name) return res.status(400).json({ error: 'id and name required' });
-  db.prepare('INSERT OR REPLACE INTO users (id, name, role, avatar_url) VALUES (?, ?, COALESCE(?, \'user\'), ?)').run(id, name, role, avatar_url || null);
+  try {
+    db.prepare('INSERT OR REPLACE INTO users (id, name, role, avatar_url) VALUES (?, ?, ?, ?)').run(id, name, role, avatar_url || null);
+    _userNameCache[id] = name;
+  } catch {
+    // Fallback if avatar_url col doesn't exist yet
+    db.prepare('INSERT OR REPLACE INTO users (id, name, role) VALUES (?, ?, ?)').run(id, name, role);
+    _userNameCache[id] = name;
+  }
   res.json({ ok: true });
 });
 
