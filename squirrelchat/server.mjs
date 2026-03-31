@@ -758,6 +758,44 @@ app.get('/api/projects/:id/download', (req, res) => {
   archive.finalize();
 });
 
+// ── Agent status / activity feed ───────────────────────────────────────────
+
+// In-memory store: last 5 freeform status posts per agent
+const agentStatusStore = {};
+
+// GET /api/agent-status — proxy RCC activity-feed (public)
+app.get('/api/agent-status', async (req, res) => {
+  try {
+    const r = await rccFetch('/api/queue/activity-feed');
+    if (r.ok && r.data?.agents) {
+      // Merge freeform status text if available
+      const agents = r.data.agents.map(a => ({
+        ...a,
+        freeStatus: (agentStatusStore[a.name] || []).slice(-1)[0] || null,
+      }));
+      return res.json({ ok: true, agents, ts: r.data.ts });
+    }
+  } catch (err) {
+    console.warn('[agent-status] RCC fetch error:', err.message);
+  }
+  // Graceful degradation — return unknown status for all known agents
+  const KNOWN = ['natasha','rocky','boris','bullwinkle','peabody','sherman','snidely','dudley'];
+  return res.json({
+    ok: false,
+    agents: KNOWN.map(name => ({ name, status: 'unknown', currentTask: null, lastSeen: null })),
+  });
+});
+
+// POST /api/agent-status — agents push freeform status text
+app.post('/api/agent-status', async (req, res) => {
+  const { agent, text, status } = req.body || {};
+  if (!agent) return res.status(400).json({ error: 'agent required' });
+  if (!agentStatusStore[agent]) agentStatusStore[agent] = [];
+  agentStatusStore[agent].push({ text: text || '', status: status || 'online', ts: new Date().toISOString() });
+  if (agentStatusStore[agent].length > 5) agentStatusStore[agent].shift();
+  return res.json({ ok: true });
+});
+
 // Agents (proxy RCC heartbeats)
 app.get('/api/agents', async (req, res) => {
   try {

@@ -3615,6 +3615,35 @@ loadPackages();
       });
     }
 
+    // ── GET /api/queue/activity-feed — fleet agent status (public) ────────
+    if (method === 'GET' && path === '/api/queue/activity-feed') {
+      const KNOWN_AGENTS = ['natasha','rocky','boris','bullwinkle','peabody','sherman','snidely','dudley'];
+      const q = await readQueue();
+      // Build a map of agent → currently claimed task
+      const activeClaims = {};
+      for (const item of (q.items || [])) {
+        if (item.status === 'in-progress' && item.claimedBy) {
+          const key = item.claimedBy.toLowerCase();
+          if (!activeClaims[key] || new Date(item.claimedAt) > new Date(activeClaims[key].claimedAt)) {
+            activeClaims[key] = {
+              id: item.id, title: item.title, priority: item.priority,
+              claimedAt: item.claimedAt, tags: item.tags || [],
+            };
+          }
+        }
+      }
+      const agentList = KNOWN_AGENTS.map(name => {
+        const hb = heartbeats[name] || {};
+        const lastSeen = hb.ts || null;
+        const isOffline = !lastSeen || (Date.now() - new Date(lastSeen).getTime() > 10 * 60 * 1000);
+        const currentTask = activeClaims[name] || null;
+        let status = 'offline';
+        if (!isOffline) status = currentTask ? 'working' : 'idle';
+        return { name, status, currentTask, lastSeen };
+      });
+      return json(res, 200, { ok: true, agents: agentList, ts: new Date().toISOString() });
+    }
+
     // ── Auth-required endpoints ───────────────────────────────────────────
     if (!isAuthed(req)) {
       return json(res, 401, { error: 'Unauthorized' });
@@ -6957,7 +6986,7 @@ loadPackages();
       }
     }
 
-    // ── GET /api/queue/claimed — list in-progress items with agent info ───
+        // ── GET /api/queue/claimed — list in-progress items with agent info ───
     if (method === 'GET' && path === '/api/queue/claimed') {
       const q = await readQueue();
       const claimed = (q.items || []).filter(i => i.status === 'in-progress');

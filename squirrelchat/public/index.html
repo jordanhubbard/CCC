@@ -111,6 +111,20 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
 .tts-btn:hover { color: var(--text); }
 .tts-btn.tts-loading { opacity: 0.45; cursor: wait; }
 .tts-btn.tts-playing { color: var(--accent); }
+/* Agent Status Panel */
+.agent-status-panel { padding: 12px 8px; border-top: 1px solid #1f2329; }
+.agent-status-panel h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 4px 8px; }
+.agent-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: default; position: relative; }
+.agent-row:hover { background: #1a1f25; }
+.agent-row:hover .agent-task-tooltip { display: block; }
+.agent-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.agent-dot.working { background: #3b82f6; }
+.agent-dot.idle { background: #6b7280; }
+.agent-dot.offline { background: #374151; }
+.agent-dot.unknown { background: #4b5563; }
+.agent-name { font-size: 12px; color: var(--text); min-width: 64px; }
+.agent-task-label { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
+.agent-task-tooltip { display: none; position: absolute; left: 0; top: 100%; z-index: 50; background: #1f2329; border: 1px solid #2a2f36; border-radius: 6px; padding: 8px 10px; font-size: 12px; color: var(--text); white-space: normal; min-width: 200px; max-width: 280px; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -121,6 +135,10 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
       <button id="toggle-sidebar" title="Toggle">☰</button>
     </header>
     <div class="channel-list" id="channel-list"></div>
+    <div class="agent-status-panel" id="agent-status-panel">
+      <h4>Fleet Status</h4>
+      <div id="agent-status-list"></div>
+    </div>
   </nav>
   <section class="main">
     <header>
@@ -689,6 +707,58 @@ async function playTTS(text, btn) {
     _currentTtsBtn = null;
   }
 }
+
+// ── Fleet Agent Status Panel ──────────────────────────────────────────────────
+function renderAgentStatus(agents) {
+  const list = document.getElementById('agent-status-list');
+  if (!list) return;
+  list.innerHTML = '';
+  agents.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'agent-row';
+    const dot = document.createElement('div');
+    dot.className = `agent-dot ${a.status || 'offline'}`;
+    const name = document.createElement('span');
+    name.className = 'agent-name';
+    name.textContent = a.name;
+    const taskLabel = document.createElement('span');
+    taskLabel.className = 'agent-task-label';
+    let taskText = '';
+    let fullDesc = '';
+    if (a.status === 'working' && a.currentTask) {
+      taskText = (a.currentTask.title || '').slice(0, 38) + (a.currentTask.title?.length > 38 ? '…' : '');
+      fullDesc = a.currentTask.title || '';
+    } else if (a.freeStatus?.text) {
+      taskText = a.freeStatus.text.slice(0, 38) + (a.freeStatus.text.length > 38 ? '…' : '');
+      fullDesc = a.freeStatus.text;
+    } else {
+      taskText = a.status === 'idle' ? 'idle' : a.status === 'offline' ? 'offline' : '—';
+    }
+    taskLabel.textContent = taskText;
+    row.append(dot, name, taskLabel);
+    if (fullDesc) {
+      const tip = document.createElement('div');
+      tip.className = 'agent-task-tooltip';
+      tip.textContent = fullDesc;
+      row.appendChild(tip);
+    }
+    list.appendChild(row);
+  });
+}
+
+async function loadAgentStatus() {
+  try {
+    const res = await fetch('/api/agent-status');
+    if (res.ok) {
+      const data = await res.json();
+      renderAgentStatus(data.agents || []);
+    }
+  } catch { /* degrade silently */ }
+}
+
+// Poll every 15 seconds
+loadAgentStatus();
+setInterval(loadAgentStatus, 15000);
 
 setupLogin();
 setupEvents();
