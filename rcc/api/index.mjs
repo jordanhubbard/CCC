@@ -11,9 +11,9 @@
 import { createServer } from 'http';
 import * as _http from 'http';
 import * as _https from 'https';
-import { readFile, writeFile, mkdir, chmod, appendFile } from 'fs/promises';
+import { readFile, writeFile, mkdir, chmod, appendFile, readdir } from 'fs/promises';
 import { existsSync, createReadStream as createRS, readFileSync, writeFileSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join as pathJoin } from 'path';
 import { createInterface } from 'readline';
 import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
 import { Brain, createRequest } from '../brain/index.mjs';
@@ -2241,6 +2241,69 @@ async function handleRequest(req, res) {
         agentToken,
         rccUrl: RCC_PUBLIC_URL,
         secrets,
+      });
+    }
+
+    // ── POST /api/onboard — public JSON endpoint; validates one-time bootstrap token,
+    // creates agent record, issues permanent agent token, returns JSON response.
+    // Single-use: token is invalidated after first successful call.
+    // Body: { token: "<bootstrap-token>", agent?: "<name>", host?: "<hostname>" }
+    // Response: { ok, agent, agentToken, rccUrl, squirrelbusToken }
+    // This is the recommended programmatic path (install-agent.sh uses this).
+    // For a shell-script installer, use GET /api/onboard?token=... | bash instead.
+    if (method === 'POST' && path === '/api/onboard') {
+      let body;
+      try { body = await readBody(req); } catch { return json(res, 400, { error: 'Invalid JSON body' }); }
+      const token = body.token;
+      if (!token) return json(res, 400, { error: 'token required in request body' });
+
+      const entry = bootstrapTokens.get(token);
+      if (!entry) return json(res, 401, { error: 'Invalid bootstrap token' });
+      if (Date.now() > entry.expiresAt) return json(res, 401, { error: 'Bootstrap token expired' });
+
+      // Single-use: check if already consumed
+      if (entry.used) return json(res, 401, { error: 'Bootstrap token already used' });
+
+      // Consume the token immediately (single-use)
+      entry.used = true;
+      entry.useCount = (entry.useCount || 0) + 1;
+      entry.lastUsedAt = new Date().toISOString();
+      saveBootstrapTokens();
+
+      // Determine agent name — body can override entry (if admin pre-created token without name)
+      const agentName = body.agent || entry.agent;
+      if (!agentName) return json(res, 400, { error: 'agent name required (in body or bootstrap token)' });
+
+      // Create or resurrect agent record
+      const agents = await readAgents();
+      let agentToken;
+      if (agents[agentName]?.token) {
+        agentToken = agents[agentName].token; // resurrection — reuse token
+      } else {
+        agentToken = `rcc-agent-${agentName}-${randomUUID().slice(0, 8)}`;
+        agents[agentName] = {
+          ...(agents[agentName] || {}),
+          name: agentName,
+          host: body.host || entry.host || 'unknown',
+          type: entry.type || 'full',
+          role: entry.role || 'agent',
+          token: agentToken,
+          registeredAt: new Date().toISOString(),
+          capabilities: agents[agentName]?.capabilities || {},
+          billing: agents[agentName]?.billing || { claude_cli: 'fixed', inference_key: 'metered', gpu: 'fixed' },
+        };
+        await writeAgents(agents);
+        AUTH_TOKENS.add(agentToken);
+      }
+
+      console.log(`[rcc-api] POST /api/onboard: agent '${agentName}' registered from ${req.socket?.remoteAddress}`);
+      return json(res, 200, {
+        ok: true,
+        agent: agentName,
+        agentToken,
+        rccUrl: RCC_PUBLIC_URL,
+        squirrelbusToken: process.env.SQUIRRELBUS_TOKEN || null,
+        role: entry.role || 'agent',
       });
     }
 
@@ -5947,13 +6010,8 @@ loadPackages();
 
     // ── POST /api/tunnel/shell — register shell-access reverse tunnel ──────
     // Like /api/tunnel/request but allocates from the shell-tunnel port pool (19080+)
-<<<<<<< HEAD
     // and writes a permissive authorized_keys entry that allows reverse port-forwarding
     // to localhost:22 (so Rocky can SSH back into the container).
-=======
-    // and writes an authorized_keys entry that allows reverse port-forwarding to localhost:22
-    // so Rocky can SSH back into the container: ssh -p <port> horde@localhost (from do-host1)
->>>>>>> ceefd7c700dea26d3a083c00487564ea5ad17024
     // Accepts: { pubkey: "ssh-ed25519 ...", agent: "peabody", label: "peabody-shell-tunnel" }
     // Returns: { port, user, host, ok, keyWritten }
     if (method === 'POST' && path === '/api/tunnel/shell') {
@@ -5980,12 +6038,9 @@ loadPackages();
         assigned = { agent, label, port, pubkey: pubkeyTrimmed, addedAt: new Date().toISOString() };
         shellState.tunnels[agent] = assigned;
         await writeJsonFile(SHELL_TUNNEL_STATE_PATH, shellState);
-<<<<<<< HEAD
 
         // Shell tunnel authorized_keys entry: allow port-forwarding only (no PTY, no commands)
         // The agent will forward its sshd port (22) to do-host1 localhost:<port>
-=======
->>>>>>> ceefd7c700dea26d3a083c00487564ea5ad17024
         const comment = `rcc-shell-tunnel-${label}`;
         const authKeyEntry = `no-pty,no-agent-forwarding,no-X11-forwarding,permitopen="localhost:${port}" ${pubkeyTrimmed} ${comment}\n`;
         try {
@@ -6005,10 +6060,10 @@ loadPackages();
         assigned.updatedAt = new Date().toISOString();
         shellState.tunnels[agent] = assigned;
         await writeJsonFile(SHELL_TUNNEL_STATE_PATH, shellState);
-        const comment = `rcc-shell-tunnel-${label}`;
-        const authKeyEntry = `no-pty,no-agent-forwarding,no-X11-forwarding,permitopen="localhost:${assigned.port}" ${pubkeyTrimmed} ${comment}\n`;
+        const comment2 = `rcc-shell-tunnel-${label}`;
+        const authKeyEntry2 = `no-pty,no-agent-forwarding,no-X11-forwarding,permitopen="localhost:${assigned.port}" ${pubkeyTrimmed} ${comment2}\n`;
         try {
-          await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry, 'utf8');
+          await appendFile(TUNNEL_AUTH_KEYS, authKeyEntry2, 'utf8');
           try {
             const { execSync } = await import('child_process');
             execSync(`sudo chown tunnel:tunnel ${TUNNEL_AUTH_KEYS} && sudo chmod 600 ${TUNNEL_AUTH_KEYS}`, { stdio: 'ignore' });
@@ -6030,10 +6085,7 @@ loadPackages();
         agent: assigned.agent,
         keyWritten,
         alreadyExisted,
-<<<<<<< HEAD
         // Rocky uses this to reach the container: ssh -p <port> <container-user>@localhost
-=======
->>>>>>> ceefd7c700dea26d3a083c00487564ea5ad17024
         connect: `ssh -p ${assigned.port} horde@localhost  # from do-host1`,
         warning: keyWritten ? null : 'authorized_keys write failed — admin must add key manually',
       });
@@ -6717,6 +6769,188 @@ loadPackages();
           keepaliveAt: i.keepaliveAt, attempts: i.attempts,
         })),
       });
+    }
+
+    // ── SBOM API ──────────────────────────────────────────────────────────
+    // GET /api/sbom — list all agent SBOMs
+    if (method === 'GET' && path === '/api/sbom') {
+      try {
+        const sbomDir = new URL('../sbom', import.meta.url).pathname;
+        const files = await readdir(sbomDir).catch(() => []);
+        const sboms = [];
+        for (const f of files) {
+          if (!f.endsWith('.sbom.json')) continue;
+          try {
+            const raw = await readFile(pathJoin(sbomDir, f), 'utf8');
+            sboms.push(JSON.parse(raw));
+          } catch {}
+        }
+        return json(res, 200, { ok: true, count: sboms.length, sboms });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // GET /api/sbom/:agent — get specific agent SBOM
+    if (method === 'GET' && path.startsWith('/api/sbom/') && !path.includes('/propose') && !path.includes('/install')) {
+      const agentName = path.slice('/api/sbom/'.length).replace(/[^a-z0-9_-]/gi, '');
+      if (!agentName) return json(res, 400, { error: 'agent name required' });
+      try {
+        const sbomDir = new URL('../sbom', import.meta.url).pathname;
+        const sbomFile = pathJoin(sbomDir, `${agentName}.sbom.json`);
+        const raw = await readFile(sbomFile, 'utf8').catch(() => null);
+        if (!raw) return json(res, 404, { error: `No SBOM found for agent: ${agentName}` });
+        return json(res, 200, JSON.parse(raw));
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // GET /api/sbom/:agent/install — return install script for this agent
+    if (method === 'GET' && path.match(/^\/api\/sbom\/[^/]+\/install$/)) {
+      const agentName = path.split('/')[3].replace(/[^a-z0-9_-]/gi, '');
+      try {
+        const sbomDir = new URL('../sbom', import.meta.url).pathname;
+        const script = await readFile(pathJoin(sbomDir, 'install-sbom.sh'), 'utf8').catch(() => null);
+        if (!script) return json(res, 404, { error: 'install-sbom.sh not found' });
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(`AGENT_NAME=${agentName} RCC_URL=${process.env.RCC_EXTERNAL_URL || 'http://localhost:8789'}\n${script}`);
+        return;
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // PUT /api/sbom/:agent — update agent SBOM (agent-authenticated)
+    if (method === 'PUT' && path.startsWith('/api/sbom/') && !path.includes('/propose') && !path.includes('/install')) {
+      const agentName = path.slice('/api/sbom/'.length).replace(/[^a-z0-9_-]/gi, '');
+      if (!agentName) return json(res, 400, { error: 'agent name required' });
+      try {
+        const body = await readBody(req);
+        const sbomData = typeof body === 'string' ? JSON.parse(body) : body;
+        if (!sbomData.agent) sbomData.agent = agentName;
+        sbomData.updated = new Date().toISOString();
+        const sbomDir = new URL('../sbom', import.meta.url).pathname;
+        const sbomFile = pathJoin(sbomDir, `${agentName}.sbom.json`);
+        await writeFile(sbomFile, JSON.stringify(sbomData, null, 2) + '\n', 'utf8');
+        // Git commit
+        const { exec: execChild } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(execChild);
+        await execAsync(`git add rcc/sbom/${agentName}.sbom.json && git commit -m "sbom: update ${agentName}"`, { cwd: process.env.WORKSPACE_DIR || '/home/jkh/.openclaw/workspace' }).catch(() => {});
+        return json(res, 200, { ok: true, agent: agentName, updated: sbomData.updated });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // POST /api/sbom/:agent/propose — agent proposes a package addition
+    if (method === 'POST' && path.match(/^\/api\/sbom\/[^/]+\/propose$/)) {
+      const agentName = path.split('/')[3].replace(/[^a-z0-9_-]/gi, '');
+      try {
+        const body = await readBody(req);
+        const proposal = typeof body === 'string' ? JSON.parse(body) : body;
+        const { package_type, name, reason } = proposal;
+        if (!package_type || !name) return json(res, 400, { error: 'package_type and name required' });
+
+        const sbomDir = new URL('../sbom', import.meta.url).pathname;
+        const sbomFile = pathJoin(sbomDir, `${agentName}.sbom.json`);
+        const raw = await readFile(sbomFile, 'utf8').catch(() => null);
+        let sbomData = raw ? JSON.parse(raw) : { agent: agentName, version: '1.0.0', packages: {}, skills: [], env_required: [], env_optional: [] };
+
+        if (package_type === 'skill') {
+          sbomData.skills = sbomData.skills || [];
+          if (!sbomData.skills.includes(name)) sbomData.skills.push(name);
+        } else {
+          sbomData.packages = sbomData.packages || {};
+          sbomData.packages[package_type] = sbomData.packages[package_type] || [];
+          if (!sbomData.packages[package_type].includes(name)) {
+            sbomData.packages[package_type].push(name);
+          }
+        }
+        sbomData.updated = new Date().toISOString();
+
+        await writeFile(sbomFile, JSON.stringify(sbomData, null, 2) + '\n', 'utf8');
+        const { exec: execChild } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(execChild);
+        await execAsync(`git add rcc/sbom/${agentName}.sbom.json && git commit -m "sbom: ${agentName} propose ${package_type}/${name} — ${reason || 'no reason'}"`, { cwd: process.env.WORKSPACE_DIR || '/home/jkh/.openclaw/workspace' }).catch(() => {});
+        return json(res, 200, { ok: true, agent: agentName, added: { type: package_type, name }, reason });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // GET /sbom — dashboard UI
+    if (method === 'GET' && path === '/sbom') {
+      try {
+        const sbomDir = new URL('../sbom', import.meta.url).pathname;
+        const files = await readdir(sbomDir).catch(() => []);
+        const sboms = [];
+        for (const f of files) {
+          if (!f.endsWith('.sbom.json')) continue;
+          try {
+            const raw = await readFile(pathJoin(sbomDir, f), 'utf8');
+            sboms.push(JSON.parse(raw));
+          } catch {}
+        }
+        const tableRows = sboms.map(s => {
+          const apt = (s.packages?.apt || []).join(', ') || '-';
+          const npm = (s.packages?.npm || []).join(', ') || '-';
+          const pip = (s.packages?.pip || []).join(', ') || '-';
+          const skills = (s.skills || []).join(', ') || '-';
+          const envReq = (s.env_required || []).join(', ') || '-';
+          return `<tr>
+            <td><strong>${s.agent || f}</strong><br><small style="color:#8b949e">${s.description || ''}</small></td>
+            <td>${s.platform || 'linux'}</td>
+            <td style="font-size:0.8em">${apt}</td>
+            <td style="font-size:0.8em">${npm}</td>
+            <td style="font-size:0.8em">${pip}</td>
+            <td style="font-size:0.8em">${skills}</td>
+            <td style="font-size:0.8em">${envReq}</td>
+            <td style="font-size:0.8em">${s.updated ? s.updated.split('T')[0] : '-'}</td>
+          </tr>`;
+        }).join('\n');
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agent SBOM Registry</title>
+<style>
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; margin: 0; padding: 24px; }
+  h1 { color: #58a6ff; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 0.85rem; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { background: #161b22; color: #8b949e; padding: 8px 12px; text-align: left; border-bottom: 2px solid #30363d; }
+  td { padding: 8px 12px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr:hover td { background: #161b22; }
+  .nav { margin-bottom: 16px; font-size: 0.85rem; }
+  .nav a { color: #58a6ff; text-decoration: none; margin-right: 16px; }
+  .install-cmd { background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 12px; margin-top: 20px; font-size: 0.8rem; color: #3fb950; }
+</style>
+</head>
+<body>
+<div class="nav"><a href="/">← Dashboard</a><a href="/api/sbom">JSON API</a></div>
+<h1>🧾 Agent SBOM Registry</h1>
+<p class="subtitle">Software Bill of Materials — declared dependencies for each agent node</p>
+<table>
+<thead><tr>
+  <th>Agent</th><th>Platform</th><th>APT</th><th>NPM</th><th>PIP</th><th>Skills</th><th>Env Required</th><th>Updated</th>
+</tr></thead>
+<tbody>${tableRows}</tbody>
+</table>
+<div class="install-cmd">
+<strong>Apply SBOM on a new node:</strong><br>
+curl -fsSL http://localhost:8789/api/sbom/&lt;agent&gt;/install | AGENT_NAME=&lt;agent&gt; bash
+</div>
+</body>
+</html>`;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
     }
 
     // ── GET /pkg — nano package registry browser UI ──────────────────────

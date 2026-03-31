@@ -1,0 +1,58 @@
+{
+  "agent": "natasha",
+  "version": "1.0.0",
+  "updated": "2026-03-31T05:00:00Z",
+  "description": "Natasha — agent on puck (Mac mini). Idea generation, coding tasks, SquirrelChat.",
+  "platform": "macos",
+  "packages": {
+    "apt": [],
+    "npm": [
+      "-g @anthropic-ai/sdk"
+    ],
+    "pip": [
+      "requests",
+      "numpy",
+      "pillow",
+      "openai"
+    ],
+    "brew": [
+      "git",
+      "node",
+      "jq",
+      "gh",
+      "ffmpeg",
+      "sqlite3"
+    ],
+    "yum": []
+  },
+  "tools": {
+    "node": {
+      "version": ">=20.0.0",
+      "check": "node --version",
+      "install": "brew install node"
+    },
+    "gh": {
+      "version": ">=2.0",
+      "check": "gh --version",
+      "install": "brew install gh"
+    }
+  },
+  "skills": [
+    "github",
+    "gemini",
+    "weather",
+    "himalaya"
+  ],
+  "env_required": [
+    "RCC_AGENT_TOKEN",
+    "RCC_URL"
+  ],
+  "env_optional": [
+    "NVIDIA_API_KEY",
+    "GITHUB_TOKEN",
+    "SLACK_TOKEN",
+    "SQUIRRELBUS_TOKEN",
+    "TOKENHUB_API_KEY"
+  ],
+  "notes": "Natasha agent on Mac mini puck. Handles idea generation, SquirrelChat hosting, and coding tasks."
+}

@@ -1,0 +1,74 @@
+{
+  "agent": "rocky",
+  "version": "1.0.0",
+  "updated": "2026-03-31T05:00:00Z",
+  "description": "Rocky — RCC hub node on do-host1 (146.190.134.110). Runs RCC API, SquirrelBus, dashboard, workqueue.",
+  "platform": "linux",
+  "packages": {
+    "apt": [
+      "git",
+      "curl",
+      "wget",
+      "nodejs",
+      "npm",
+      "ffmpeg",
+      "python3",
+      "python3-pip",
+      "jq",
+      "build-essential",
+      "sqlite3",
+      "docker.io"
+    ],
+    "npm": [
+      "-g pm2",
+      "-g @anthropic-ai/sdk"
+    ],
+    "pip": [
+      "requests",
+      "numpy",
+      "pillow"
+    ],
+    "brew": [],
+    "yum": []
+  },
+  "tools": {
+    "gh": {
+      "version": ">=2.0",
+      "check": "gh --version",
+      "install": "apt"
+    },
+    "node": {
+      "version": ">=20.0.0",
+      "check": "node --version",
+      "install": "apt"
+    },
+    "pm2": {
+      "version": ">=5.0",
+      "check": "pm2 --version",
+      "install": "npm -g pm2"
+    }
+  },
+  "skills": [
+    "github",
+    "gemini",
+    "weather",
+    "himalaya",
+    "obsidian"
+  ],
+  "env_required": [
+    "RCC_AGENT_TOKEN",
+    "RCC_URL"
+  ],
+  "env_optional": [
+    "NVIDIA_API_KEY",
+    "GITHUB_TOKEN",
+    "SLACK_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
+    "SQUIRRELBUS_TOKEN",
+    "TOKENHUB_API_KEY",
+    "MINIO_ENDPOINT",
+    "MINIO_ACCESS_KEY",
+    "MINIO_SECRET_KEY"
+  ],
+  "notes": "Main RCC hub node. Runs the rockyandfriends server stack. Full trust agent."
+}

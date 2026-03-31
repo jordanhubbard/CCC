@@ -1,0 +1,63 @@
+{
+  "agent": "boris",
+  "version": "1.0.0",
+  "updated": "2026-03-31T05:00:00Z",
+  "description": "Boris — GPU node in Sweden (boris-sweden). 4x L40 GPUs, 190GB VRAM. Runs vLLM (Nemotron).",
+  "platform": "linux",
+  "packages": {
+    "apt": [
+      "git",
+      "curl",
+      "wget",
+      "nodejs",
+      "npm",
+      "python3",
+      "python3-pip",
+      "jq",
+      "build-essential",
+      "nvidia-cuda-toolkit"
+    ],
+    "npm": [
+      "-g @anthropic-ai/sdk"
+    ],
+    "pip": [
+      "vllm",
+      "torch",
+      "transformers",
+      "requests",
+      "numpy",
+      "huggingface_hub",
+      "accelerate"
+    ],
+    "brew": [],
+    "yum": []
+  },
+  "tools": {
+    "nvidia-smi": {
+      "version": ">=500",
+      "check": "nvidia-smi --version",
+      "install": "system"
+    },
+    "node": {
+      "version": ">=20.0.0",
+      "check": "node --version",
+      "install": "apt"
+    }
+  },
+  "skills": [
+    "github",
+    "gemini"
+  ],
+  "env_required": [
+    "RCC_AGENT_TOKEN",
+    "RCC_URL",
+    "HF_TOKEN"
+  ],
+  "env_optional": [
+    "GITHUB_TOKEN",
+    "SQUIRRELBUS_TOKEN",
+    "VLLM_PORT",
+    "CUDA_VISIBLE_DEVICES"
+  ],
+  "notes": "Boris GPU node — Sweden datacenter. 4x L40 GPUs (190GB total VRAM). Primary vLLM inference node for Nemotron. Outbound-only networking."
+}
