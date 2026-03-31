@@ -50,12 +50,28 @@ async function tunnelListening(port) {
   }
 }
 
+// Full clean restart: kill zombie EngineCore/GPU worker processes, purge leaked
+// PSM shared memory objects and semaphores, then restart via supervisord.
+// A plain 'supervisorctl restart' is not enough — zombie EngineCore processes
+// from a prior CUDA error will poison the new start.
+const CLEAN_RESTART_CMD = [
+  'supervisorctl stop vllm',
+  // Kill any leftover vllm/EngineCore/ray processes that supervisord missed
+  "pkill -9 -f 'EngineCore|vllm|ray::' 2>/dev/null || true",
+  // Purge leaked POSIX shared memory objects (PSM, /dev/shm/psm_*)
+  "ls /dev/shm/ 2>/dev/null | grep -E 'psm_|vllm' | xargs -I{} rm -f /dev/shm/{} 2>/dev/null || true",
+  // Purge leaked POSIX semaphores (/dev/shm/sem.*)
+  "ls /dev/shm/ 2>/dev/null | grep '^sem\\.' | xargs -I{} rm -f /dev/shm/{} 2>/dev/null || true",
+  'sleep 2',
+  'supervisorctl start vllm',
+].join(' && ');
+
 async function restartVllm(agent) {
   if (DRY_RUN) {
-    console.log(`[watchdog] DRY-RUN: would restart vllm on ${agent}`);
+    console.log(`[watchdog] DRY-RUN: would clean-restart vllm on ${agent}`);
     return;
   }
-  console.log(`[watchdog] Sending restart command to ${agent} via RCC exec...`);
+  console.log(`[watchdog] Sending clean-restart to ${agent} via RCC exec...`);
   const resp = await fetch(`${RCC_URL}/api/exec`, {
     method: 'POST',
     headers: {
@@ -65,7 +81,7 @@ async function restartVllm(agent) {
     body: JSON.stringify({
       targets: [agent],
       mode: 'shell',
-      code: 'supervisorctl restart vllm',
+      code: CLEAN_RESTART_CMD,
     }),
   });
   if (!resp.ok) {
@@ -73,7 +89,7 @@ async function restartVllm(agent) {
     return;
   }
   const data = await resp.json();
-  console.log(`[watchdog] Restart dispatched to ${agent}: exec-id=${data.id}`);
+  console.log(`[watchdog] Clean-restart dispatched to ${agent}: exec-id=${data.id}`);
 }
 
 async function main() {
