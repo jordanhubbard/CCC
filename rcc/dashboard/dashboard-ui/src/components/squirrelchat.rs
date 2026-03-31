@@ -40,6 +40,22 @@ use crate::components::sc_reactions::{EmojiPicker, ReactionsBar};
 use crate::components::sc_thread::ThreadPanel;
 use crate::components::sc_channel_modal::CreateChannelModal;
 
+// ─── Voice Channel Types ─────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, serde::Deserialize, Default, PartialEq)]
+struct VoiceParticipantInfo {
+    agent_id: String,
+    joined_at: i64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, Default, PartialEq)]
+struct VoiceChannelInfo {
+    id: String,
+    name: String,
+    #[serde(default)]
+    participants: Vec<VoiceParticipantInfo>,
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // format_msg_ts is now ScMessage::format_ts() — no standalone helper needed
@@ -564,6 +580,13 @@ pub fn SquirrelChat() -> impl IntoView {
     // Schedule toast state
     let (schedule_toast, set_schedule_toast) = create_signal(Option::<String>::None);
 
+    // Voice channel state
+    let (voice_channels, set_voice_channels) = create_signal(Vec::<VoiceChannelInfo>::new());
+    let (active_voice_channel, set_active_voice_channel) = create_signal(Option::<String>::None);
+    let (active_voice_session, set_active_voice_session) = create_signal(Option::<String>::None);
+    let (voice_muted, set_voice_muted) = create_signal(false);
+    let (voice_speaking, set_voice_speaking) = create_signal(false);
+
     let chat_ref = create_node_ref::<leptos::html::Div>();
 
     // ── Load messages when channel changes ────────────────────────────────────
@@ -574,6 +597,118 @@ pub fn SquirrelChat() -> impl IntoView {
             set_messages.set(msgs);
         }
     });
+
+    // ── Inject WebRTC JS shim on mount ────────────────────────────────────────
+    create_effect(move |_| {
+        let shim = r#"
+if (!window.__squirrelchat_voice) {
+window.__squirrelchat_voice = (function() {
+    var pc = null, localStream = null, evtSrc = null, sessionId = null;
+    var muted = false, analyserInterval = null;
+    var _speaking = false, _agentId = null, _targetAgent = null;
+    function joinVoice(sid, iceServers) {
+        sessionId = sid;
+        navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function(stream) {
+            localStream = stream;
+            pc = new RTCPeerConnection({ iceServers: iceServers });
+            stream.getTracks().forEach(function(t) { pc.addTrack(t, stream); });
+            pc.onicecandidate = function(e) {
+                if (e.candidate && _targetAgent) {
+                    fetch('/sc/api/voice/signal', { method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ session_id: sessionId, to_agent: _targetAgent,
+                            signal_type: 'ice-candidate', payload: e.candidate.toJSON() })
+                    });
+                }
+            };
+            pc.ontrack = function(e) {
+                var audio = new Audio(); audio.srcObject = e.streams[0]; audio.play().catch(function(){});
+            };
+            evtSrc = new EventSource('/sc/api/voice/signal/' + sessionId);
+            evtSrc.onmessage = function(e) {
+                var sig = JSON.parse(e.data);
+                if (sig.signal_type === 'offer') {
+                    pc.setRemoteDescription(new RTCSessionDescription(sig.payload)).then(function() {
+                        return pc.createAnswer();
+                    }).then(function(ans) {
+                        return pc.setLocalDescription(ans).then(function() { return ans; });
+                    }).then(function(ans) {
+                        fetch('/sc/api/voice/signal', { method: 'POST',
+                            headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({ session_id: sessionId, to_agent: sig.from_session,
+                                signal_type: 'answer', payload: ans }) });
+                    });
+                } else if (sig.signal_type === 'answer') {
+                    pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+                } else if (sig.signal_type === 'ice-candidate') {
+                    pc.addIceCandidate(new RTCIceCandidate(sig.payload)).catch(function(){});
+                }
+            };
+            try {
+                var ctx = new AudioContext();
+                var src = ctx.createMediaStreamSource(stream);
+                var analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+                src.connect(analyser);
+                var data = new Uint8Array(analyser.frequencyBinCount);
+                analyserInterval = setInterval(function() {
+                    if (muted) { window.__squirrelchat_voice._speaking = false; return; }
+                    analyser.getByteTimeDomainData(data);
+                    var rms = 0;
+                    for (var i=0; i<data.length; i++) rms += (data[i]-128)*(data[i]-128);
+                    window.__squirrelchat_voice._speaking = Math.sqrt(rms/data.length) > 10;
+                }, 150);
+            } catch(e2) {}
+            return pc.createOffer();
+        }).then(function(offer) {
+            if (offer && pc) return pc.setLocalDescription(offer);
+        }).catch(function(e) { console.error('[voice] join error', e); });
+    }
+    function leaveVoice() {
+        if (analyserInterval) { clearInterval(analyserInterval); analyserInterval = null; }
+        if (evtSrc) { evtSrc.close(); evtSrc = null; }
+        if (localStream) { localStream.getTracks().forEach(function(t){t.stop();}); localStream = null; }
+        if (pc) { pc.close(); pc = null; }
+        sessionId = null; _speaking = false;
+        window.__squirrelchat_voice._speaking = false;
+    }
+    function muteVoice() { muted=true; if(localStream)localStream.getAudioTracks().forEach(function(t){t.enabled=false;}); _speaking=false; window.__squirrelchat_voice._speaking=false; }
+    function unmuteVoice() { muted=false; if(localStream)localStream.getAudioTracks().forEach(function(t){t.enabled=true;}); }
+    return { joinVoice:joinVoice, leaveVoice:leaveVoice, muteVoice:muteVoice, unmuteVoice:unmuteVoice, _speaking:false, _agentId:null, _targetAgent:null };
+})();
+}
+"#;
+        let _ = js_sys::eval(shim);
+    });
+
+    // ── Poll voice channels every 5s ──────────────────────────────────────────
+    {
+        let set_vc = set_voice_channels.clone();
+        create_effect(move |_| {
+            spawn_local(async move {
+                let set_vc2 = set_vc.clone();
+                let _ = gloo_timers::future::TimeoutFuture::new(0).await;
+                // Initial fetch
+                if let Ok(resp) = gloo_net::http::Request::get("/sc/api/voice/channels").send().await {
+                    if let Ok(data) = resp.json::<Vec<VoiceChannelInfo>>().await {
+                        set_vc2.set(data);
+                    }
+                }
+            });
+        });
+    }
+    let poll_voice = {
+        let set_vc = set_voice_channels.clone();
+        move || {
+            let set_vc2 = set_vc.clone();
+            spawn_local(async move {
+                if let Ok(resp) = gloo_net::http::Request::get("/sc/api/voice/channels").send().await {
+                    if let Ok(data) = resp.json::<Vec<VoiceChannelInfo>>().await {
+                        set_vc2.set(data);
+                    }
+                }
+            });
+        }
+    };
 
     // ── Load DMs on mount ──────────────────────────────────────────────────────
     create_effect(move |_| {
@@ -976,6 +1111,25 @@ pub fn SquirrelChat() -> impl IntoView {
         }
     });
 
+    // ── Poll voice speaking indicator ─────────────────────────────────────────
+    {
+        create_effect(move |_| {
+            let active_sess = active_voice_session.get();
+            if active_sess.is_some() {
+                let set_sp = set_voice_speaking.clone();
+                spawn_local(async move {
+                    loop {
+                        gloo_timers::future::TimeoutFuture::new(200).await;
+                        let speaking = js_sys::eval("(window.__squirrelchat_voice && window.__squirrelchat_voice._speaking) ? true : false")
+                            .map(|v| v.as_bool().unwrap_or(false))
+                            .unwrap_or(false);
+                        set_sp.set(speaking);
+                    }
+                });
+            }
+        });
+    }
+
     // ── View ──────────────────────────────────────────────────────────────────
     view! {
         <div class="sc-layout">
@@ -1283,6 +1437,152 @@ pub fn SquirrelChat() -> impl IntoView {
                         }).collect::<Vec<_>>()
                     }}
                 </div>
+
+                // Voice Channels
+                <div class="sc-sidebar-section">
+                    <div class="sc-section-header">
+                        "🎙 Voice"
+                    </div>
+                    {move || {
+                        let channels = voice_channels.get();
+                        let active_ch = active_voice_channel.get();
+                        let active_sess = active_voice_session.get();
+                        let my_id = identity.get().id.clone();
+                        let muted = voice_muted.get();
+                        let speaking = voice_speaking.get();
+                        channels.into_iter().map(|ch| {
+                            let ch_id = ch.id.clone();
+                            let ch_id2 = ch.id.clone();
+                            let ch_name = ch.name.clone();
+                            let participant_count = ch.participants.len();
+                            let participants = ch.participants.clone();
+                            let is_active = active_ch.as_deref() == Some(&ch_id);
+                            let my_id_join = my_id.clone();
+                            let set_avc = set_active_voice_channel.clone();
+                            let set_avs = set_active_voice_session.clone();
+                            let set_muted = set_voice_muted.clone();
+                            let pv = poll_voice.clone();
+                            view! {
+                                <div class="sc-voice-channel">
+                                    <div class="sc-voice-channel-row"
+                                        on:click=move |_| {
+                                            if !is_active {
+                                                let cid = ch_id2.clone();
+                                                let aid = my_id_join.clone();
+                                                let set_avc2 = set_avc.clone();
+                                                let set_avs2 = set_avs.clone();
+                                                let pv2 = pv.clone();
+                                                spawn_local(async move {
+                                                    if let Ok(resp) = gloo_net::http::Request::post("/sc/api/voice/join")
+                                                        .json(&serde_json::json!({"channel_id": cid, "agent_id": aid}))
+                                                        .unwrap()
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        if let Ok(data) = resp.json::<serde_json::Value>().await {
+                                                            if let Some(sid) = data["session_id"].as_str() {
+                                                                let sid = sid.to_string();
+                                                                let ice_servers: Vec<serde_json::Value> = data["ice_servers"]
+                                                                    .as_array().cloned().unwrap_or_default();
+                                                                let js_call = format!(
+                                                                    "window.__squirrelchat_voice && window.__squirrelchat_voice.joinVoice('{}', {})",
+                                                                    sid,
+                                                                    serde_json::to_string(&ice_servers).unwrap_or_default()
+                                                                );
+                                                                let _ = js_sys::eval(&js_call);
+                                                                set_avc2.set(Some(cid));
+                                                                set_avs2.set(Some(sid));
+                                                                pv2();
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    >
+                                        <span class="sc-voice-channel-icon">"🎙"</span>
+                                        <span class="sc-voice-channel-name">{ch_name}</span>
+                                        {if participant_count > 0 {
+                                            view! { <span class="sc-voice-count">{participant_count}</span> }.into_view()
+                                        } else { ().into_view() }}
+                                        {if is_active {
+                                            let set_avc3 = set_active_voice_channel.clone();
+                                            let set_avs3 = set_active_voice_session.clone();
+                                            let sess_for_leave = active_sess.clone();
+                                            let set_mut = set_muted.clone();
+                                            let pv3 = poll_voice.clone();
+                                            view! {
+                                                <span
+                                                    class="sc-voice-leave"
+                                                    title="Leave channel"
+                                                    on:click=move |ev| {
+                                                        ev.stop_propagation();
+                                                        let _ = js_sys::eval("window.__squirrelchat_voice && window.__squirrelchat_voice.leaveVoice()");
+                                                        if let Some(sid) = sess_for_leave.clone() {
+                                                            let pv4 = pv3.clone();
+                                                            spawn_local(async move {
+                                                                let _ = gloo_net::http::Request::post("/sc/api/voice/leave")
+                                                                    .json(&serde_json::json!({"session_id": sid}))
+                                                                    .unwrap()
+                                                                    .send()
+                                                                    .await;
+                                                                pv4();
+                                                            });
+                                                        }
+                                                        set_avc3.set(None);
+                                                        set_avs3.set(None);
+                                                        set_mut.set(false);
+                                                    }
+                                                >"×"</span>
+                                            }.into_view()
+                                        } else { ().into_view() }}
+                                    </div>
+                                    {if is_active {
+                                        let muted_now = muted;
+                                        let set_mut2 = set_voice_muted.clone();
+                                        view! {
+                                            <div class="sc-voice-controls">
+                                                <button
+                                                    class="sc-voice-mute-btn"
+                                                    class:sc-voice-muted=move || muted_now
+                                                    title=if muted_now { "Unmute" } else { "Mute" }
+                                                    on:click=move |_| {
+                                                        let now_muted = !muted_now;
+                                                        set_mut2.set(now_muted);
+                                                        if now_muted {
+                                                            let _ = js_sys::eval("window.__squirrelchat_voice && window.__squirrelchat_voice.muteVoice()");
+                                                        } else {
+                                                            let _ = js_sys::eval("window.__squirrelchat_voice && window.__squirrelchat_voice.unmuteVoice()");
+                                                        }
+                                                    }
+                                                >
+                                                    {if muted_now { "🔇" } else { "🎤" }}
+                                                </button>
+                                                {if speaking && !muted_now {
+                                                    view! { <span class="sc-voice-speaking-dot" title="Speaking"></span> }.into_view()
+                                                } else { ().into_view() }}
+                                            </div>
+                                        }.into_view()
+                                    } else { ().into_view() }}
+                                    {if !participants.is_empty() {
+                                        view! {
+                                            <div class="sc-voice-participants">
+                                                {participants.iter().map(|p| {
+                                                    let initial = p.agent_id.chars().next().unwrap_or('?').to_uppercase().to_string();
+                                                    let name = p.agent_id.clone();
+                                                    view! {
+                                                        <span class="sc-voice-avatar" title=name>{initial}</span>
+                                                    }
+                                                }).collect::<Vec<_>>()}
+                                            </div>
+                                        }.into_view()
+                                    } else { ().into_view() }}
+                                </div>
+                            }
+                        }).collect::<Vec<_>>()
+                    }}
+                </div>
+
             </aside>
 
             // ── Main area ─────────────────────────────────────────────────────

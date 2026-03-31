@@ -110,6 +110,12 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/channels/:id/read", post(mark_read))
         // Voice + AI
         .route("/api/voice/transcribe", post(voice_transcribe))
+        // WebRTC Voice channels
+        .route("/api/voice/channels", get(crate::voice::list_voice_channels))
+        .route("/api/voice/join", post(crate::voice::voice_join))
+        .route("/api/voice/leave", post(crate::voice::voice_leave))
+        .route("/api/voice/signal", post(crate::voice::voice_signal_post))
+        .route("/api/voice/signal/:session_id", get(crate::voice::voice_signal_sse))
         .route("/api/ai/suggest", post(ai_suggest))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 

@@ -2,6 +2,7 @@ mod db;
 mod models;
 mod ws;
 mod routes;
+mod voice;
 
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ pub type SharedState = Arc<AppState>;
 pub struct AppState {
     pub db: db::Db,
     pub hub: ws::Hub,
+    pub voice: Arc<voice::VoiceState>,
 }
 
 #[tokio::main]
@@ -24,8 +26,9 @@ async fn main() -> anyhow::Result<()> {
     db.migrate()?;
 
     let hub = ws::Hub::new();
+    let voice = Arc::new(voice::VoiceState::new());
 
-    let state: SharedState = Arc::new(AppState { db, hub });
+    let state: SharedState = Arc::new(AppState { db, hub, voice });
 
     // ── Scheduled message delivery worker ─────────────────────────────────────
     {
