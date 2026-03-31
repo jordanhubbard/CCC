@@ -1,7 +1,7 @@
 pub mod activity_feed;
 pub mod health_banner;
 pub mod agent_cards;
-pub mod coding_agent;
+// pub mod coding_agent; // disabled — crush-server not deployed
 pub mod diff_view;
 pub mod issues;
 pub mod agent_detail;
