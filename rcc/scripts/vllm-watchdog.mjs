@@ -56,12 +56,17 @@ async function tunnelListening(port) {
 // from a prior CUDA error will poison the new start.
 const CLEAN_RESTART_CMD = [
   'supervisorctl stop vllm',
-  // Kill any leftover vllm/EngineCore/ray processes that supervisord missed
-  "pkill -9 -f 'EngineCore|vllm|ray::' 2>/dev/null || true",
+  // Kill EngineCore, Worker, and ray processes — including GPU-holding VLLM::Worker zombies
+  // that survive supervisord stop and keep VRAM allocated (~46.5GB each on L40s)
+  "pkill -9 -f 'EngineCore|VLLM::Worker|VllmWorker|vllm.worker|ray::' 2>/dev/null || true",
+  // Wait for GPU VRAM to actually release (kernel needs a moment after process kill)
+  'sleep 3',
   // Purge leaked POSIX shared memory objects (PSM, /dev/shm/psm_*)
   "ls /dev/shm/ 2>/dev/null | grep -E 'psm_|vllm' | xargs -I{} rm -f /dev/shm/{} 2>/dev/null || true",
   // Purge leaked POSIX semaphores (/dev/shm/sem.*)
   "ls /dev/shm/ 2>/dev/null | grep '^sem\\.' | xargs -I{} rm -f /dev/shm/{} 2>/dev/null || true",
+  // Verify GPUs are actually free before starting (log warning if not)
+  "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader 2>/dev/null | grep -v '^$' && echo 'WARNING: GPU still has active processes' || true",
   'sleep 2',
   'supervisorctl start vllm',
 ].join(' && ');
