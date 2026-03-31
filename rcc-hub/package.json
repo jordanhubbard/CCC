@@ -1,17 +1,22 @@
 {
   "name": "rcc-hub",
-  "version": "0.1.0",
-  "description": "Rocky Command Center — standalone hub server for agent coordination, work queues, and LLM routing",
+  "version": "1.0.0",
+  "description": "Rocky Command Center — self-hostable AI agent coordination hub",
   "type": "module",
+  "main": "index.mjs",
   "scripts": {
-    "start": "node src/api/index.mjs",
-    "setup": "node scripts/setup.mjs"
-  },
-  "dependencies": {
-    "@zilliz/milvus2-sdk-node": "^2.4.9"
+    "start": "node index.mjs",
+    "start:pm2": "pm2 start index.mjs --name rcc-hub",
+    "setup": "bash scripts/setup.sh"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18"
   },
-  "license": "MIT"
+  "dependencies": {},
+  "keywords": ["agents", "workqueue", "ai", "orchestration"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jordanhubbard/rockyandfriends"
+  }
 }

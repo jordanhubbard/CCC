@@ -1,0 +1,50 @@
+{
+  "agent": "rocky",
+  "version": "1.0.0",
+  "description": "RCC hub node on do-host1 (DigitalOcean) — primary command center",
+  "host": "do-host1",
+  "os": "linux",
+  "packages": {
+    "apt": [
+      "git",
+      "curl",
+      "jq",
+      "build-essential",
+      "sqlite3",
+      "ripgrep",
+      "fd-find",
+      "trash-cli",
+      "python3",
+      "python3-pip",
+      "redis-server"
+    ],
+    "brew": [],
+    "npm": ["pm2"],
+    "pip": ["pymilvus", "sentence-transformers"],
+    "cargo": []
+  },
+  "tools": {
+    "node": ">=18",
+    "git": "*",
+    "python3": ">=3.10",
+    "jq": "*",
+    "curl": "*"
+  },
+  "skills": ["github", "weather", "gemini", "himalaya"],
+  "env_required": [
+    "RCC_AGENT_TOKEN",
+    "AGENT_NAME",
+    "RCC_AUTH_TOKENS"
+  ],
+  "env_optional": [
+    "GITHUB_TOKEN",
+    "SLACK_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
+    "NVIDIA_API_KEY",
+    "TOKENHUB_API_KEY",
+    "SQUIRRELBUS_TOKEN"
+  ],
+  "capabilities": ["claude_cli", "ssh_tunnel"],
+  "pending_proposals": [],
+  "updated_at": "2026-03-31T02:00:00Z"
+}

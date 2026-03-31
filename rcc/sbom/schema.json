@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent SBOM",
+  "description": "Software Bill of Materials for an RCC agent node",
+  "type": "object",
+  "required": ["agent", "version"],
+  "properties": {
+    "agent": {
+      "type": "string",
+      "description": "Agent name (must match RCC agent registry)"
+    },
+    "version": {
+      "type": "string",
+      "description": "SBOM version (semver)"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this agent node"
+    },
+    "host": {
+      "type": "string",
+      "description": "Hostname or IP of the agent node"
+    },
+    "os": {
+      "type": "string",
+      "enum": ["linux", "macos", "windows"],
+      "description": "Operating system"
+    },
+    "packages": {
+      "type": "object",
+      "description": "System and language packages required",
+      "properties": {
+        "apt": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Debian/Ubuntu apt packages"
+        },
+        "brew": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "macOS Homebrew packages"
+        },
+        "npm": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "npm global packages"
+        },
+        "pip": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Python pip packages"
+        },
+        "cargo": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Rust cargo install packages"
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "Required CLI tools with version constraints",
+      "additionalProperties": { "type": "string" }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "OpenClaw skills installed on this agent"
+    },
+    "env_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Environment variables that must be set"
+    },
+    "env_optional": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Environment variables that enable optional features"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["gpu", "vllm", "claude_cli", "docker", "ssh_tunnel", "tailscale"]
+      },
+      "description": "Special hardware/software capabilities"
+    },
+    "pending_proposals": {
+      "type": "array",
+      "description": "Proposed additions not yet approved",
+      "items": {
+        "type": "object",
+        "required": ["ts", "proposed_by", "category", "item", "reason"],
+        "properties": {
+          "ts": { "type": "string" },
+          "proposed_by": { "type": "string" },
+          "category": { "type": "string" },
+          "item": { "type": "string" },
+          "reason": { "type": "string" },
+          "approved": { "type": "boolean" }
+        }
+      }
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "ISO timestamp of last update"
+    }
+  }
+}

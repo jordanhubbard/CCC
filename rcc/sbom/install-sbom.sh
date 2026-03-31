@@ -1,216 +1,144 @@
 #!/usr/bin/env bash
-# install-sbom.sh — Idempotent SBOM installer for RCC agent nodes
-# Usage: AGENT_NAME=rocky bash install-sbom.sh [/path/to/sbom.json]
-# Or:    bash install-sbom.sh rocky.sbom.json
+# install-sbom.sh — Idempotent SBOM enforcer for RCC agent nodes
+# Usage: install-sbom.sh [path/to/sbom.json]
+# If no path given, looks for ~/.rcc/sbom.json or rcc/sbom/<AGENT_NAME>.json
 
 set -euo pipefail
 
-SBOM_FILE="${1:-}"
-AGENT_NAME="${AGENT_NAME:-}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SBOM_PATH="${1:-}"
+AGENT_NAME="${AGENT_NAME:-$(hostname -s)}"
 RCC_URL="${RCC_URL:-http://localhost:8789}"
+RCC_AGENT_TOKEN="${RCC_AGENT_TOKEN:-}"
 
-# Detect platform
-PLATFORM="linux"
-if [[ "$(uname)" == "Darwin" ]]; then
-  PLATFORM="macos"
-fi
-
-# Resolve SBOM file
-if [[ -z "$SBOM_FILE" ]]; then
-  if [[ -n "$AGENT_NAME" ]]; then
-    SBOM_FILE="$SCRIPT_DIR/${AGENT_NAME}.sbom.json"
+# ── Find SBOM ──────────────────────────────────────────────────────────────
+if [ -z "$SBOM_PATH" ]; then
+  if [ -f "$HOME/.rcc/sbom.json" ]; then
+    SBOM_PATH="$HOME/.rcc/sbom.json"
+  elif [ -f "$(dirname "$0")/${AGENT_NAME}.json" ]; then
+    SBOM_PATH="$(dirname "$0")/${AGENT_NAME}.json"
   else
-    echo "❌ Usage: AGENT_NAME=<name> bash install-sbom.sh  OR  bash install-sbom.sh <file.sbom.json>"
+    echo "ERROR: No SBOM found. Pass path as argument or place at ~/.rcc/sbom.json"
     exit 1
   fi
 fi
 
-if [[ ! -f "$SBOM_FILE" ]]; then
-  # Try fetching from RCC hub
-  if [[ -n "$AGENT_NAME" && -n "$RCC_URL" ]]; then
-    echo "📥 Fetching SBOM from $RCC_URL/api/sbom/$AGENT_NAME ..."
-    curl -fsSL "$RCC_URL/api/sbom/$AGENT_NAME" -o "/tmp/${AGENT_NAME}.sbom.json" 2>/dev/null || {
-      echo "❌ SBOM file not found: $SBOM_FILE and could not fetch from hub"
-      exit 1
-    }
-    SBOM_FILE="/tmp/${AGENT_NAME}.sbom.json"
-  else
-    echo "❌ SBOM file not found: $SBOM_FILE"
-    exit 1
-  fi
-fi
-
-echo "🔧 Installing SBOM: $SBOM_FILE"
-
-# Parse SBOM with node (available on all agent nodes)
-if ! command -v node &>/dev/null; then
-  echo "❌ node is required to parse SBOM JSON. Install Node.js first."
+echo "🔍 Loading SBOM from: $SBOM_PATH"
+if ! command -v jq &>/dev/null; then
+  echo "ERROR: jq required to parse SBOM. Install it first: apt install jq / brew install jq"
   exit 1
 fi
 
-# Extract fields using node
-read_field() {
-  node -e "const s=require('$SBOM_FILE'); const v=s.$1; console.log(Array.isArray(v)?v.join('\n'):(v||''));" 2>/dev/null || echo ""
-}
+OS=$(jq -r '.os // "linux"' "$SBOM_PATH")
+echo "📋 SBOM for agent: $(jq -r '.agent' "$SBOM_PATH") (os: $OS)"
 
-read_obj_keys() {
-  node -e "const s=require('$SBOM_FILE'); const v=s.$1; if(v)Object.keys(v).forEach(k=>console.log(k));" 2>/dev/null || true
-}
-
-read_pkg_list() {
-  node -e "const s=require('$SBOM_FILE'); const v=(s.packages||{})['$1']||[]; v.forEach(x=>console.log(x));" 2>/dev/null || true
-}
-
-AGENT=$(read_field agent)
-SBOM_PLATFORM=$(read_field platform)
-echo "  Agent: $AGENT"
-echo "  Platform: $SBOM_PLATFORM (running on: $PLATFORM)"
-
-# ── APT packages ─────────────────────────────────────────────────────────────
-APT_PKGS=$(read_pkg_list apt)
-if [[ -n "$APT_PKGS" && "$PLATFORM" == "linux" ]]; then
-  echo ""
-  echo "📦 APT packages..."
-  MISSING_APT=()
-  while IFS= read -r pkg; do
-    [[ -z "$pkg" ]] && continue
-    if ! dpkg -l "$pkg" &>/dev/null 2>&1; then
-      MISSING_APT+=("$pkg")
-    else
-      echo "  ✓ $pkg"
-    fi
-  done <<< "$APT_PKGS"
-
-  if [[ ${#MISSING_APT[@]} -gt 0 ]]; then
-    echo "  Installing: ${MISSING_APT[*]}"
-    sudo apt-get install -y "${MISSING_APT[@]}" 2>/dev/null || apt-get install -y "${MISSING_APT[@]}"
-  fi
-fi
-
-# ── Homebrew packages ─────────────────────────────────────────────────────────
-BREW_PKGS=$(read_pkg_list brew)
-if [[ -n "$BREW_PKGS" && "$PLATFORM" == "macos" ]]; then
-  echo ""
-  echo "🍺 Homebrew packages..."
-  if command -v brew &>/dev/null; then
-    while IFS= read -r pkg; do
-      [[ -z "$pkg" ]] && continue
-      if brew list "$pkg" &>/dev/null 2>&1; then
-        echo "  ✓ $pkg"
-      else
-        echo "  Installing: $pkg"
-        brew install "$pkg"
-      fi
-    done <<< "$BREW_PKGS"
+# ── Package install helpers ────────────────────────────────────────────────
+install_apt() {
+  local pkgs=("$@")
+  if [ ${#pkgs[@]} -eq 0 ]; then return; fi
+  echo "📦 Installing apt packages: ${pkgs[*]}"
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get install -y "${pkgs[@]}" 2>/dev/null || echo "  ⚠️  Some apt packages may have failed (non-fatal)"
   else
-    echo "  ⚠️  brew not found, skipping Homebrew packages"
+    echo "  ℹ️  apt not available on this system — skipping"
   fi
-fi
+}
 
-# ── NPM packages ─────────────────────────────────────────────────────────────
-NPM_PKGS=$(read_pkg_list npm)
-if [[ -n "$NPM_PKGS" ]]; then
-  echo ""
-  echo "📦 NPM packages..."
-  while IFS= read -r pkg; do
-    [[ -z "$pkg" ]] && continue
-    # Check for global flag
-    if [[ "$pkg" == -g* ]]; then
-      PKG_NAME="${pkg#-g }"
-      PKG_NAME="${pkg#-g}"
-      PKG_NAME="${PKG_NAME# }"
-      if npm list -g "$PKG_NAME" &>/dev/null 2>&1; then
-        echo "  ✓ $PKG_NAME (global)"
-      else
-        echo "  Installing globally: $PKG_NAME"
-        npm install -g "$PKG_NAME"
-      fi
-    else
-      # Local package — just note it (no install location context)
-      echo "  ℹ️  Local npm package '$pkg' — install manually in project dir"
-    fi
-  done <<< "$NPM_PKGS"
-fi
-
-# ── PIP packages ─────────────────────────────────────────────────────────────
-PIP_PKGS=$(read_pkg_list pip)
-if [[ -n "$PIP_PKGS" ]]; then
-  echo ""
-  echo "🐍 Python packages..."
-  PIP_CMD="pip3"
-  command -v pip3 &>/dev/null || PIP_CMD="pip"
-  
-  while IFS= read -r pkg; do
-    [[ -z "$pkg" ]] && continue
-    if $PIP_CMD show "$pkg" &>/dev/null 2>&1; then
-      echo "  ✓ $pkg"
-    else
-      echo "  Installing: $pkg"
-      $PIP_CMD install --quiet "$pkg"
-    fi
-  done <<< "$PIP_PKGS"
-fi
-
-# ── Skills ────────────────────────────────────────────────────────────────────
-SKILLS=$(read_field skills)
-if [[ -n "$SKILLS" ]]; then
-  echo ""
-  echo "🎭 OpenClaw skills..."
-  SKILLS_DIR="${OPENCLAW_SKILLS_DIR:-$HOME/.openclaw/workspace/skills}"
-  CLAWHUB_CMD=""
-  command -v clawhub &>/dev/null && CLAWHUB_CMD="clawhub"
-
-  while IFS= read -r skill; do
-    [[ -z "$skill" ]] && continue
-    if [[ -d "$SKILLS_DIR/$skill" ]]; then
-      echo "  ✓ $skill"
-    elif [[ -n "$CLAWHUB_CMD" ]]; then
-      echo "  Installing skill: $skill"
-      clawhub install "$skill" || echo "  ⚠️  Could not install skill: $skill"
-    else
-      echo "  ⚠️  Skill '$skill' not found (clawhub not available)"
-    fi
-  done <<< "$SKILLS"
-fi
-
-# ── Environment variable check ───────────────────────────────────────────────
-ENV_REQUIRED=$(read_field env_required)
-ENV_OPTIONAL=$(read_field env_optional)
-
-if [[ -n "$ENV_REQUIRED" ]]; then
-  echo ""
-  echo "🔑 Required environment variables..."
-  MISSING_ENV=()
-  while IFS= read -r var; do
-    [[ -z "$var" ]] && continue
-    if [[ -n "${!var:-}" ]]; then
-      echo "  ✓ $var"
-    else
-      MISSING_ENV+=("$var")
-      echo "  ❌ $var (NOT SET)"
-    fi
-  done <<< "$ENV_REQUIRED"
-
-  if [[ ${#MISSING_ENV[@]} -gt 0 ]]; then
-    echo ""
-    echo "⚠️  Missing required env vars: ${MISSING_ENV[*]}"
-    echo "   Add them to ~/.rcc/.env or export before running"
+install_brew() {
+  local pkgs=("$@")
+  if [ ${#pkgs[@]} -eq 0 ]; then return; fi
+  echo "🍺 Installing brew packages: ${pkgs[*]}"
+  if command -v brew &>/dev/null; then
+    brew install "${pkgs[@]}" 2>/dev/null || echo "  ⚠️  Some brew packages may have failed (non-fatal)"
+  else
+    echo "  ℹ️  brew not available — skipping"
   fi
+}
+
+install_npm() {
+  local pkgs=("$@")
+  if [ ${#pkgs[@]} -eq 0 ]; then return; fi
+  echo "📦 Installing npm global packages: ${pkgs[*]}"
+  if command -v npm &>/dev/null; then
+    npm install -g "${pkgs[@]}" 2>/dev/null || echo "  ⚠️  Some npm installs may have failed (non-fatal)"
+  else
+    echo "  ℹ️  npm not available — skipping"
+  fi
+}
+
+install_pip() {
+  local pkgs=("$@")
+  if [ ${#pkgs[@]} -eq 0 ]; then return; fi
+  echo "🐍 Installing pip packages: ${pkgs[*]}"
+  if command -v pip3 &>/dev/null; then
+    pip3 install --quiet "${pkgs[@]}" 2>/dev/null || echo "  ⚠️  Some pip installs may have failed (non-fatal)"
+  else
+    echo "  ℹ️  pip3 not available — skipping"
+  fi
+}
+
+# ── Extract and install packages ───────────────────────────────────────────
+APT_PKGS=$(jq -r '.packages.apt // [] | .[]' "$SBOM_PATH" | tr '\n' ' ')
+BREW_PKGS=$(jq -r '.packages.brew // [] | .[]' "$SBOM_PATH" | tr '\n' ' ')
+NPM_PKGS=$(jq -r '.packages.npm // [] | .[]' "$SBOM_PATH" | tr '\n' ' ')
+PIP_PKGS=$(jq -r '.packages.pip // [] | .[]' "$SBOM_PATH" | tr '\n' ' ')
+
+[ -n "$APT_PKGS" ] && install_apt $APT_PKGS
+[ -n "$BREW_PKGS" ] && install_brew $BREW_PKGS
+[ -n "$NPM_PKGS" ] && install_npm $NPM_PKGS
+[ -n "$PIP_PKGS" ] && install_pip $PIP_PKGS
+
+# ── Check tool versions ────────────────────────────────────────────────────
+echo ""
+echo "🔧 Checking required tools..."
+TOOLS=$(jq -r '.tools // {} | keys[]' "$SBOM_PATH" 2>/dev/null || echo "")
+MISSING=()
+for tool in $TOOLS; do
+  if command -v "$tool" &>/dev/null; then
+    echo "  ✅ $tool: $(command -v "$tool")"
+  else
+    echo "  ❌ $tool: NOT FOUND"
+    MISSING+=("$tool")
+  fi
+done
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo ""
+  echo "⚠️  Missing tools: ${MISSING[*]}"
+  echo "   These may need manual installation."
 fi
 
-if [[ -n "$ENV_OPTIONAL" ]]; then
+# ── Check env vars ─────────────────────────────────────────────────────────
+echo ""
+echo "🔑 Checking required environment variables..."
+REQUIRED_ENV=$(jq -r '.env_required // [] | .[]' "$SBOM_PATH" 2>/dev/null || echo "")
+ENV_MISSING=()
+for var in $REQUIRED_ENV; do
+  if [ -n "${!var:-}" ]; then
+    echo "  ✅ $var: set"
+  else
+    echo "  ❌ $var: NOT SET"
+    ENV_MISSING+=("$var")
+  fi
+done
+if [ ${#ENV_MISSING[@]} -gt 0 ]; then
   echo ""
-  echo "🔑 Optional environment variables..."
-  while IFS= read -r var; do
-    [[ -z "$var" ]] && continue
-    if [[ -n "${!var:-}" ]]; then
-      echo "  ✓ $var"
-    else
-      echo "  ○ $var (not set)"
-    fi
-  done <<< "$ENV_OPTIONAL"
+  echo "⚠️  Missing required env vars: ${ENV_MISSING[*]}"
+  echo "   Add them to ~/.rcc/.env and source it."
+fi
+
+# ── Post SBOM to hub ───────────────────────────────────────────────────────
+if [ -n "$RCC_AGENT_TOKEN" ] && [ -n "$RCC_URL" ]; then
+  echo ""
+  echo "📡 Syncing SBOM to hub at $RCC_URL..."
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$RCC_URL/api/sbom/$AGENT_NAME" \
+    -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d @"$SBOM_PATH" 2>/dev/null || echo "000")
+  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+    echo "  ✅ SBOM synced to hub"
+  else
+    echo "  ⚠️  SBOM sync returned HTTP $HTTP_CODE (hub may not support SBOM yet)"
+  fi
 fi
 
 echo ""
-echo "✅ SBOM installation complete for agent: $AGENT"
+echo "✅ SBOM enforcement complete for $(jq -r '.agent' "$SBOM_PATH")"

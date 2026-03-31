@@ -1,0 +1,42 @@
+{
+  "agent": "natasha",
+  "version": "1.0.0",
+  "description": "Natasha — creative/coding agent node",
+  "os": "linux",
+  "packages": {
+    "apt": [
+      "git",
+      "curl",
+      "jq",
+      "build-essential",
+      "python3",
+      "python3-pip",
+      "clang",
+      "cmake"
+    ],
+    "brew": [],
+    "npm": [],
+    "pip": [],
+    "cargo": []
+  },
+  "tools": {
+    "node": ">=18",
+    "git": "*",
+    "python3": ">=3.10",
+    "clang": "*"
+  },
+  "skills": ["github", "gemini", "nano-banana-pro"],
+  "env_required": [
+    "RCC_AGENT_TOKEN",
+    "AGENT_NAME",
+    "RCC_URL"
+  ],
+  "env_optional": [
+    "GITHUB_TOKEN",
+    "NVIDIA_API_KEY",
+    "TOKENHUB_API_KEY"
+  ],
+  "capabilities": ["claude_cli"],
+  "pending_proposals": [],
+  "updated_at": "2026-03-31T02:00:00Z"
+}

@@ -15,7 +15,9 @@ import { EventEmitter } from 'events';
 // ── Configuration ──────────────────────────────────────────────────────────
 
 const TOKENHUB_URL     = process.env.TOKENHUB_URL     || 'http://localhost:8090';
-const TOKENHUB_API_KEY = process.env.TOKENHUB_API_KEY || 'tokenhub_043600a238032da1027087eae20d95bf41340176d1b4d870c4826bf72dfc7812';
+const TOKENHUB_API_KEY = process.env.TOKENHUB_API_KEY || process.env.TOKENHUB_AGENT_KEY || 'tokenhub_1b8cdce9904ca32eea3d06624079b5bfd9baf5a0eec4e7d6f3dacdf4b6aeeb15';
+// Preferred models in priority order — brain tries each until one succeeds
+const BRAIN_MODELS = (process.env.BRAIN_MODELS || 'nemotron,nemotron-peabody,nemotron-sherman,nemotron-snidely,nemotron-dudley,llama-3.3-70b-instruct').split(',').map(s => s.trim()).filter(Boolean);
 const STATE_PATH       = process.env.BRAIN_STATE_PATH || './brain-state.json';
 const TICK_MS          = parseInt(process.env.BRAIN_TICK_MS || '30000', 10);
 
@@ -80,7 +82,7 @@ export function createRequest({ messages, maxTokens = 1024, priority = 'normal',
 
 // ── Model Call ────────────────────────────────────────────────────────────
 
-async function callModel(messages, maxTokens, timeoutMs = 30000) {
+async function callModelWithName(model, messages, maxTokens, timeoutMs = 30000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
@@ -92,6 +94,7 @@ async function callModel(messages, maxTokens, timeoutMs = 30000) {
         'Authorization': `Bearer ${TOKENHUB_API_KEY}`,
       },
       body: JSON.stringify({
+        model,
         messages,
         max_tokens: maxTokens,
       }),
@@ -101,13 +104,14 @@ async function callModel(messages, maxTokens, timeoutMs = 30000) {
     clearTimeout(timer);
 
     if (!resp.ok) {
-      throw Object.assign(new Error(`HTTP ${resp.status}`), { code: 'HTTP_ERROR', status: resp.status });
+      const body = await resp.text().catch(() => '');
+      throw Object.assign(new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`), { code: 'HTTP_ERROR', status: resp.status });
     }
 
     const data = await resp.json();
     const text = data?.choices?.[0]?.message?.content || '';
     const tokensUsed = data?.usage?.total_tokens || Math.ceil(text.length / 4);
-    return { text, tokensUsed };
+    return { text, tokensUsed, model };
 
   } catch (err) {
     clearTimeout(timer);
@@ -116,6 +120,22 @@ async function callModel(messages, maxTokens, timeoutMs = 30000) {
     }
     throw err;
   }
+}
+
+async function callModel(messages, maxTokens, timeoutMs = 30000) {
+  let lastErr;
+  for (const model of BRAIN_MODELS) {
+    try {
+      const result = await callModelWithName(model, messages, maxTokens, timeoutMs);
+      if (result.text) return result;
+      // empty response — try next model
+      lastErr = new Error(`Empty response from ${model}`);
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[brain] Model ${model} failed: ${err.message} — trying next`);
+    }
+  }
+  throw lastErr || new Error('All models failed');
 }
 
 // ── Brain Engine ──────────────────────────────────────────────────────────

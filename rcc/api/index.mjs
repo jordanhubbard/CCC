@@ -47,6 +47,7 @@ const TUNNEL_STATE_PATH  = process.env.TUNNEL_STATE_PATH  || './data/tunnel-stat
 const TUNNEL_USER        = process.env.TUNNEL_USER        || 'tunnel';
 const TUNNEL_AUTH_KEYS   = process.env.TUNNEL_AUTH_KEYS   || '/home/tunnel/.ssh/authorized_keys';
 const TUNNEL_PORT_START  = parseInt(process.env.TUNNEL_PORT_START || '18080', 10);
+const SBOM_DIR           = process.env.SBOM_DIR || './sbom';
 
 // ── Services map ───────────────────────────────────────────────────────────
 const SERVICES_CATALOG = [
@@ -6559,6 +6560,46 @@ loadPackages();
       });
     }
 
+    // ── GET /api/agentos/console/:slot — console_mux ring output ──────────────
+    // TODO: wire to real QEMU pipe / console_mux ring reader when available
+    const consoleGetMatch = path.match(/^\/api\/agentos\/console\/(\d+)$/);
+    if (method === 'GET' && consoleGetMatch) {
+      const slot = parseInt(consoleGetMatch[1], 10);
+      if (slot < 0 || slot > 15) return json(res, 400, { error: 'slot must be 0-15' });
+      if (!global._consoleMuxRings) global._consoleMuxRings = {};
+      const ring = global._consoleMuxRings[slot] || [];
+      return json(res, 200, {
+        slot,
+        lines: ring.length > 0 ? ring : [`[console_mux] slot ${slot} ready — TODO: wire QEMU pipe`],
+      });
+    }
+
+    // ── POST /api/agentos/console/attach/:slot — send attach command ──────────
+    // TODO: forward to console_mux PD via SquirrelBus when QEMU bridge is live
+    const consoleAttachMatch = path.match(/^\/api\/agentos\/console\/attach\/(\d+)$/);
+    if (method === 'POST' && consoleAttachMatch) {
+      const slot = parseInt(consoleAttachMatch[1], 10);
+      if (slot < 0 || slot > 15) return json(res, 400, { error: 'slot must be 0-15' });
+      // TODO: PPC OP_CONSOLE_ATTACH (0x80) to console_mux via QEMU debug bridge
+      return json(res, 200, { ok: true, slot, note: 'attach queued — TODO: wire to console_mux PD' });
+    }
+
+    // ── POST /api/agentos/console/push — console_mux ring ingest (internal) ───
+    // Used by the QEMU pipe reader to push lines into the in-memory ring cache
+    if (method === 'POST' && path === '/api/agentos/console/push') {
+      const body = await readBody(req);
+      const { slot, line } = body;
+      if (typeof slot !== 'number' || typeof line !== 'string')
+        return json(res, 400, { error: 'slot (number) and line (string) required' });
+      if (!global._consoleMuxRings) global._consoleMuxRings = {};
+      if (!global._consoleMuxRings[slot]) global._consoleMuxRings[slot] = [];
+      global._consoleMuxRings[slot].push(line);
+      // Keep last 200 lines per slot
+      if (global._consoleMuxRings[slot].length > 200)
+        global._consoleMuxRings[slot] = global._consoleMuxRings[slot].slice(-200);
+      return json(res, 200, { ok: true });
+    }
+
     // ── GET /api/mesh — agentOS distributed mesh topology + slot health ────────
     if (method === 'GET' && path === '/api/mesh') {
       const now = Date.now();
@@ -7326,6 +7367,7 @@ loadPackages();
       });
     }
 
+<<<<<<< HEAD
     // ── GET /api/agentos/events — synthetic agentOS lifecycle events ──────
     if (method === 'GET' && path.startsWith('/api/agentos/events')) {
       const now = Date.now();
@@ -7353,6 +7395,91 @@ loadPackages();
       }
       events.sort((a, b) => a.ts - b.ts);
       return json(res, 200, { events, slots: [0,1,2,3,4,5,6,7], generated_at: now });
+=======
+    // ── SBOM endpoints ──────────────────────────────────────────────────────────
+    // GET /api/sbom — list all SBOMs
+    if (method === 'GET' && path === '/api/sbom') {
+      try {
+        const { readdir } = await import('fs/promises');
+        const sbomPath = new URL(`../../rcc/sbom`, import.meta.url).pathname;
+        let files = [];
+        try { files = await readdir(sbomPath); } catch { files = []; }
+        const sboms = {};
+        for (const f of files.filter(f => f.endsWith('.json') && f !== 'schema.json')) {
+          try {
+            const raw = await readFile(`${sbomPath}/${f}`, 'utf8');
+            const data = JSON.parse(raw);
+            sboms[data.agent || f.replace('.json', '')] = data;
+          } catch {}
+        }
+        return json(res, 200, { sboms, count: Object.keys(sboms).length });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // GET /api/sbom/:agent — get a specific agent's SBOM
+    const sbomGetMatch = path.match(/^\/api\/sbom\/([a-zA-Z0-9_-]+)$/);
+    if (method === 'GET' && sbomGetMatch) {
+      const agentName = sbomGetMatch[1];
+      const sbomPath = new URL(`../../rcc/sbom/${agentName}.json`, import.meta.url).pathname;
+      try {
+        const raw = await readFile(sbomPath, 'utf8');
+        return json(res, 200, JSON.parse(raw));
+      } catch {
+        return json(res, 404, { error: `No SBOM found for agent: ${agentName}` });
+      }
+    }
+
+    // POST /api/sbom/:agent — create or update an agent's SBOM (agent self-reports)
+    const sbomPostMatch = path.match(/^\/api\/sbom\/([a-zA-Z0-9_-]+)$/);
+    if (method === 'POST' && sbomPostMatch) {
+      const agentName = sbomPostMatch[1];
+      const sbomPath = new URL(`../../rcc/sbom/${agentName}.json`, import.meta.url).pathname;
+      const sbomDir  = new URL(`../../rcc/sbom`, import.meta.url).pathname;
+      try {
+        const { mkdir: mkdirFs } = await import('fs/promises');
+        await mkdirFs(sbomDir, { recursive: true }).catch(() => {});
+        const body = await readBody(req);
+        const data = JSON.parse(body);
+        data.agent = agentName;
+        data.updated_at = new Date().toISOString();
+        await writeFile(sbomPath, JSON.stringify(data, null, 2), 'utf8');
+        return json(res, 200, { ok: true, agent: agentName, updated_at: data.updated_at });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    }
+
+    // POST /api/sbom/:agent/propose — agent proposes a new dependency
+    const sbomProposeMatch = path.match(/^\/api\/sbom\/([a-zA-Z0-9_-]+)\/propose$/);
+    if (method === 'POST' && sbomProposeMatch) {
+      const agentName = sbomProposeMatch[1];
+      const sbomPath = new URL(`../../rcc/sbom/${agentName}.json`, import.meta.url).pathname;
+      try {
+        const body = await readBody(req);
+        const proposal = JSON.parse(body);
+        if (!proposal.category || !proposal.item || !proposal.reason) {
+          return json(res, 400, { error: 'Must include: category, item, reason' });
+        }
+        let sbom = {};
+        try { sbom = JSON.parse(await readFile(sbomPath, 'utf8')); } catch { sbom = { agent: agentName, version: '1.0.0', pending_proposals: [] }; }
+        if (!sbom.pending_proposals) sbom.pending_proposals = [];
+        sbom.pending_proposals.push({
+          ts: new Date().toISOString(),
+          proposed_by: proposal.proposed_by || agentName,
+          category: proposal.category,
+          item: proposal.item,
+          reason: proposal.reason,
+          approved: false,
+        });
+        sbom.updated_at = new Date().toISOString();
+        await writeFile(sbomPath, JSON.stringify(sbom, null, 2), 'utf8');
+        return json(res, 200, { ok: true, proposal_count: sbom.pending_proposals.length });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+>>>>>>> origin/main
     }
 
     return json(res, 404, { error: 'Not found' });
