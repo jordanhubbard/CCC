@@ -161,6 +161,10 @@ if (channelCount.cnt === 0) {
   console.log('[squirrelchat] Seeded default channels');
 }
 
+// Ensure #worklog channel always exists (even on existing DBs that skipped seeding)
+db.prepare('INSERT OR IGNORE INTO channels (id, name, description) VALUES (?, ?, ?)')
+  .run('worklog', 'Worklog', 'Agent task completion journal — auto-posted by workqueue.completed');
+
 // Seed default agent users
 const agentSeeds = ['rocky', 'bullwinkle', 'natasha', 'boris', 'sparky', 'peabody', 'snidely', 'sherman', 'dudley'];
 const insertUser = db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)');
@@ -1118,6 +1122,64 @@ app.get('/api/stream', (req, res) => {
     sseClients.delete(res);
     clearInterval(keepalive);
   });
+});
+
+// ── #worklog REST endpoint ────────────────────────────────────────────────────
+// POST /sc/api/worklog/post
+// Body: { agent, title, result, commit? }
+// Posts a formatted task-completion entry to the #worklog channel, threaded
+// under a "📅 YYYY-MM-DD" daily date-header message.
+// No auth token required — agents post directly without a session.
+
+function worklogDateLabel(ts) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `📅 ${y}-${m}-${day}`;
+}
+
+function worklogInsertMessage(from, text, channel, threadId) {
+  const ts = Date.now();
+  const r = db.prepare(
+    'INSERT INTO messages (ts, from_agent, text, channel, thread_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(ts, from, text, channel, threadId || null);
+  db.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(ts, channel);
+  const msg = formatMessage({
+    id: r.lastInsertRowid, ts, from_agent: from, text, channel,
+    mentions: null, thread_id: threadId || null, edited_at: null,
+    created_at: ts, slash_result: null,
+  });
+  const payload = JSON.stringify({ type: 'message', data: msg });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  return msg;
+}
+
+app.post('/sc/api/worklog/post', (req, res) => {
+  const { agent, title, result, commit } = req.body || {};
+  if (!agent || !title) {
+    return res.status(400).json({ error: 'agent and title are required' });
+  }
+
+  const todayLabel = worklogDateLabel(Date.now());
+
+  // Find or create today's date-header message in #worklog
+  let dateHeader = db.prepare(
+    "SELECT * FROM messages WHERE channel = 'worklog' AND from_agent = 'worklog-system' AND text = ? AND thread_id IS NULL ORDER BY ts DESC LIMIT 1"
+  ).get(todayLabel);
+
+  if (!dateHeader) {
+    dateHeader = worklogInsertMessage('worklog-system', todayLabel, 'worklog', null);
+  }
+
+  // Format the task-completion entry
+  const truncated = result ? String(result).slice(0, 200) : '';
+  const commitPart = commit ? ` (${String(commit).slice(0, 10)})` : '';
+  const text = `✅ **${agent}** — *${title}*${commitPart}\n> ${truncated}`;
+
+  const msg = worklogInsertMessage('worklog-system', text, 'worklog', dateHeader.id);
+
+  res.json({ ok: true, message: msg, date_header_id: dateHeader.id });
 });
 
 // SPA catch-all — serve index.html for non-API routes
