@@ -6629,6 +6629,98 @@ loadPackages();
       return json(res, 200, { ok: true });
     }
 
+    // ── GET /api/agentos/shell — dev_shell Terminal tab (SSE output stream) ────
+    // Streams dev_shell output ring to the RCC dashboard Terminal tab.
+    // The dashboard writes commands via POST /api/agentos/shell/cmd.
+    //
+    // In production, this would poll the dev_shell_ring shared MR via AgentFS
+    // or a QEMU pipe reader.  For the prototype we use an in-memory ring that
+    // the QEMU bridge can push into via POST /api/agentos/shell/push.
+    if (method === 'GET' && path === '/api/agentos/shell') {
+      if (!global._devShellOutput) global._devShellOutput = [];
+      if (!global._devShellSseClients) global._devShellSseClients = new Set();
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.flushHeaders?.();
+
+      // Send buffered output first
+      for (const line of global._devShellOutput.slice(-100)) {
+        res.write(`data: ${JSON.stringify({ type: 'output', text: line })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ type: 'connected', ts: new Date().toISOString() })}\n\n`);
+
+      global._devShellSseClients.add(res);
+      const ka = setInterval(() => res.write(': ping\n\n'), 20000);
+      req.on('close', () => {
+        global._devShellSseClients.delete(res);
+        clearInterval(ka);
+      });
+      return; // SSE — don't call json()
+    }
+
+    // ── POST /api/agentos/shell/cmd — write a command to dev_shell ────────────
+    // Body: { cmd: "pd list\n" }
+    // In production: writes into dev_shell_ring cmd ring and notifies PD.
+    // Prototype: echoes to SSE clients with a simulated response.
+    if (method === 'POST' && path === '/api/agentos/shell/cmd') {
+      const body = await readBody(req);
+      const cmd = (typeof body.cmd === 'string') ? body.cmd.trim() : '';
+      if (!cmd) return json(res, 400, { error: 'cmd required' });
+      if (!global._devShellSseClients) global._devShellSseClients = new Set();
+      if (!global._devShellOutput)    global._devShellOutput = [];
+
+      // Echo command back
+      const echoLine = `> ${cmd}`;
+      global._devShellOutput.push(echoLine);
+      if (global._devShellOutput.length > 500) global._devShellOutput.shift();
+
+      for (const client of global._devShellSseClients) {
+        client.write(`data: ${JSON.stringify({ type: 'output', text: echoLine })}\n\n`);
+      }
+
+      // Simulated responses for common commands (until QEMU bridge is live)
+      const simulated = {
+        'help':      'agentOS dev_shell — type pd list, mem dump, trace dump, etc.\r\n> ',
+        'version':   'agentOS v0.1.0-alpha\r\n> ',
+        'pd list':   'PD list: controller(50) swap_slot_0..3(75) worker_0..7(80) init_agent(90) ...\r\n> ',
+        'mr list':   'MRs: perf_ring vibe_code vibe_state gpu_tensor_buf dev_shell_ring\r\n> ',
+        'perf show': '[0] pd=0 ch=0 lat=0ns  [1] pd=0 ch=0 lat=0ns (ring empty)\r\n> ',
+        'trace dump':'trace dump: notified trace_recorder\r\n> ',
+      };
+      const resp = simulated[cmd] || `unknown command: ${cmd}\r\nType 'help' for command list.\r\n> `;
+      global._devShellOutput.push(resp);
+      if (global._devShellOutput.length > 500) global._devShellOutput.shift();
+      for (const client of global._devShellSseClients) {
+        client.write(`data: ${JSON.stringify({ type: 'output', text: resp })}\n\n`);
+      }
+
+      return json(res, 200, { ok: true, cmd, queued: true });
+    }
+
+    // ── POST /api/agentos/shell/push — QEMU bridge pushes dev_shell output ────
+    // Used by the QEMU pipe reader when the dev_shell_ring is live.
+    // Body: { text: "pd list output...\n> " }
+    if (method === 'POST' && path === '/api/agentos/shell/push') {
+      const body = await readBody(req);
+      const text = (typeof body.text === 'string') ? body.text : '';
+      if (!text) return json(res, 400, { error: 'text required' });
+      if (!global._devShellSseClients) global._devShellSseClients = new Set();
+      if (!global._devShellOutput)    global._devShellOutput = [];
+
+      global._devShellOutput.push(text);
+      if (global._devShellOutput.length > 500) global._devShellOutput.shift();
+      for (const client of global._devShellSseClients) {
+        client.write(`data: ${JSON.stringify({ type: 'output', text })}\n\n`);
+      }
+      return json(res, 200, { ok: true });
+    }
+
     // ── GET /api/mesh — agentOS distributed mesh topology + slot health ────────
     if (method === 'GET' && path === '/api/mesh') {
       const now = Date.now();
