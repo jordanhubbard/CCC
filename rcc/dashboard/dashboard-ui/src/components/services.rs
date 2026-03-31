@@ -22,7 +22,8 @@ impl ServiceStatus {
     fn category(&self) -> &'static str {
         match self.id.as_str() {
             "rcc-dashboard" | "services-map" | "squirrelchat" | "tokenhub-admin" => "UI",
-            "boris-vllm" | "whisper-api" | "agentfs" | "usdagent" | "ollama"    => "GPU",
+            "boris-vllm" | "peabody-vllm" | "sherman-vllm" | "snidely-vllm" | "dudley-vllm"
+            | "whisper-api" | "agentfs" | "usdagent" | "ollama"                 => "GPU",
             _                                                                     => "API",
         }
     }
@@ -35,6 +36,10 @@ impl ServiceStatus {
             "tokenhub-admin" => "🔑",
             "squirrelbus"    => "🚌",
             "boris-vllm"     => "🧠",
+            "peabody-vllm"   => "🧠",
+            "sherman-vllm"   => "🧠",
+            "snidely-vllm"   => "🧠",
+            "dudley-vllm"    => "🧠",
             "whisper-api"    => "🎙️",
             "agentfs"        => "📁",
             "usdagent"       => "🎨",
