@@ -976,6 +976,130 @@ app.post('/api/voice/synthesize', async (req, res) => {
   return res.status(404).json({ error: 'TTS unavailable', reason: 'No TTS backend reachable' });
 });
 
+// ── #worklog: auto-post agent task completions ──────────────────────────────
+//
+// Polls the RCC queue for newly completed items every 30 seconds.
+// When a completion is detected, posts a formatted entry to #worklog.
+// Posts are prefixed with a daily date header (posted once per day).
+//
+// Message format:
+//   ✅ **agent** — task title
+//   > result summary (if present)
+//   `commit-hash`  (if present in result)
+
+const WORKLOG_CHANNEL = 'worklog';
+const WORKLOG_POLL_MS = 30_000;
+
+// Track highest completed item timestamp seen so we don't re-post
+let worklogLastSeenTs = Date.now();
+let worklogLastDateHeader = '';
+
+function extractCommitHash(text) {
+  if (!text) return null;
+  const m = text.match(/\b([0-9a-f]{7,40})\b/);
+  return m ? m[1] : null;
+}
+
+function worklogDateHeader() {
+  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+async function ensureWorklogChannel() {
+  try {
+    const r = await rccFetch('/api/channels');
+    // Check if worklog channel exists in squirrelchat DB
+    const existing = db.prepare('SELECT id FROM channels WHERE id = ?').get(WORKLOG_CHANNEL);
+    if (!existing) {
+      db.prepare('INSERT OR IGNORE INTO channels (id, name, description, type) VALUES (?, ?, ?, ?)')
+        .run(WORKLOG_CHANNEL, '#worklog', 'Automated fleet build journal — task completions', 'channel');
+      console.log('[worklog] Created #worklog channel');
+    }
+  } catch (err) {
+    console.warn('[worklog] ensureWorklogChannel error:', err.message);
+  }
+}
+
+async function postWorklogMessage(text) {
+  const ts = Date.now();
+  const stmt = db.prepare(
+    'INSERT INTO messages (ts, from_agent, text, channel) VALUES (?, ?, ?, ?)'
+  );
+  const r = stmt.run(ts, 'worklogbot', text, WORKLOG_CHANNEL);
+  db.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(ts, WORKLOG_CHANNEL);
+  const message = formatMessage({
+    id: r.lastInsertRowid, ts, from_agent: 'worklogbot', text,
+    channel: WORKLOG_CHANNEL, mentions: null, thread_id: null,
+    edited_at: null, created_at: ts, slash_result: null,
+  });
+  const payload = JSON.stringify({ type: 'message', data: message });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+}
+
+async function pollWorklog() {
+  try {
+    const r = await rccFetch('/api/queue');
+    if (!r.ok || !r.data) return;
+
+    const completed = r.data.completed || [];
+    // Find items completed after our last seen ts
+    const newItems = completed.filter(item =>
+      item && typeof item === 'object' &&
+      item.completedAt &&
+      new Date(item.completedAt).getTime() > worklogLastSeenTs
+    );
+
+    if (newItems.length === 0) return;
+
+    // Sort by completedAt ascending
+    newItems.sort((a, b) =>
+      new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime()
+    );
+
+    // Update our watermark
+    worklogLastSeenTs = new Date(newItems[newItems.length - 1].completedAt).getTime();
+
+    // Post daily date header if needed
+    const today = worklogDateHeader();
+    if (today !== worklogLastDateHeader) {
+      worklogLastDateHeader = today;
+      await postWorklogMessage(`📅 **${today}**`);
+    }
+
+    // Post each completion
+    for (const item of newItems) {
+      const agent   = item.claimedBy || item.source || 'fleet';
+      const title   = item.title || item.id || 'unknown task';
+      const result  = item.result || '';
+      const commit  = extractCommitHash(result);
+      const time    = new Date(item.completedAt).toISOString().slice(11, 16) + ' UTC';
+
+      let msg = `✅ **${agent}** — ${title}`;
+      if (result && result.length < 200) {
+        msg += `\n> ${result.slice(0, 180)}`;
+      }
+      if (commit) {
+        msg += `\n\`${commit}\``;
+      }
+      msg += `  ·  _${time}_`;
+
+      await postWorklogMessage(msg);
+      console.log(`[worklog] Posted: ${agent} — ${title.slice(0, 60)}`);
+    }
+  } catch (err) {
+    console.warn('[worklog] poll error:', err.message);
+  }
+}
+
+// Bootstrap #worklog channel and start polling when server starts
+(async () => {
+  await ensureWorklogChannel();
+  // Initial poll slightly delayed to let server fully start
+  setTimeout(async () => {
+    await pollWorklog();
+    setInterval(pollWorklog, WORKLOG_POLL_MS);
+  }, 5000);
+})();
+
 // SSE stream
 app.get('/api/stream', (req, res) => {
   res.set({
