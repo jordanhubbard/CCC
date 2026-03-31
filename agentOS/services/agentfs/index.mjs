@@ -59,6 +59,10 @@ const BUCKET        = process.env.AGENTFS_BUCKET          || 'agentfs-modules';
 const MAX_SIZE      = parseInt(process.env.AGENTFS_MAX_MB || '64', 10) * 1024 * 1024;
 const WASMTIME      = process.env.WASMTIME_PATH           || `${process.env.HOME}/.local/bin/wasmtime`;
 const AOT_ENABLED   = process.env.AGENTFS_AOT !== '0';   // default on; set AGENTFS_AOT=0 to disable
+const SQUIRRELBUS_URL   = process.env.SQUIRRELBUS_URL    || 'http://100.89.199.14:8788/bus';
+const AGENTFS_ORIGIN    = process.env.AGENTFS_ORIGIN_URL || 'http://sparky.tail407856.ts.net:8791';
+const AGENTFS_REPLICATE = process.env.AGENTFS_REPLICATE  === '1';
+const PEER_URLS         = (process.env.AGENTFS_PEER_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 // WASM magic bytes: \0asm + version 1
 const WASM_MAGIC = Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
@@ -142,6 +146,21 @@ export function checkCapabilities(caps, required = []) {
   const declared = new Set([...caps.requires, ...caps.provides]);
   const missing = required.filter(r => !declared.has(r));
   return { ok: missing.length === 0, missing };
+}
+
+// ── SquirrelBus publisher ─────────────────────────────────────────────────────
+// Best-effort: never throws, never blocks the caller.
+async function publishBusEvent(type, payload) {
+  try {
+    await fetch(`${SQUIRRELBUS_URL}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'agentfs', to: 'all', type, body: JSON.stringify(payload) }),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (err) {
+    console.warn(`[agentfs] squirrelbus publish failed (best-effort): ${err.message}`);
+  }
 }
 
 // ── S3 client (MinIO) ─────────────────────────────────────────────────────────
@@ -340,6 +359,7 @@ async function handleUpload(req, res) {
   }));
 
   console.log(`[agentfs] stored ${hash} (${buf.length}B wasm, aot=${compiled.aot}${compiled.cwasm ? ` ${compiled.cwasm.length}B cwasm` : ''})`);
+  publishBusEvent('agentos.fs.put', { hash, size: buf.length, caps, origin_url: AGENTFS_ORIGIN, ts: now }).catch(() => {});
   json(res, 201, metaObj);
 }
 
@@ -490,6 +510,7 @@ async function handleDelete(req, res, hash) {
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: moduleKey(hash) }));
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: metaKey(hash) })).catch(() => {});
     console.log(`[agentfs] deleted ${hash}`);
+    publishBusEvent('agentos.fs.delete', { hash, ts: new Date().toISOString() }).catch(() => {});
     json(res, 200, { ok: true, hash });
   } catch (err) {
     if (err.name === 'NoSuchKey') return json(res, 404, { error: 'module not found', hash });
@@ -501,6 +522,11 @@ async function handleDelete(req, res, hash) {
 async function router(req, res) {
   const url = new URL(req.url, `http://localhost`);
   const path = url.pathname;
+
+  // Peers (no auth — service discovery)
+  if (path === '/agentfs/peers' && req.method === 'GET') {
+    return json(res, 200, { peers: PEER_URLS });
+  }
 
   // Health (no auth)
   if (path === '/agentfs/health' && req.method === 'GET') {
@@ -559,6 +585,12 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`[agentfs] listening on 0.0.0.0:${PORT}`);
   console.log(`[agentfs] bucket=${BUCKET} minio=${MINIO_EP}`);
   console.log(`[agentfs] max_size=${MAX_SIZE / 1024 / 1024}MB`);
+  if (AGENTFS_REPLICATE) console.log(`[agentfs] replication enabled  origin=${AGENTFS_ORIGIN}  bus=${SQUIRRELBUS_URL}`);
 });
+
+if (AGENTFS_REPLICATE) {
+  const { startReplicationSubscriber } = await import('./replication.mjs');
+  startReplicationSubscriber(s3, BUCKET);
+}
 
 export { server };

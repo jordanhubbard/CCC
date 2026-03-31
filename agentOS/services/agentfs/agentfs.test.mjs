@@ -98,7 +98,7 @@ function validateMagic(buf) {
 
 function sha(buf) { return _hash('sha256').update(buf).digest('hex'); }
 
-function makeTestServer(port, token) {
+function makeTestServer(port, token, opts = {}) {
   // Minimal in-memory AgentFS for testing (same logic, no S3)
   const store = new Map(); // hash → {buf, meta}
 
@@ -148,6 +148,17 @@ function makeTestServer(port, token) {
       const already = store.has(hash);
       const meta = { hash, size: buf.length, uploaded_at: new Date().toISOString(), aot: false, aot_size: null, aot_ms: null, capabilities: null };
       if (!already) store.set(hash, { buf, meta });
+
+      // Publish bus event if busUrl configured (best-effort)
+      if (!already && opts.busUrl) {
+        fetch(`${opts.busUrl}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: 'agentfs', to: 'all', type: 'agentos.fs.put',
+            body: JSON.stringify({ hash, size: buf.length, origin_url: `http://localhost:${port}`, ts: new Date().toISOString() }) }),
+        }).catch(() => {});
+      }
+
       return jres(res, already ? 200 : 201, { hash, size: buf.length, already_exists: already, aot: false, capabilities: null });
     }
 
@@ -351,5 +362,140 @@ describe('AgentFS', () => {
 
     const list = await req('GET', '/agentfs/modules');
     assert.equal(list.body.count, 2);
+  });
+
+  // ── SquirrelBus replication tests ────────────────────────────────────────────
+
+  test('replication event published on upload', async () => {
+    let capturedMsg = null;
+
+    // Mock SquirrelBus: captures POST /send
+    const busSrv = createServer((req, res) => {
+      const chunks = [];
+      req.on('data', c => chunks.push(c));
+      req.on('end', () => {
+        try { capturedMsg = JSON.parse(Buffer.concat(chunks).toString()); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+    const busPort = PORT + 200;
+    busSrv.listen(busPort);
+    await once(busSrv, 'listening');
+
+    const busSrvPort2 = PORT + 201;
+    const agentSrv = makeTestServer(busSrvPort2, TOKEN, { busUrl: `http://localhost:${busPort}` });
+    agentSrv.listen(busSrvPort2);
+    await once(agentSrv, 'listening');
+
+    try {
+      const r = await fetch(`http://localhost:${busSrvPort2}/agentfs/modules`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/wasm' },
+        body: VALID_WASM,
+      });
+      assert.equal(r.status, 201, 'upload should succeed');
+
+      // Bus publish is fire-and-forget — give it a moment
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      assert.ok(capturedMsg, 'SquirrelBus should have received a publish event');
+      assert.equal(capturedMsg.type, 'agentos.fs.put', 'event type should be agentos.fs.put');
+      const payload = JSON.parse(capturedMsg.body);
+      assert.equal(payload.hash, WASM_HASH, 'event payload should contain uploaded hash');
+      assert.ok(payload.origin_url, 'event payload should contain origin_url');
+    } finally {
+      agentSrv.close();
+      busSrv.close();
+    }
+  });
+
+  test('replication subscriber fetches missing blob', async () => {
+    const { startReplicationSubscriber } = await import('./replication.mjs');
+
+    const REPL_WASM = Buffer.concat([VALID_WASM, Buffer.from('replication-subscriber-test')]);
+    const REPL_HASH = createHash('sha256').update(REPL_WASM).digest('hex');
+
+    const originPort  = PORT + 300;
+    const busReplPort = PORT + 301;
+
+    // Mock SquirrelBus: returns one agentos.fs.put event on first poll, empty thereafter
+    let busCallCount = 0;
+    const busReplSrv = createServer((req, res) => {
+      busCallCount++;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (busCallCount === 1) {
+        res.end(JSON.stringify({ messages: [{
+          type: 'agentos.fs.put',
+          ts: new Date().toISOString(),
+          body: JSON.stringify({
+            hash: REPL_HASH, size: REPL_WASM.length,
+            origin_url: `http://localhost:${originPort}`,
+            ts: new Date().toISOString(),
+          }),
+        }] }));
+      } else {
+        res.end(JSON.stringify({ messages: [] }));
+      }
+    });
+    busReplSrv.listen(busReplPort);
+    await once(busReplSrv, 'listening');
+
+    // Mock origin AgentFS: serves the WASM bytes (no auth check in mock)
+    const originSrv = createServer((req, res) => {
+      if (req.url === `/agentfs/modules/${REPL_HASH}`) {
+        res.writeHead(200, { 'Content-Type': 'application/wasm' });
+        res.end(REPL_WASM);
+      } else {
+        res.writeHead(404); res.end();
+      }
+    });
+    originSrv.listen(originPort);
+    await once(originSrv, 'listening');
+
+    // In-memory S3 mock
+    const s3Store = new Map();
+    const mockS3 = {
+      async send(cmd) {
+        const name = cmd.constructor.name;
+        const key  = cmd.input?.Key;
+        if (name === 'HeadObjectCommand') {
+          if (!s3Store.has(key)) {
+            const e = new Error('Not Found'); e.name = 'NoSuchKey'; throw e;
+          }
+          return {};
+        }
+        if (name === 'PutObjectCommand') {
+          s3Store.set(key, cmd.input.Body);
+          return {};
+        }
+        if (name === 'DeleteObjectCommand') {
+          s3Store.delete(key);
+          return {};
+        }
+      },
+    };
+
+    const controller = new AbortController();
+    try {
+      await startReplicationSubscriber(mockS3, 'test-repl-bucket', {
+        squirrelbusUrl: `http://localhost:${busReplPort}`,
+        ownOriginUrl: 'http://different-node:8791',
+        fetchToken: TOKEN,
+        signal: controller.signal,
+      });
+
+      // Wait for replication (poll → fetch → store)
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const storedKey = `modules/${REPL_HASH}.wasm`;
+      assert.ok(s3Store.has(storedKey), 'blob should be stored in MinIO after replication');
+      const stored = Buffer.from(s3Store.get(storedKey));
+      assert.deepEqual(stored, REPL_WASM, 'stored content must match origin content');
+    } finally {
+      controller.abort();
+      originSrv.close();
+      busReplSrv.close();
+    }
   });
 });
