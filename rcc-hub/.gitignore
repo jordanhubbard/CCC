@@ -1,0 +1,7 @@
+.env
+node_modules/
+src/api/data/*.json
+src/api/data/*.jsonl
+src/api/data/**/*.json
+src/api/data/**/*.jsonl
+*.bak

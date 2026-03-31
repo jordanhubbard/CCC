@@ -1,0 +1,17 @@
+{
+  "name": "rcc-hub",
+  "version": "0.1.0",
+  "description": "Rocky Command Center — standalone hub server for agent coordination, work queues, and LLM routing",
+  "type": "module",
+  "scripts": {
+    "start": "node src/api/index.mjs",
+    "setup": "node scripts/setup.mjs"
+  },
+  "dependencies": {
+    "@zilliz/milvus2-sdk-node": "^2.4.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
