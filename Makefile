@@ -2,7 +2,7 @@
 # Entry points for common operator tasks.
 # All the actual logic lives in deploy/ scripts.
 
-.PHONY: help init-rcc register dev start-rcc start-dashboard test clean
+.PHONY: help init-rcc register dev start-rcc start-dashboard docker-build docker-up docker-down test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -15,6 +15,24 @@ init-rcc: ## Interactive setup: configure this node (RCC host or client agent)
 
 register: ## Register this agent with the RCC hub
 	@bash deploy/register-agent.sh
+
+# ── Docker (Operator path) ─────────────────────────────────────────────────
+
+docker-build: ## Build the RCC Docker image locally
+	docker build -t rcc:local .
+
+docker-up: ## Start the full RCC stack via Docker Compose
+	@if [ ! -f rcc-data/.env ]; then \
+		echo "No rcc-data/.env found. Run 'make init-rcc' first."; \
+		exit 1; \
+	fi
+	docker compose up -d
+
+docker-down: ## Stop the RCC Docker stack
+	docker compose down
+
+docker-logs: ## Tail logs from all RCC containers
+	docker compose logs -f
 
 # ── Development ────────────────────────────────────────────────────────────
 

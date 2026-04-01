@@ -26,6 +26,11 @@ rcc/brain/brain-state.json
 # These contain real hostnames/tokens — never commit them
 onboarding/ONBOARD_*.rendered.md
 
+# Docker operator data dir (contains .env with real secrets)
+rcc-data/
+squirrelchat-data/
+logs/
+
 # Queue state (runtime data, not source)
 workqueue/queue.json
 workqueue/state-*.json
