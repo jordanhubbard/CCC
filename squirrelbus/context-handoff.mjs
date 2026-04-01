@@ -16,7 +16,7 @@ import { readFileSync, existsSync } from 'fs';
 import { createHmac, createHash } from 'crypto';
 
 const BUS_SEND_URL = 'http://100.89.199.14:8788/bus/send';
-const BUS_TOKEN = 'wq-dash-token-2026';
+const BUS_TOKEN = '<YOUR_BUS_TOKEN>';
 const MINIO_HOST = '100.89.199.14:9000';
 const MINIO_KEY = 'rockymoose4810f4cc7d28916f';
 const MINIO_SECRET = '1b7a14087771df4bf85d6001fdd047a61348641bdf78aefd';

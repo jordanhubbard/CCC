@@ -20,7 +20,7 @@
  *
  * Environment:
  *   RCC_URL      default: http://100.89.199.14:8789
- *   RCC_TOKEN    default: wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+ *   RCC_TOKEN    default: <YOUR_RCC_TOKEN>
  */
 
 import { parseArgs } from 'node:util';
@@ -31,7 +31,7 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const RCC_URL   = process.env.RCC_URL   || 'http://100.89.199.14:8789';
-const RCC_TOKEN = process.env.RCC_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const RCC_TOKEN = process.env.RCC_TOKEN || '<YOUR_RCC_TOKEN>';
 const DEFAULT_THRESHOLD = parseFloat(process.env.DEDUP_THRESHOLD || '0.85');
 
 // ── Dedup check (inline, avoids subprocess) ───────────────────────────────────

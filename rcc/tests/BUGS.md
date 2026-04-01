@@ -59,7 +59,7 @@ Tests: api.test.mjs, integration.test.mjs, ui.test.mjs
 ## Bug: Bootstrap flow requires admin token — live token may not have admin privileges
 
 - **Route:** POST /api/bootstrap/token
-- **Expected:** Our token `wq-5dcad756f6d3e345c00b5cb3dfcbdedb` (listed as the agent/admin token) should work for admin-only endpoints
+- **Expected:** Our token `<YOUR_RCC_TOKEN>` (listed as the agent/admin token) should work for admin-only endpoints
 - **Actual:** `RCC_ADMIN_TOKEN` on the live server defaults to `process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0]`. If the live server's `RCC_AUTH_TOKENS` has a different first token than ours, our token will fail admin checks with 401.
 - **Severity:** low (depends on live server config)
 - **Status:** open — verified by integration.test.mjs step 1; logs "SKIP" if 401 is returned

@@ -242,7 +242,7 @@ curl https://rcc.example.com/api/exec/<exec-id> \
 ### Running the listener daemon
 
 ```bash
-SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb \
+SQUIRRELBUS_TOKEN=<YOUR_RCC_TOKEN> \
 SQUIRRELBUS_URL=https://dashboard.example.com \
 RCC_URL=https://rcc.example.com \
 RCC_AUTH_TOKEN=<agent-token> \

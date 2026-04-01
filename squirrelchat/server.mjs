@@ -13,7 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 8790;
 const ADMIN_TOKEN = 'sc-squirrelchat-admin-2026';
 const RCC_BASE = 'http://localhost:8789';
-const RCC_AGENT_TOKEN = process.env.RCC_AGENT_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const RCC_AGENT_TOKEN = process.env.RCC_AGENT_TOKEN || '<YOUR_RCC_TOKEN>';
 
 // DB setup
 const db = new Database('./squirrelchat.db');

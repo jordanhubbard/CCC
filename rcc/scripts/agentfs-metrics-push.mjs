@@ -13,7 +13,7 @@
  *   RCC_LOCAL_URL     — Local RCC metrics endpoint (default http://127.0.0.1:8789)
  */
 
-const TOKEN         = process.env.RCC_AUTH_TOKEN  || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const TOKEN         = process.env.RCC_AUTH_TOKEN  || '<YOUR_RCC_TOKEN>';
 const BUS_URL       = process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
 const RCC_LOCAL_URL = process.env.RCC_LOCAL_URL   || 'http://127.0.0.1:8789';
 const INTERVAL_MS   = 5_000;

@@ -221,7 +221,7 @@ sudo mkdir -p /etc/rcc
 
 # Write credentials (get these from Rocky or jkh):
 sudo tee /etc/rcc/env << 'ENVEOF'
-SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+SQUIRRELBUS_TOKEN=<YOUR_RCC_TOKEN>
 SQUIRRELBUS_URL=https://dashboard.example.com
 RCC_URL=https://rcc.example.com
 RCC_AUTH_TOKEN=<agent-specific-token>

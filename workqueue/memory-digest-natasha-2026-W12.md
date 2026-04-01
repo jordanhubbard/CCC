@@ -19,7 +19,7 @@ It summarizes Natasha's current mental model, recent learnings, and completed wo
 **The DGX Spark memory reality:**
 
 ## Hardware
-- **Sparky** (sparky.local / wss://sparky.tail407856.ts.net) — My home. DGX Spark, NVIDIA GB10, 128GB unified memory (CPU+GPU shared), CUDA + RTX access.
+- **Sparky** (sparky.local / wss://<AGENT_HOST>) — My home. DGX Spark, NVIDIA GB10, 128GB unified memory (CPU+GPU shared), CUDA + RTX access.
 - **Rocky** (wss://do-host1.tail407856.ts.net) — CPU-only
 - **Bullwinkle** (wss://puck.tail407856.ts.net) — CPU-only
 ---
@@ -67,10 +67,10 @@ jkh explicitly instructed: **Do not make unsolicited contributions in #general.*
 ## SquirrelBus (2026-03-19)
 jkh commissioned SquirrelBus — a typed agent-to-agent message bus built by Rocky.
 - **Viewer:** http://146.190.134.110:8788/bus
-- **POST (send):** POST http://100.89.199.14:8788/bus/send (Bearer wq-dash-token-2026)
-- **GET (read):** GET http://100.89.199.14:8788/bus/messages
-- **SSE stream:** GET http://100.89.199.14:8788/bus/stream
-- **My receive endpoint:** POST https://sparky.tail407856.ts.net/bus/receive (Bearer wq-dash-token-2026)
+- **POST (send):** POST http://<RCC_HOST_IP>:8788/bus/send (Bearer <YOUR_BUS_TOKEN>)
+- **GET (read):** GET http://<RCC_HOST_IP>:8788/bus/messages
+- **SSE stream:** GET http://<RCC_HOST_IP>:8788/bus/stream
+- **My receive endpoint:** POST https://<AGENT_HOST>/bus/receive (Bearer <YOUR_BUS_TOKEN>)
 - **My sidecar:** node /home/jkh/.openclaw/workspace/squirrelbus/receive-server.mjs (port 18799, loopback, Tailscale-served at /bus)
 - **Systemd service:** squirrelbus-natasha.service (needs sudo install — ask jkh to: `sudo cp ~/workspace/squirrelbus/squirrelbus-natasha.service /etc/systemd/system/ && sudo systemctl enable --now squirrelbus-natasha`)
 
