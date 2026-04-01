@@ -16,7 +16,7 @@ services:
 
   # ── RCC API ──────────────────────────────────────────────────────────────
   rcc-api:
-    image: ghcr.io/jordanhubbard/rcc:latest
+    image: ${RCC_IMAGE:-ghcr.io/jordanhubbard/rcc:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -47,7 +47,7 @@ services:
   # (The Rust/Axum version in rcc/dashboard/squirrelchat-server/ is for
   #  native bare-metal installs with full WASM dashboard integration.)
   squirrelchat:
-    image: ghcr.io/jordanhubbard/rcc:latest
+    image: ${RCC_IMAGE:-ghcr.io/jordanhubbard/rcc:latest}
     build:
       context: .
       dockerfile: Dockerfile

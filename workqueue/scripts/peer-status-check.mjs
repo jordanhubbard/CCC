@@ -155,7 +155,7 @@ async function sendSlackDM(userId, text) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer pottsylvania-7bef066943f98165051b4fc3',
+        'Authorization': process.env.TOKENHUB_API_KEY || '<YOUR_TOKENHUB_KEY>',
         'Content-Length': Buffer.byteLength(payload),
       },
     }, (res) => {
