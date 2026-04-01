@@ -16,6 +16,12 @@ const PORT = process.env.PORT || 8790;
 const ADMIN_TOKEN = process.env.SC_ADMIN_TOKEN || '<SC_ADMIN_TOKEN>';
 const RCC_BASE = 'http://localhost:8789';
 const RCC_AGENT_TOKEN = process.env.RCC_AGENT_TOKEN || '<YOUR_RCC_TOKEN>';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || null;
+const SC_FROM_EMAIL = process.env.SC_FROM_EMAIL || 'noreply@jordanhubbard.net';
+const SC_BASE_URL = process.env.SC_BASE_URL || 'https://chat.jordanhubbard.net';
+const DEV_MODE = process.env.SQUIRRELCHAT_DEV_MODE === '1';
+const TOKEN_SECRET = process.env.SC_TOKEN_SECRET || 'squirrelchat-dev-secret';
+const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
 // DB setup
 const db = new Database('./squirrelchat.db');
@@ -104,6 +110,22 @@ try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT \'user\''); } catch {}
 // Rename users.token → users.token_hash if needed (backward compat — just add alias col)
 try { db.exec('ALTER TABLE users ADD COLUMN token_hash TEXT'); } catch {}
+// Email verification fields
+try { db.exec('ALTER TABLE users ADD COLUMN email TEXT'); } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN confirmed INTEGER DEFAULT 0'); } catch {}
+
+// Pending email confirmations (registration + reset)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pending_confirmations (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL,
+    otp_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used INTEGER DEFAULT 0
+  )
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_pending_email ON pending_confirmations(email)'); } catch {}
 
 // Additive migrations for channels table
 try { db.exec('ALTER TABLE channels ADD COLUMN last_message_at INTEGER'); } catch {}
@@ -227,10 +249,16 @@ function auth(req, res, next) {
     const userId = match[1];
     const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
     if (user) { req.userId = userId; return next(); }
-    // Auto-create user on first login (new name-claim token)
+    // Auto-create user on first login (name-claim, legacy)
     db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, \'user\')').run(userId, userId);
     req.userId = userId;
     return next();
+  }
+  // New-style HMAC token: sc-<64 hex chars>
+  if (token.startsWith('sc-') && token.length > 20) {
+    const hash = createHmac('sha256', TOKEN_SECRET).update(token).digest('hex');
+    const user = db.prepare('SELECT id FROM users WHERE token_hash = ? AND confirmed = 1').get(hash);
+    if (user) { req.userId = user.id; return next(); }
   }
   return res.status(401).json({ error: 'Unauthorized' });
 }
