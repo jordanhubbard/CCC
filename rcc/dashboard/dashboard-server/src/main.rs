@@ -420,16 +420,21 @@ pub fn build_app(state: Arc<AppState>, dist: &str) -> Router {
         .route("/bus/*path", get(bus_get).post(bus_post))
         .route("/s3/*path", get(s3_get).put(s3_put).delete(s3_delete))
         .route("/sc/*path", get(sc_get).post(sc_post).patch(sc_patch).delete(sc_delete))
-        // SPA deep-link routes — serve index.html for all named tab paths
-        .route("/geek",      get(spa_index))
-        .route("/kanban",    get(spa_index))
-        .route("/chat",      get(spa_index))
-        .route("/agents",    get(spa_index))
-        .route("/issues",    get(spa_index))
-        .route("/providers", get(spa_index))
-        .route("/coding",    get(spa_index))
-        .route("/services",  get(spa_index))
-        .route("/timeline",  get(spa_index))
+        // SPA deep-link routes — serve index.html for all named tab paths.
+        // These must match the leptos_router routes defined in app.rs.
+        .route("/geek-view",    get(spa_index))
+        .route("/geek_view",    get(spa_index)) // alias
+        .route("/kanban",       get(spa_index))
+        .route("/squirrelchat", get(spa_index))
+        .route("/chat",         get(spa_index)) // alias
+        .route("/agents",       get(spa_index))
+        .route("/issues",       get(spa_index))
+        .route("/providers",    get(spa_index))
+        .route("/services",     get(spa_index))
+        .route("/timeline",     get(spa_index))
+        // Generic SPA catch-all: any GET that doesn't match an API/asset route
+        // returns index.html so leptos_router can handle it client-side.
+        .fallback(spa_index)
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state)
         .fallback_service(
