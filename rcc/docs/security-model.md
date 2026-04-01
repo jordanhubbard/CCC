@@ -49,7 +49,7 @@ without re-provisioning.
 │                                                                     │
 │  Named bundles (each returns a set of related env vars):            │
 │    slack       SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, etc.          │
-│    mattermost  MATTERMOST_TOKEN, MATTERMOST_URL                     │
+│    (mattermost retired 2026-04-01)                                  │
 │    minio       MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_ENDPOINT   │
 │    milvus      MILVUS_ADDRESS                                       │
 │    nvidia      NVIDIA_API_KEY, NVIDIA_API_BASE                      │

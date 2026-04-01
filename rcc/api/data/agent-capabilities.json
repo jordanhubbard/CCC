@@ -29,7 +29,7 @@
     "milvus": true,
     "squirrelbus": true,
     "slack": true,
-    "mattermost": true,
+
     "rcc_host": true
   }
 }

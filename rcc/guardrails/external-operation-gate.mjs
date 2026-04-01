@@ -56,7 +56,7 @@ const DEFAULT_SERVICE_CONFIGS = {
   slack:    { permissions: ['read', 'write'],           blocked: ['delete'], batchLimit: 5 },
   telegram: { permissions: ['read', 'write'],           blocked: ['delete'], batchLimit: 5 },
   exec:     { permissions: ['read'],                    blocked: ['delete'], requireApproval: ['write', 'modify'] },
-  mattermost: { permissions: ['read', 'write'],         blocked: ['delete'], batchLimit: 10 },
+  // mattermost retired 2026-04-01
 };
 
 // ── Main Class ───────────────────────────────────────────────────────

@@ -62,8 +62,7 @@ const SECRETS_MAP = {
   'slack/watch_channel':         env.WATCH_CHANNEL,
 
   // Mattermost
-  'mattermost/token':            env.MATTERMOST_TOKEN,
-  'mattermost/url':              env.MATTERMOST_URL,
+  // mattermost/token and mattermost/url retired 2026-04-01
 
   // NVIDIA (direct gateway — kept for fallback / legacy consumers)
   'nvidia/api_key':              env.NVIDIA_API_KEY,

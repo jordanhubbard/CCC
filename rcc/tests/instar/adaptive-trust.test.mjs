@@ -162,11 +162,11 @@ describe('AdaptiveTrust', () => {
   test('summarizeTrust returns a non-empty string', async () => {
     const t = await trust();
     const agent = 'agent-summary-' + Date.now();
-    t.recordSuccess(agent, 'mattermost', 'post');
+    t.recordSuccess(agent, 'slack', 'post');
     const summary = t.summarizeTrust(agent);
     assert.ok(typeof summary === 'string');
     assert.ok(summary.includes(agent));
-    assert.ok(summary.includes('mattermost'));
+    assert.ok(summary.includes('slack'));
   });
 
   test('summarizeTrust surface streak suggestions at milestone 20', async () => {

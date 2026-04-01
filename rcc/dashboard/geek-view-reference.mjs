@@ -447,7 +447,7 @@ app.post('/api/crash-report', requireAuth, async (req, res) => {
       description: `Unhandled exception in ${service}. Stack trace and logs available.`,
       notes: `Error: ${error}\nStack: ${stackLines}\nSource: ${sourceDir || 'unknown'}\nMinIO logs: ${minioPath}`,
       tags: ['crash', 'auto-filed', service],
-      channel: 'mattermost',
+      channel: 'slack',
       claimedBy: null,
       claimedAt: null,
       attempts: 0,

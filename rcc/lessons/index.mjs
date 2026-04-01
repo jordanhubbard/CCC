@@ -451,13 +451,7 @@ export async function seedKnownLessons() {
       fix: 'Scout dedup checks against items in the authoritative queue API. If items were previously written directly to queue.json (bypassing API), they won\'t have scout_key tags and won\'t dedup — but also won\'t appear as scout items. Run fresh scan after queue is clean.',
       context: 'The pump runs in-process within the API server. Standalone pump runs write to queue.json directly.',
     },
-    {
-      domain: 'mattermost',
-      tags: ['api', 'http', 'https', 'mattermost'],
-      symptom: 'Mattermost API calls return empty response or silent failure',
-      fix: 'Use HTTPS for Mattermost, not HTTP. HTTP returns empty body with no error.',
-      context: 'Mattermost redirects HTTP to HTTPS but curl/fetch don\'t always follow for POST.',
-    },
+    // mattermost lesson removed 2026-04-01 (retired)
   ];
 
   for (const lesson of known) {

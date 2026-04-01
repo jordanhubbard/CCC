@@ -547,7 +547,7 @@ async function writeRequests(data) {
 
 // ── Secrets I/O ───────────────────────────────────────────────────────────
 // secrets.json stores named bundles (service aliases) and scalar key→value pairs.
-// Named aliases: slack, mattermost, minio, milvus, nvidia, github
+// Named aliases: slack, minio, milvus, nvidia, github
 // Each alias maps to an object of env-var-name → value.
 // Individual secrets are stored as top-level key → scalar string.
 async function readSecrets() {
