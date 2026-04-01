@@ -144,7 +144,7 @@ You want to modify RCC itself — add features, fix bugs, extend the protocol.
 ### Setup
 
 ```bash
-git clone https://github.com/jordanhubbard/rockyandfriends
+git clone https://github.com/YOUR_USERNAME/rockyandfriends
 cd rockyandfriends
 npm install
 make init-rcc   # configure a local dev instance

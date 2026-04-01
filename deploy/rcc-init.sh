@@ -253,6 +253,27 @@ chmod 600 "$ENV_FILE"
 success ".env written (chmod 600)"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# TEMPLATE RENDERING: substitute {{RCC_HOST}} / {{GITHUB_USER}} in *.tmpl files
+# ═══════════════════════════════════════════════════════════════════════════
+if $IS_RCC_HOST && [ -n "$RCC_HOST_PUBLIC" ]; then
+  echo ""
+  info "Rendering deployment templates (*.tmpl → live configs)..."
+  GITHUB_USER_VAL=""
+  prompt GITHUB_USER_VAL "GitHub username (for project URLs, or leave blank to skip)" ""
+  find "$WORKSPACE_DIR" -name "*.tmpl" \
+    ! -path "*/.git/*" \
+    ! -path "*/node_modules/*" | while read -r tmpl; do
+    out="${tmpl%.tmpl}"
+    sed \
+      -e "s|{{RCC_HOST}}|${RCC_HOST_PUBLIC}|g" \
+      -e "s|{{GITHUB_USER}}|${GITHUB_USER_VAL}|g" \
+      -e "s|{{AGENT_NAME}}|${AGENT_NAME}|g" \
+      "$tmpl" > "$out"
+    success "  rendered: $(basename "$out")"
+  done
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
 # RCC HOST: set up data dirs + optional service
 # ═══════════════════════════════════════════════════════════════════════════
 if $IS_RCC_HOST; then

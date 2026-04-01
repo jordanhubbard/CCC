@@ -109,3 +109,8 @@ squirrelchat/squirrelchat.db
 # Instance-specific project registry (contains deployment URLs)
 rcc/api/projects.json
 
+
+# init-rcc rendered outputs (generated from *.tmpl — never commit instance configs)
+.rcc-init
+HEARTBEAT.md
+workqueue/WORKQUEUE_AGENT_NATASHA.md
