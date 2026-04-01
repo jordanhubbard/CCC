@@ -350,7 +350,10 @@ function renderPins() {
 async function loadInitialData() {
   state.channels = await api('/channels');
   renderChannels();
-  selectChannel(state.channels[0]?.id || 'general');
+  // Honour deep-link: /channel/<id> → open that channel on load
+  const pathMatch = location.pathname.match(/^\/channel\/(.+)$/);
+  const initChannel = pathMatch ? decodeURIComponent(pathMatch[1]) : (state.channels[0]?.id || 'general');
+  selectChannel(initChannel);
   state.agents = await api('/agents');
   renderAgents();
   state.projects = await api('/projects');
@@ -373,6 +376,9 @@ function signOut() {
 }
 async function selectChannel(id) {
   state.currentChannel = state.channels.find(c => c.id === id) || { id, name: id };
+  // Update URL so the active channel is deep-linkable
+  const newPath = '/channel/' + encodeURIComponent(id);
+  if (location.pathname !== newPath) history.pushState({ channel: id }, '', newPath);
   document.getElementById('channel-title').textContent = state.currentChannel.id.startsWith('dm-') ? state.currentChannel.name : '#' + state.currentChannel.id;
   document.getElementById('composer').placeholder = `Message ${state.currentChannel.id.startsWith('dm-') ? state.currentChannel.name : '#' + state.currentChannel.id}`;
   const res = await api(`/messages?channel=${encodeURIComponent(id)}&limit=50`);
@@ -764,6 +770,12 @@ setupLogin();
 setupEvents();
 setupMicButton();
 if (state.user && state.token) init();
+
+// Handle browser back/forward navigation between channels
+window.addEventListener('popstate', (e) => {
+  const id = e.state?.channel || location.pathname.match(/^\/channel\/(.+)$/)?.[1];
+  if (id && state.channels.length) selectChannel(decodeURIComponent(id));
+});
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
