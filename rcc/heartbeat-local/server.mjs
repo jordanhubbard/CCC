@@ -15,6 +15,7 @@ import { createRequire } from 'node:module';
 import { existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { sendHeartbeat } from '../agent/offline-heartbeat.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -209,19 +210,16 @@ const server = http.createServer(async (req, res) => {
     const agent = decodeURIComponent(hbMatch[1]).toLowerCase();
     const body = await readBody(req);
     const ts = body.ts || new Date().toISOString();
-    const host = body.host || null;
-    insertHb(agent, ts, host, 'online');
+    const host = body.host || 'unknown';
+    const status = body.status || 'online';
+    insertHb(agent, ts, host, status);
     console.log(`[hb-local] ${agent}@${ts} (rcc_reachable=${rccReachable})`);
 
-    // If RCC is up, forward immediately (best-effort, don't block reply)
-    if (rccReachable) {
-      fetch(`${RCC_URL}/api/heartbeat/${encodeURIComponent(agent)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RCC_TOKEN}` },
-        body: JSON.stringify({ ...body, ts }),
-        signal: AbortSignal.timeout(3000),
-      }).then(r => { if (r.ok) markReplayed(agent, ts); }).catch(() => {});
-    }
+    // Use sendHeartbeat for store-and-forward: buffers to SQLite when offline,
+    // replays buffered rows when RCC is reachable again.
+    sendHeartbeat(RCC_URL, agent, host, status).then(online => {
+      if (online) markReplayed(agent, ts);
+    }).catch(() => {});
 
     return json(res, 200, { ok: true, buffered: !rccReachable });
   }
