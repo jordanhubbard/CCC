@@ -17,7 +17,7 @@ import { dirname, join as pathJoin } from 'path';
 import { createInterface } from 'readline';
 import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
 import { Brain, createRequest } from '../brain/index.mjs';
-import { embed, upsert as vectorUpsert, search as vectorSearch, searchAll as vectorSearchAll, ensureCollections, collectionStats } from '../vector/index.mjs';
+import { embed, upsert as vectorUpsert, search as vectorSearch, searchAll as vectorSearchAll, ensureCollections, collectionStats, channelMemoryIngest, channelMemoryRecall } from '../vector/index.mjs';
 import { Pump } from '../scout/pump.mjs';
 import * as llmRegistry from '../llm/registry.mjs';
 import { learnLesson, queryLessons, queryAllLessons, formatLessonsForContext, getTrendingLessons, formatTrendingForHeartbeat, getHeartbeatContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
@@ -5351,6 +5351,42 @@ loadPackages();
           results = searches.flat().sort((a, b) => b.score - a.score).slice(0, k);
         }
         return json(res, 200, { ok: true, results });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── POST /api/memory/ingest — channel-scoped memory ingest ───────────────
+    // Body: { id, text, platform, workspace_id, channel_id, user_id, conv_id, agent, source }
+    if (method === 'POST' && path === '/api/memory/ingest') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const { id, text, platform, workspace_id, channel_id, user_id, conv_id, agent, source } = body || {};
+      if (!id || !text) return json(res, 400, { error: 'Missing required fields: id, text' });
+      try {
+        await channelMemoryIngest(id, text, { platform, workspace_id, channel_id, user_id, conv_id, agent, source });
+        return json(res, 200, { ok: true, id });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── GET /api/memory/recall — two-phase channel-scoped memory recall ───────
+    // Query params: q, platform, workspace_id, channel_id, user_id, k
+    if (method === 'GET' && path === '/api/memory/recall') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const q = url.searchParams.get('q') || '';
+      if (!q) return json(res, 400, { error: 'Missing query parameter q' });
+      const scope = {
+        platform:     url.searchParams.get('platform')     || '',
+        workspace_id: url.searchParams.get('workspace_id') || '',
+        channel_id:   url.searchParams.get('channel_id')   || '',
+        user_id:      url.searchParams.get('user_id')      || '',
+      };
+      const k = parseInt(url.searchParams.get('k') || '8', 10);
+      try {
+        const result = await channelMemoryRecall(q, scope, { k });
+        return json(res, 200, { ok: true, query: q, scope, ...result });
       } catch (err) {
         return json(res, 500, { ok: false, error: err.message });
       }
