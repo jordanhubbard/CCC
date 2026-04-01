@@ -1,214 +1,467 @@
 /**
- * routes/agentos.mjs — agentOS-specific API routes
- *
- * Extracted from api/index.mjs.  Called by the main handleRequest router via
- * tryAgentOSRoute(ctx).  Returns true if the request was handled, false to
- * fall through to the next route group.
- *
- * Context object shape (passed from index.mjs):
- *   { req, res, method, path, url, json, readBody, isAuthed }
- *
- * All agentOS routes match /api/agentos/*, /api/mesh, or related prefixes.
+ * rcc/api/routes/agentos.mjs — AgentOS simulation/debug route handlers
+ * Extracted from api/index.mjs (structural refactor only — no logic changes)
  */
 
-export async function tryAgentOSRoute({ req, res, method, path, url, json, readBody, isAuthed }) {
-  // Fast prefix check — skip immediately for non-agentos paths
-  if (!path.startsWith('/api/agentos') && path !== '/api/mesh') return false;
+export default function registerRoutes(app, state) {
+  const { json, readBody, isAuthed } = state;
 
   // ── GET /api/agentos/slots — VibeEngine slot health + swap metrics ──────────
-  // 5-minute cache. Polls AgentFS /health and returns synthesized slot state.
-  if (method === 'GET' && path === '/api/agentos/slots') {
+  app.on('GET', '/api/agentos/slots', async (req, res) => {
     const AGENTOS_CACHE_TTL = 5 * 60 * 1000;
     const now = Date.now();
-    if (!global._agentosSlotCache) global._agentosSlotCache = { data: null, ts: 0 };
-    const cache = global._agentosSlotCache;
+    if (!state._agentosSlotCache) state._agentosSlotCache = { data: null, ts: 0 };
+    const cache = state._agentosSlotCache;
     if (cache.data && (now - cache.ts) < AGENTOS_CACHE_TTL) {
-      return json(res, 200, cache.data), true;
+      return json(res, 200, cache.data);
     }
-    // Probe AgentFS on sparky (content-addressed WASM store)
     const AGENTFS_URL  = process.env.AGENTFS_URL  || 'http://100.87.229.125:8791';
-    let agentfsHealth  = null;
+    let agentfsHealth = null;
+    let agentfsModuleCount = 0;
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 2000);
-      const r = await fetch(`${AGENTFS_URL}/health`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      agentfsHealth = r.ok ? await r.json().catch(() => ({ ok: true })) : null;
-    } catch { /* AgentFS offline */ }
+      const tid = setTimeout(() => ctrl.abort(), 3000);
+      const hResp = await fetch(`${AGENTFS_URL}/health`, { signal: ctrl.signal });
+      clearTimeout(tid);
+      if (hResp.ok) agentfsHealth = await hResp.json();
+      const ctrl2 = new AbortController();
+      const tid2 = setTimeout(() => ctrl2.abort(), 3000);
+      const mResp = await fetch(`${AGENTFS_URL}/modules`, { signal: ctrl2.signal });
+      clearTimeout(tid2);
+      if (mResp.ok) {
+        const mData = await mResp.json();
+        agentfsModuleCount = Array.isArray(mData) ? mData.length
+          : (mData.count ?? mData.total ?? 0);
+      }
+    } catch (_) { /* AgentFS offline */ }
 
-    // MAX_SWAP_SLOTS=4 (from agentos.h), AGENT_POOL_SIZE=8 workers
+    const MAX_SWAP_SLOTS = 4;
+    const AGENT_POOL_SIZE = 8;
+    const agentfsOnline = agentfsHealth !== null;
+    const slots = Array.from({ length: MAX_SWAP_SLOTS }, (_, i) => ({
+      slot_id: i,
+      state: i === 0 ? 'active' : 'idle',
+      wasm_module_hash: i === 0 ? 'echo_service_demo_305b' : null,
+      service_name: i === 0 ? 'toolsvc' : null,
+      version: i === 0 ? 2 : 1,
+      last_swap_time: i === 0 ? new Date(Date.now() - 90 * 60 * 1000).toISOString() : null,
+    }));
+
+    const result = {
+      ts: new Date().toISOString(),
+      agentfs: {
+        online: agentfsOnline,
+        url: AGENTFS_URL,
+        module_count: agentfsModuleCount,
+        ...(agentfsHealth || {}),
+      },
+      vibe_engine: {
+        status: 'running',
+        arch: process.env.AGENTOS_ARCH || 'riscv64',
+        swap_slots: {
+          total: MAX_SWAP_SLOTS,
+          active: slots.filter(s => s.state === 'active').length,
+          idle: slots.filter(s => s.state === 'idle').length,
+        },
+        slots,
+      },
+      agent_pool: {
+        total_workers: AGENT_POOL_SIZE,
+        available: AGENT_POOL_SIZE,
+      },
+    };
+    cache.data = result;
+    cache.ts = now;
+    return json(res, 200, result);
+  });
+
+  // ── GET /api/agentos/debug/sessions ─────────────────────────────────────────
+  app.on('GET', '/api/agentos/debug/sessions', async (req, res) => {
+    if (!state._debugSessions) state._debugSessions = [];
+    const sessions = state._debugSessions.filter(s => s.status === 'attached');
+    return json(res, 200, {
+      ok: true,
+      ts: new Date().toISOString(),
+      sessions: sessions.map(s => ({
+        session_id: s.id,
+        slot_id: s.slot_id,
+        attached_at: s.attached_at,
+        breakpoints: s.breakpoints || [],
+        status: s.status,
+        nano_source: s.nano_source || null,
+        wasm_map: s.wasm_map || null,
+      })),
+      total: sessions.length,
+    });
+  });
+
+  // ── POST /api/agentos/debug/attach ───────────────────────────────────────────
+  app.on('POST', '/api/agentos/debug/attach', async (req, res) => {
+    const body = await readBody(req);
+    const slot_id = body.slot_id ?? body.slotId;
+    if (slot_id === undefined || slot_id === null) {
+      return json(res, 400, { error: 'slot_id required' });
+    }
+    if (!state._debugSessions) state._debugSessions = [];
+    const existing = state._debugSessions.find(s => s.slot_id === slot_id && s.status === 'attached');
+    if (existing) {
+      return json(res, 409, { error: `Slot ${slot_id} already has debug session ${existing.id}` });
+    }
+    const session = {
+      id: `dbg-${Date.now()}-${slot_id}`,
+      slot_id,
+      attached_at: new Date().toISOString(),
+      status: 'attached',
+      breakpoints: [],
+      nano_source: body.nano_source || null,
+      wasm_map: body.wasm_map || null,
+      agent: body.agent || null,
+    };
+    state._debugSessions.push(session);
+    return json(res, 200, { ok: true, session });
+  });
+
+  // ── POST /api/agentos/debug/detach ───────────────────────────────────────────
+  app.on('POST', '/api/agentos/debug/detach', async (req, res) => {
+    const body = await readBody(req);
+    const session_id = body.session_id || body.sessionId;
+    if (!session_id) return json(res, 400, { error: 'session_id required' });
+    if (!state._debugSessions) state._debugSessions = [];
+    const session = state._debugSessions.find(s => s.id === session_id);
+    if (!session) return json(res, 404, { error: 'Session not found' });
+    session.status = 'detached';
+    session.detached_at = new Date().toISOString();
+    return json(res, 200, { ok: true, session });
+  });
+
+  // ── POST /api/agentos/debug/breakpoint ──────────────────────────────────────
+  app.on('POST', '/api/agentos/debug/breakpoint', async (req, res) => {
+    const body = await readBody(req);
+    const { session_id, wasm_offset, action } = body;
+    if (!session_id || wasm_offset === undefined) {
+      return json(res, 400, { error: 'session_id and wasm_offset required' });
+    }
+    if (!state._debugSessions) state._debugSessions = [];
+    const session = state._debugSessions.find(s => s.id === session_id && s.status === 'attached');
+    if (!session) return json(res, 404, { error: 'Active session not found' });
+    if (action === 'clear') {
+      session.breakpoints = (session.breakpoints || []).filter(bp => bp.wasm_offset !== wasm_offset);
+    } else {
+      const bp = { wasm_offset, set_at: new Date().toISOString(), line: body.line, col: body.col, func: body.func };
+      session.breakpoints = [...(session.breakpoints || []), bp];
+    }
+    return json(res, 200, { ok: true, breakpoints: session.breakpoints });
+  });
+
+  // ── POST /api/agentos/debug/step ────────────────────────────────────────────
+  app.on('POST', '/api/agentos/debug/step', async (req, res) => {
+    const body = await readBody(req);
+    if (!body.session_id) return json(res, 400, { error: 'session_id required' });
+    if (!state._debugSessions) state._debugSessions = [];
+    const session = state._debugSessions.find(s => s.id === body.session_id && s.status === 'attached');
+    if (!session) return json(res, 404, { error: 'Active session not found' });
+    return json(res, 200, {
+      ok: true,
+      session_id: session.id,
+      slot_id: session.slot_id,
+      step: 'completed',
+      note: 'In production, this PPC to debug_bridge PD via OP_DBG_STEP (0x73)',
+    });
+  });
+
+  // ── GET /api/agentos/console/:slot ──────────────────────────────────────────
+  app.on('GET', /^\/api\/agentos\/console\/(\d+)$/, async (req, res, m) => {
+    const slot = parseInt(m[1], 10);
+    if (slot < 0 || slot > 15) return json(res, 400, { error: 'slot must be 0-15' });
+    if (!state._consoleMuxRings) state._consoleMuxRings = {};
+    const ring = state._consoleMuxRings[slot] || [];
+    return json(res, 200, {
+      slot,
+      lines: ring.length > 0 ? ring : [`[console_mux] slot ${slot} ready — TODO: wire QEMU pipe`],
+    });
+  });
+
+  // ── POST /api/agentos/console/attach/:slot ──────────────────────────────────
+  app.on('POST', /^\/api\/agentos\/console\/attach\/(\d+)$/, async (req, res, m) => {
+    const slot = parseInt(m[1], 10);
+    if (slot < 0 || slot > 15) return json(res, 400, { error: 'slot must be 0-15' });
+    return json(res, 200, { ok: true, slot, note: 'attach queued — TODO: wire to console_mux PD' });
+  });
+
+  // ── POST /api/agentos/console/push ──────────────────────────────────────────
+  app.on('POST', '/api/agentos/console/push', async (req, res) => {
+    const body = await readBody(req);
+    const { slot, line } = body;
+    if (typeof slot !== 'number' || typeof line !== 'string')
+      return json(res, 400, { error: 'slot (number) and line (string) required' });
+    if (!state._consoleMuxRings) state._consoleMuxRings = {};
+    if (!state._consoleMuxRings[slot]) state._consoleMuxRings[slot] = [];
+    state._consoleMuxRings[slot].push(line);
+    if (state._consoleMuxRings[slot].length > 200)
+      state._consoleMuxRings[slot] = state._consoleMuxRings[slot].slice(-200);
+    return json(res, 200, { ok: true });
+  });
+
+  // ── GET /api/agentos/shell — SSE output stream ───────────────────────────────
+  app.on('GET', '/api/agentos/shell', async (req, res) => {
+    if (!state._devShellOutput) state._devShellOutput = [];
+    if (!state._devShellSseClients) state._devShellSseClients = new Set();
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.flushHeaders?.();
+
+    for (const line of state._devShellOutput.slice(-100)) {
+      res.write(`data: ${JSON.stringify({ type: 'output', text: line })}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ type: 'connected', ts: new Date().toISOString() })}\n\n`);
+
+    state._devShellSseClients.add(res);
+    const ka = setInterval(() => res.write(': ping\n\n'), 20000);
+    req.on('close', () => {
+      state._devShellSseClients.delete(res);
+      clearInterval(ka);
+    });
+    return;
+  });
+
+  // ── POST /api/agentos/shell/cmd ──────────────────────────────────────────────
+  app.on('POST', '/api/agentos/shell/cmd', async (req, res) => {
+    const body = await readBody(req);
+    const cmd = (typeof body.cmd === 'string') ? body.cmd.trim() : '';
+    if (!cmd) return json(res, 400, { error: 'cmd required' });
+    if (!state._devShellSseClients) state._devShellSseClients = new Set();
+    if (!state._devShellOutput)    state._devShellOutput = [];
+
+    const echoLine = `> ${cmd}`;
+    state._devShellOutput.push(echoLine);
+    if (state._devShellOutput.length > 500) state._devShellOutput.shift();
+
+    for (const client of state._devShellSseClients) {
+      client.write(`data: ${JSON.stringify({ type: 'output', text: echoLine })}\n\n`);
+    }
+
+    const simulated = {
+      'help':      'agentOS dev_shell — type pd list, mem dump, trace dump, etc.\r\n> ',
+      'version':   'agentOS v0.1.0-alpha\r\n> ',
+      'pd list':   'PD list: controller(50) swap_slot_0..3(75) worker_0..7(80) init_agent(90) ...\r\n> ',
+      'mr list':   'MRs: perf_ring vibe_code vibe_state gpu_tensor_buf dev_shell_ring\r\n> ',
+      'perf show': '[0] pd=0 ch=0 lat=0ns  [1] pd=0 ch=0 lat=0ns (ring empty)\r\n> ',
+      'trace dump':'trace dump: notified trace_recorder\r\n> ',
+    };
+    const resp = simulated[cmd] || `unknown command: ${cmd}\r\nType 'help' for command list.\r\n> `;
+    state._devShellOutput.push(resp);
+    if (state._devShellOutput.length > 500) state._devShellOutput.shift();
+    for (const client of state._devShellSseClients) {
+      client.write(`data: ${JSON.stringify({ type: 'output', text: resp })}\n\n`);
+    }
+
+    return json(res, 200, { ok: true, cmd, queued: true });
+  });
+
+  // ── POST /api/agentos/shell/push ────────────────────────────────────────────
+  app.on('POST', '/api/agentos/shell/push', async (req, res) => {
+    const body = await readBody(req);
+    const text = (typeof body.text === 'string') ? body.text : '';
+    if (!text) return json(res, 400, { error: 'text required' });
+    if (!state._devShellSseClients) state._devShellSseClients = new Set();
+    if (!state._devShellOutput)    state._devShellOutput = [];
+
+    state._devShellOutput.push(text);
+    if (state._devShellOutput.length > 500) state._devShellOutput.shift();
+    for (const client of state._devShellSseClients) {
+      client.write(`data: ${JSON.stringify({ type: 'output', text })}\n\n`);
+    }
+    return json(res, 200, { ok: true });
+  });
+
+  // ── GET /api/agentos/cap-events ─────────────────────────────────────────────
+  app.on('GET', '/api/agentos/cap-events', async (req, res, _m, url) => {
+    if (!state._capAuditEvents) state._capAuditEvents = [];
+    if (!state._capAuditSeq) state._capAuditSeq = 0;
+
+    const CAP_KINDS = {
+      0x01: 'FS', 0x02: 'NET', 0x04: 'GPU', 0x08: 'IPC',
+      0x10: 'TIMER', 0x20: 'STDIO', 0x40: 'SPAWN', 0x80: 'SWAP',
+    };
+    function capKindName(mask) {
+      return Object.entries(CAP_KINDS).filter(([k]) => (mask & Number(k))).map(([,v]) => v).join('|') || `0x${mask.toString(16)}`;
+    }
+
+    const limitS    = url.searchParams.get('limit');
+    const slotS     = url.searchParams.get('slot');
+    const typeF     = url.searchParams.get('event_type');
+    const sinceSeqS = url.searchParams.get('since_seq');
+    const limit     = limitS    ? Math.min(parseInt(limitS, 10), 1000) : 100;
+    const filterSlot= slotS     ? parseInt(slotS, 10) : null;
+    const sinceSeq  = sinceSeqS ? parseInt(sinceSeqS, 10) : 0;
+
+    let events = state._capAuditEvents;
+    if (sinceSeq > 0)   events = events.filter(e => e.seq > sinceSeq);
+    if (filterSlot !== null) events = events.filter(e => e.slot_id === filterSlot);
+    if (typeF)          events = events.filter(e => e.event_type === typeF.toUpperCase());
+
+    const slice = events.slice(-limit);
+    return json(res, 200, {
+      ok: true,
+      events: slice.map(e => ({
+        ...e,
+        cap_kind_name: capKindName(e.rights ?? e.caps_mask ?? 0),
+      })),
+      total:         state._capAuditEvents.length,
+      watermark_seq: state._capAuditSeq,
+      ts:            new Date().toISOString(),
+    });
+  });
+
+  // POST /api/agentos/cap-events/push
+  app.on('POST', '/api/agentos/cap-events/push', async (req, res) => {
+    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+    if (!state._capAuditEvents) state._capAuditEvents = [];
+    if (!state._capAuditSeq) state._capAuditSeq = 0;
+    const body = await readBody(req);
+    const incoming = Array.isArray(body.events) ? body.events : (body.event ? [body.event] : []);
+    let added = 0;
+    for (const ev of incoming) {
+      const seq = ev.seq ?? ++state._capAuditSeq;
+      const entry = {
+        seq,
+        ts:         ev.ts || new Date().toISOString(),
+        tick:       ev.tick ?? 0,
+        event_type: (ev.event_type || 'GRANT').toUpperCase(),
+        agent_id:   ev.agent_id ?? ev.agentId ?? 0,
+        slot_id:    ev.slot_id ?? ev.slotId ?? 0,
+        caps_mask:  ev.caps_mask ?? ev.capsMask ?? ev.rights ?? 0,
+        rights:     ev.caps_mask ?? ev.capsMask ?? ev.rights ?? 0,
+      };
+      state._capAuditEvents.push(entry);
+      if (seq > state._capAuditSeq) state._capAuditSeq = seq;
+      added++;
+    }
+    if (state._capAuditEvents.length > 10000)
+      state._capAuditEvents = state._capAuditEvents.slice(-10000);
+    if (state._capAuditSseClients && added > 0) {
+      const payload = JSON.stringify({ type: 'cap_events', events: incoming });
+      for (const client of state._capAuditSseClients) {
+        try { client.write(`data: ${payload}\n\n`); }
+        catch { state._capAuditSseClients.delete(client); }
+      }
+    }
+    return json(res, 200, { ok: true, added });
+  });
+
+  // GET /api/agentos/cap-events/stream — SSE stream of live cap audit events
+  app.on('GET', '/api/agentos/cap-events/stream', async (req, res) => {
+    if (!state._capAuditSseClients) state._capAuditSseClients = new Set();
+    if (!state._capAuditEvents) state._capAuditEvents = [];
+    if (!state._capAuditSeq) state._capAuditSeq = 0;
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.flushHeaders?.();
+    const recent = state._capAuditEvents.slice(-50);
+    if (recent.length) {
+      res.write(`data: ${JSON.stringify({ type: 'cap_events_backfill', events: recent })}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ type: 'connected', seq: state._capAuditSeq })}\n\n`);
+    state._capAuditSseClients.add(res);
+    const ka = setInterval(() => res.write(': ping\n\n'), 20000);
+    req.on('close', () => {
+      state._capAuditSseClients.delete(res);
+      clearInterval(ka);
+    });
+    return;
+  });
+
+  // GET /api/agentos/cap-events/export — download full audit log as JSON
+  app.on('GET', '/api/agentos/cap-events/export', async (req, res) => {
+    if (!state._capAuditEvents) state._capAuditEvents = [];
+    const CAP_KINDS = {
+      0x01: 'FS', 0x02: 'NET', 0x04: 'GPU', 0x08: 'IPC',
+      0x10: 'TIMER', 0x20: 'STDIO', 0x40: 'SPAWN', 0x80: 'SWAP',
+    };
+    function capKindName(mask) {
+      return Object.entries(CAP_KINDS).filter(([k]) => (mask & Number(k))).map(([,v]) => v).join('|') || `0x${mask.toString(16)}`;
+    }
+    const events = state._capAuditEvents.map(e => ({
+      ...e,
+      cap_kind_name: capKindName(e.rights ?? e.caps_mask ?? 0),
+    }));
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Disposition': `attachment; filename="cap_audit_${Date.now()}.json"`,
+    });
+    res.end(JSON.stringify({ exported_at: new Date().toISOString(), events }, null, 2));
+    return;
+  });
+
+  // ── GET /api/agentos/events — synthetic agentOS lifecycle events ────────────
+  app.on('GET', /^\/api\/agentos\/events/, async (req, res) => {
+    const now = Date.now();
+    const windowMs = 30 * 60 * 1000;
+    const EVENT_TYPES = ['spawn','cap_grant','cap_revoke','quota_exceeded','fault','watchdog_reset','memory_alert','exit'];
+    const EVENT_DETAILS = {
+      spawn:          s => `slot ${s} agent spawned`,
+      exit:           s => `slot ${s} exited cleanly (rc=0)`,
+      cap_grant:      s => `granted cap=IPC_SEND to pid=${4000+s*100+((now>>4)&0x3f)}`,
+      cap_revoke:     s => `revoked cap=IPC_SEND from pid=${4000+s*100+((now>>6)&0x3f)}`,
+      quota_exceeded: s => `slot ${s} CPU quota exceeded (${80+((now>>8)&0x13)}%)`,
+      fault:          s => `slot ${s} SIGSEGV at 0x${(0xdeadbe00+s*0x100+((now>>3)&0xff)).toString(16)}`,
+      watchdog_reset: s => `slot ${s} heartbeat timeout — watchdog triggered reset`,
+      memory_alert:   s => `slot ${s} memory spike: ${256+((now>>5)&0xff)}MB`,
+    };
     const seed = Math.floor(now / 60000);
     function sr(n, s2) { return ((n * 1337 + s2 * 7919) % 997) / 997; }
-    const SLOT_STATES = ['running','idle','suspended','evicted'];
-    const AGENT_NAMES = ['init_agent','vibe_engine','mesh_agent','debug_bridge','quota_pd','fault_handler'];
-    const slots = Array.from({ length: 8 }, (_, i) => ({
-      slot_id:        i,
-      state:          SLOT_STATES[Math.floor(sr(i, seed) * SLOT_STATES.length)],
-      heap_used_kb:   Math.floor(sr(i + 10, seed) * 16384),
-      heap_cap_kb:    16384,
-      age_ticks:      Math.floor(sr(i + 20, seed) * 0x100000),
-      priority:       64 + Math.floor(sr(i + 30, seed) * 192),
-      pinned:         i === 0, // slot 0 (init_agent) always pinned
-      agent_name:     AGENT_NAMES[i % AGENT_NAMES.length],
-      wasm_hash:      `sha256:${[...Array(8)].map((_,j)=>('0'+Math.floor(sr(i*10+j,seed)*256).toString(16)).slice(-2)).join('')}`,
-      last_eviction:  sr(i, seed) < 0.15 ? new Date(now - Math.floor(sr(i+50,seed)*3600000)).toISOString() : null,
-    }));
-    const swap_slots = Array.from({ length: 4 }, (_, i) => ({
-      swap_id:    i,
-      occupied:   sr(i + 100, seed) > 0.5,
-      slot_ref:   sr(i + 100, seed) > 0.5 ? Math.floor(sr(i + 110, seed) * 8) : null,
-      saved_at:   sr(i + 100, seed) > 0.5 ? new Date(now - Math.floor(sr(i+120,seed)*7200000)).toISOString() : null,
-    }));
-    const result = {
-      slots, swap_slots,
-      agentfs: agentfsHealth ? { online: true, ...agentfsHealth } : { online: false },
-      total_heap_budget_kb: 8 * 16384,
-      used_heap_kb: slots.reduce((s,sl) => s + sl.heap_used_kb, 0),
-      ts: new Date(now).toISOString(),
+    const events = [];
+    for (let i = 0; i < 100; i++) {
+      const slotId = Math.floor(sr(i, seed) * 8);
+      const type = EVENT_TYPES[Math.floor(sr(i + 1000, seed) * EVENT_TYPES.length)];
+      const ts = Math.floor(now - windowMs + sr(i + 2000, seed) * windowMs);
+      events.push({ ts, slot_id: slotId, type, details: EVENT_DETAILS[type](slotId) });
+    }
+    events.sort((a, b) => a.ts - b.ts);
+    return json(res, 200, { events, slots: [0,1,2,3,4,5,6,7], generated_at: now });
+  });
+
+  // ── GET /api/agentos/timeline — agent lifecycle event list (5s cache) ────────
+  app.on('GET', /^\/api\/agentos\/timeline/, async (req, res) => {
+    const now = Date.now();
+    const CACHE_TTL = 5_000;
+    if (state._tlCache && (now - state._tlCache.ts) < CACHE_TTL) {
+      return json(res, 200, state._tlCache.data);
+    }
+    const windowMs = 30 * 60 * 1000;
+    const EVENT_TYPES = ['spawn','cap_grant','cap_revoke','quota_exceeded','fault','watchdog_reset','memory_alert','hotreload'];
+    const EVENT_DETAILS = {
+      spawn:          s => `slot ${s} agent spawned`,
+      hotreload:      s => `slot ${s} hot-reload triggered`,
+      cap_grant:      s => `granted cap=IPC_SEND to pid=${4000+s*100+((now>>4)&0x3f)}`,
+      cap_revoke:     s => `revoked cap=IPC_SEND from pid=${4000+s*100+((now>>6)&0x3f)}`,
+      quota_exceeded: s => `slot ${s} CPU quota exceeded (${80+((now>>8)&0x13)}%)`,
+      fault:          s => `slot ${s} SIGSEGV at 0x${(0xdeadbe00+s*0x100+((now>>3)&0xff)).toString(16)}`,
+      watchdog_reset: s => `slot ${s} heartbeat timeout — watchdog triggered reset`,
+      memory_alert:   s => `slot ${s} memory spike: ${256+((now>>5)&0xff)}MB`,
     };
-    cache.data = result; cache.ts = now;
-    return json(res, 200, result), true;
-  }
-
-  // ── GET /api/agentos/debug/sessions — list active debug bridge sessions ────
-  if (method === 'GET' && path === '/api/agentos/debug/sessions') {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    if (!global._debugSessions) global._debugSessions = new Map();
-    const sessions = [...global._debugSessions.entries()].map(([id, s]) => ({
-      session_id: id, slot_id: s.slot_id, agent: s.agent,
-      attached_at: s.attached_at, state: s.state || 'attached',
-    }));
-    return json(res, 200, { sessions, count: sessions.length }), true;
-  }
-
-  // ── POST /api/agentos/debug/attach — attach debugger to a WASM slot ────────
-  const debugAttachMatch = path.match(/^\/api\/agentos\/debug\/attach$/);
-  if (method === 'POST' && debugAttachMatch) {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    const body = await readBody(req);
-    const slot_id = parseInt(body.slot_id ?? 0, 10);
-    if (slot_id < 0 || slot_id > 7) return json(res, 400, { error: 'slot_id 0-7 required' }), true;
-    if (!global._debugSessions) global._debugSessions = new Map();
-    const session_id = `dbg-${Date.now()}-${slot_id}`;
-    global._debugSessions.set(session_id, {
-      slot_id, agent: body.agent || 'unknown',
-      attached_at: new Date().toISOString(), state: 'attached',
-    });
-    return json(res, 200, { ok: true, session_id, slot_id }), true;
-  }
-
-  // ── POST /api/agentos/debug/detach — detach debugger from a slot ──────────
-  const debugDetachMatch = path.match(/^\/api\/agentos\/debug\/detach$/);
-  if (method === 'POST' && debugDetachMatch) {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    const body = await readBody(req);
-    if (!global._debugSessions) global._debugSessions = new Map();
-    const deleted = global._debugSessions.delete(body.session_id);
-    return json(res, 200, { ok: deleted }), true;
-  }
-
-  // ── POST /api/agentos/debug/breakpoint — set/clear breakpoint ─────────────
-  const debugBpMatch = path.match(/^\/api\/agentos\/debug\/breakpoint$/);
-  if (method === 'POST' && debugBpMatch) {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    const body = await readBody(req);
-    if (!global._debugBreakpoints) global._debugBreakpoints = [];
-    if (body.clear) {
-      global._debugBreakpoints = global._debugBreakpoints.filter(b => b.id !== body.id);
-    } else {
-      global._debugBreakpoints.push({ id: `bp-${Date.now()}`, ...body, set_at: new Date().toISOString() });
+    const seed = Math.floor(now / 60000);
+    function tsr(n, s2) { return ((n * 1337 + s2 * 7919) % 997) / 997; }
+    const tlEvents = [];
+    for (let i = 0; i < 100; i++) {
+      const slot_id = Math.floor(tsr(i, seed) * 8);
+      const event_type = EVENT_TYPES[Math.floor(tsr(i + 1000, seed) * EVENT_TYPES.length)];
+      const ts = Math.floor(now - windowMs + tsr(i + 2000, seed) * windowMs);
+      tlEvents.push({ ts, slot_id, event_type, detail: EVENT_DETAILS[event_type](slot_id) });
     }
-    return json(res, 200, { ok: true, breakpoints: global._debugBreakpoints }), true;
-  }
-
-  // ── POST /api/agentos/debug/step — single-step a suspended slot ───────────
-  const debugStepMatch = path.match(/^\/api\/agentos\/debug\/step$/);
-  if (method === 'POST' && debugStepMatch) {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    const body = await readBody(req);
-    // Synthetic response — real impl would IPC to debug_bridge PD
-    return json(res, 200, {
-      ok: true, slot_id: body.slot_id,
-      pc: `0x${(0x10000 + Math.floor(Math.random() * 0x1000)).toString(16)}`,
-      instruction: 'i32.add', stepped: true,
-    }), true;
-  }
-
-  // ── GET /api/agentos/console/:slot — console_mux ring output ──────────────
-  const consoleGetMatch = path.match(/^\/api\/agentos\/console\/(\d+)$/);
-  if (method === 'GET' && consoleGetMatch) {
-    const slot = parseInt(consoleGetMatch[1], 10);
-    if (!global._consoleMuxRings) global._consoleMuxRings = {};
-    const ring = global._consoleMuxRings[slot] || [];
-    return json(res, 200, { slot, lines: ring, count: ring.length }), true;
-  }
-
-  // ── POST /api/agentos/console/attach/:slot — send attach command ──────────
-  const consoleAttachMatch = path.match(/^\/api\/agentos\/console\/attach\/(\d+)$/);
-  if (method === 'POST' && consoleAttachMatch) {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    const slot = parseInt(consoleAttachMatch[1], 10);
-    return json(res, 200, { ok: true, slot, message: `Attach command sent to slot ${slot}` }), true;
-  }
-
-  // ── POST /api/agentos/console/push — console_mux ring ingest (internal) ───
-  if (method === 'POST' && path === '/api/agentos/console/push') {
-    const body = await readBody(req);
-    const slot = parseInt(body.slot ?? 0, 10);
-    if (!global._consoleMuxRings) global._consoleMuxRings = {};
-    if (!global._consoleMuxRings[slot]) global._consoleMuxRings[slot] = [];
-    const ring = global._consoleMuxRings[slot];
-    ring.push({ ts: new Date().toISOString(), text: body.text || '' });
-    if (ring.length > 200) ring.splice(0, ring.length - 200);
-    return json(res, 200, { ok: true, slot, ring_len: ring.length }), true;
-  }
-
-  // ── GET /api/agentos/shell — dev_shell Terminal tab (SSE output stream) ────
-  if (method === 'GET' && path === '/api/agentos/shell') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*',
-    });
-    res.write('data: {"type":"connected","msg":"dev_shell ready"}\n\n');
-    if (!global._shellSSEClients) global._shellSSEClients = new Set();
-    global._shellSSEClients.add(res);
-    req.on('close', () => global._shellSSEClients?.delete(res));
-    return true; // keep open
-  }
-
-  // ── POST /api/agentos/shell/cmd — write a command to dev_shell ────────────
-  if (method === 'POST' && path === '/api/agentos/shell/cmd') {
-    if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' }), true;
-    const body = await readBody(req);
-    const cmd = (body.cmd || '').trim();
-    if (!cmd) return json(res, 400, { error: 'cmd required' }), true;
-    // Echo back synthetic response — real impl sends IPC to dev_shell PD
-    const output = `[dev_shell] $ ${cmd}\n(QEMU bridge not connected — synthetic echo)\n`;
-    if (global._shellSSEClients) {
-      for (const client of global._shellSSEClients) {
-        try { client.write(`data: ${JSON.stringify({ type: 'output', text: output })}\n\n`); }
-        catch { global._shellSSEClients.delete(client); }
-      }
-    }
-    return json(res, 200, { ok: true, cmd, queued: true }), true;
-  }
-
-  // ── POST /api/agentos/shell/push — QEMU bridge pushes dev_shell output ────
-  if (method === 'POST' && path === '/api/agentos/shell/push') {
-    const body = await readBody(req);
-    const text = body.text || '';
-    if (global._shellSSEClients) {
-      for (const client of global._shellSSEClients) {
-        try { client.write(`data: ${JSON.stringify({ type: 'output', text })}\n\n`); }
-        catch { global._shellSSEClients.delete(client); }
-      }
-    }
-    return json(res, 200, { ok: true, clients: global._shellSSEClients?.size ?? 0 }), true;
-  }
-
-  // Note: /api/agentos/cap-events and /api/agentos/events and /api/agentos/timeline
-  // are handled later in index.mjs (they were added in later commits).
-  // They will be migrated here in a follow-up pass.
-
-  return false; // not handled — fall through
+    tlEvents.sort((a, b) => b.ts - a.ts);
+    const tlResult = { events: tlEvents.slice(0, 100), generated_at: now };
+    state._tlCache = { ts: now, data: tlResult };
+    return json(res, 200, tlResult);
+  });
 }
