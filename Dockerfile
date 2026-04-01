@@ -1,6 +1,9 @@
 # RCC — Rocky Command Center
-# Multi-stage build: RCC API + SquirrelChat backend in one image.
-# The WASM dashboard is served as static files from the same container.
+# Multi-stage build: RCC API + SquirrelChat (Node.js/Express) in one image.
+#
+# The WASM dashboard static files (rcc/dashboard/dist/) are NOT baked into
+# this image — they are bind-mounted at runtime from the repo checkout.
+# The dist/ is pre-built and committed; kept current by wasm-build.yml CI.
 #
 # Build: docker build -t rcc .
 # Run:   docker compose up   (see docker-compose.yml)
@@ -42,9 +45,6 @@ COPY rcc/ ./rcc/
 # SquirrelChat backend
 COPY squirrelchat/server.mjs ./squirrelchat/server.mjs
 COPY squirrelchat/public/ ./squirrelchat/public/
-
-# Dashboard static files (pre-built WASM dist, committed or CI-built)
-COPY rcc/dashboard/dist/ ./rcc/dashboard/dist/
 
 # Deploy assets (scripts, templates)
 COPY deploy/ ./deploy/

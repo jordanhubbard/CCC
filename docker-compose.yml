@@ -2,9 +2,15 @@
 # docker compose up    → starts the full stack
 # docker compose up -d → detached
 #
-# First run: make init-rcc (generates .env and config in ./rcc-data/)
+# First run: make init-rcc (generates config in ./rcc-data/)
 #
 # See GETTING_STARTED.md for the full operator walkthrough.
+#
+# Notes:
+# - rcc-data/ is a bind-mount dir created by make init-rcc (contains .env + runtime data)
+# - squirrelchat-data/ is a bind-mount dir for the SQLite database
+# - logs/ is a shared bind-mount for all service logs
+# - The WASM dashboard dist is bind-mounted from rcc/dashboard/dist/ (pre-built, committed to repo)
 
 services:
 
@@ -37,6 +43,9 @@ services:
       - rcc-net
 
   # ── SquirrelChat ──────────────────────────────────────────────────────────
+  # Node.js/Express backend — the portable version for Docker deployment.
+  # (The Rust/Axum version in rcc/dashboard/squirrelchat-server/ is for
+  #  native bare-metal installs with full WASM dashboard integration.)
   squirrelchat:
     image: ghcr.io/jordanhubbard/rcc:latest
     build:
@@ -54,7 +63,7 @@ services:
     ports:
       - "${SC_PORT:-8790}:8790"
     volumes:
-      - ./squirrelchat-data:/data/squirrelchat
+      - ./squirrelchat-data:/data/squirrelchat  # SQLite database persistence
       - ./logs:/data/logs
     depends_on:
       rcc-api:
@@ -63,7 +72,9 @@ services:
       - rcc-net
 
   # ── Dashboard (WASM static) ───────────────────────────────────────────────
-  # Serves the pre-built Leptos/WASM frontend. Proxies /api to rcc-api.
+  # Serves the pre-built Leptos/WASM frontend from rcc/dashboard/dist/.
+  # The dist/ is committed to the repo and kept current by the wasm-build CI workflow.
+  # Proxies /api and /bus (SSE) to rcc-api.
   dashboard:
     image: nginx:alpine
     container_name: rcc-dashboard
@@ -71,7 +82,7 @@ services:
     ports:
       - "${DASHBOARD_PORT:-8788}:80"
     volumes:
-      - ./rcc/dashboard/dist:/usr/share/nginx/html:ro
+      - ./rcc/dashboard/dist:/usr/share/nginx/html:ro        # pre-built WASM dist
       - ./deploy/nginx/dashboard.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - rcc-api
@@ -82,7 +93,6 @@ networks:
   rcc-net:
     driver: bridge
 
-volumes:
-  rcc-data:
-  squirrelchat-data:
-  logs:
+# NOTE: No named volumes defined here — all persistence uses bind mounts
+# (./rcc-data, ./squirrelchat-data, ./logs) so operators can easily inspect
+# and back up their data without docker volume commands.

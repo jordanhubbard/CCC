@@ -50,17 +50,16 @@ It writes `~/.rcc/.env` with your answers. That file is never committed to git.
 
 ### Step 3: Start RCC
 
-If you chose to install a systemd service during init, it's already running. Check with:
 ```bash
-systemctl status rcc-api
+make docker-up
 ```
 
-Otherwise, start manually:
-```bash
-make start-rcc
-```
+This starts three containers: `rcc-api` (port 8789), `squirrelchat` (port 8790), and `dashboard` (port 8788, nginx serving the WASM frontend).
+
+> **Note:** The WASM dashboard (`rcc/dashboard/dist/`) is pre-built and committed to the repo. It is bind-mounted at runtime — not baked into the Docker image. If you're on a fresh fork and the dashboard looks wrong, run the `wasm-build` workflow manually from GitHub Actions to rebuild it for your platform.
 
 Open `http://your-server-ip:8789/health` — you should see `{"status":"ok"}`.
+Open `http://your-server-ip:8788` for the full dashboard.
 
 ### Step 4: Register project zero (optional)
 
