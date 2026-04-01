@@ -1,0 +1,110 @@
+{
+  "id": "wq-RCC-setup-001",
+  "title": "RCC: first-run setup TUI + config management (openclaw-pattern)",
+  "status": "proposed",
+  "priority": "high",
+  "assigned_to": "rocky",
+  "created_by": "natasha",
+  "created_at": "2026-03-31T21:57:00Z",
+  "description": "Build a first-run setup experience for RCC that follows the openclaw pattern: console/TUI is trusted by physical access, web UI requires admin token. Setup is a guided conversation (not a CLI wizard) once the LLM provider is configured. All config stored in data/secrets.json (already the pattern). Goal: 'curl | sh' install + conversational TUI → fully configured RCC with no manual env var editing.",
+
+  "principles": [
+    "Follow openclaw pattern: TUI trusted by console access, web UI requires admin token",
+    "TUI is a conversation, not a CLI prompt sequence — especially once LLM is wired",
+    "All persistent config lives in data/secrets.json (already established)",
+    "Everything configurable in TUI must also be readable/writable in the web UI",
+    "Skippable items are flagged with consequences, not blocked (e.g. 'no email = no user self-registration')"
+  ],
+
+  "bootstrap_sequence": [
+    {
+      "step": 1,
+      "name": "admin_token",
+      "description": "Generate + display admin token. Console access = trusted. Store in secrets.json.",
+      "required": true,
+      "skippable": false
+    },
+    {
+      "step": 2,
+      "name": "public_url",
+      "description": "Set RCC_PUBLIC_URL. Required for email confirm links, agent callbacks, WebRTC signaling.",
+      "required": true,
+      "skippable": false
+    },
+    {
+      "step": 3,
+      "name": "llm_provider",
+      "description": "TokenHub URL + optional auth key. If host has a GPU, offer local vLLM as default. Unlocks conversational mode for remaining setup steps.",
+      "required": false,
+      "skippable": true,
+      "note": "Skipping means setup remains CLI-style prompts, not conversational"
+    },
+    {
+      "step": 4,
+      "name": "email_provider",
+      "description": "Resend API key, SMTP config, or Mailgun. Skip = DEV_MODE (console log only). Required for user self-registration and token reset.",
+      "required": false,
+      "skippable": true,
+      "note": "Without email, admin must create all user accounts manually"
+    },
+    {
+      "step": 5,
+      "name": "messaging",
+      "description": "Slack bot token + signing secret. Optional. Enables agent notifications and channel integration.",
+      "required": false,
+      "skippable": true
+    },
+    {
+      "step": 6,
+      "name": "initial_users",
+      "description": "Create user accounts. Admin sets username + email + optional phone (for Telegram/WhatsApp). Token shown once for copy. Phone number enables messaging channel setup later.",
+      "required": false,
+      "skippable": true
+    }
+  ],
+
+  "config_items_to_manage": {
+    "mandatory": [
+      "admin_token",
+      "public_url (RCC_PUBLIC_URL)"
+    ],
+    "high_value": [
+      "llm_provider (TOKENHUB_URL + TOKENHUB_ADMIN_TOKEN or local GPU URL)",
+      "email_provider (RESEND_API_KEY or SMTP_HOST/USER/PASS/FROM)",
+      "slack (SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SLACK_AGENT_CHANNEL)"
+    ],
+    "optional": [
+      "github_token (GH_TOKEN — for Issues/PR integration)",
+      "squirrelbus (SQUIRRELBUS_URL, SQUIRRELBUS_TOKEN — agent messaging backbone)",
+      "vector_store (MILVUS_URL — semantic dedup, memory features)",
+      "tunnel_config (TUNNEL_AUTH_KEYS, TUNNEL_USER, TUNNEL_PORT_START — Sweden GPU fleet)",
+      "minio_s3 (endpoint, access key, secret — file storage)"
+    ]
+  },
+
+  "tui_design": {
+    "mode": "conversational once LLM is wired, structured prompts before",
+    "trust_model": "console access = admin, no token required for TUI",
+    "storage": "data/secrets.json (all config) + env var fallback for compat",
+    "web_ui_parity": "Settings page in RCC web UI mirrors all TUI config as read/write"
+  },
+
+  "user_management": {
+    "admin_creates": "username + email + optional phone, token shown once",
+    "self_register": "username + email → email verification → token shown once (requires email provider)",
+    "phone_number": "stored per-user, used for Telegram/WhatsApp channel setup later",
+    "agent_tokens": "ADMIN_TOKEN env var stays as escape hatch, agents never go through email flow"
+  },
+
+  "out_of_scope": [
+    "OAuth/SSO (future)",
+    "Multi-tenant RCC (future)",
+    "Automated SSL cert provisioning (use Caddy in front)"
+  ],
+
+  "open_questions": [
+    "TUI implementation: Node.js ink/blessed, or a simple readline conversation loop?",
+    "Is 'curl | sh' install realistic or should we target a package (deb/rpm/npm global)?",
+    "Should the TUI be a separate binary/script or part of the main rcc process (e.g. 'rcc setup')?"
+  ]
+}

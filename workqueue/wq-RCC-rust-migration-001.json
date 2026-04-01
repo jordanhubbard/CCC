@@ -1,0 +1,144 @@
+{
+  "id": "wq-RCC-rust-migration-001",
+  "title": "RCC: full migration from Node.js to Rust — no JS services remaining",
+  "status": "proposed",
+  "priority": "critical",
+  "assigned_to": "all",
+  "created_by": "natasha",
+  "created_at": "2026-04-01T05:45:00Z",
+  "description": "jkh directive: no Node.js services after this migration. Everything becomes Rust (server) or WASM (client), with a clean client/server boundary. The Rust foundation already exists — dashboard-server (Axum), squirrelchat-server (Axum/SQLite), dashboard-ui (Leptos/WASM). The migration is: retire rcc/api/index.mjs, replace with a Rust API server that has feature parity, then delete all Node.js service files.",
+
+  "current_state": {
+    "rust_already_exists": [
+      "rcc/dashboard/dashboard-server/ — Axum server, proxies RCC API + serves WASM",
+      "rcc/dashboard/squirrelchat-server/ — Axum + SQLite, WebSocket, full chat server",
+      "rcc/dashboard/dashboard-ui/ — Leptos/WASM frontend (trunk build)",
+      "agentOS/sdk/rust/ — Rust SDK"
+    ],
+    "node_services_to_retire": [
+      "rcc/api/index.mjs (8176 lines) — THE main target",
+      "squirrelchat/server.mjs — superseded by squirrelchat-server Rust crate",
+      "rcc/brain/index.mjs (299 lines) — work pump, folds into Rust API",
+      "rcc/scout/github.mjs (308 lines) — GitHub integration, folds into Rust API",
+      "rcc/vector/index.mjs — Milvus dedup, becomes Rust client",
+      "squirrelbus/receive-server.mjs — bus receiver, folds into Rust API",
+      "rcc-hub/ — entire directory is a mirror of rcc/api/ — DELETE"
+    ],
+    "node_scripts_to_evaluate": [
+      "workqueue/scripts/*.mjs — ~30 scripts, evaluate each: keep as one-shot CLI scripts (OK), retire if functionality moves into Rust API, or rewrite as Rust CLI tools",
+      "rcc/exec/agent-listener.mjs — remote exec daemon, evaluate: rewrite in Rust or keep as thin shim"
+    ]
+  },
+
+  "target_architecture": {
+    "rcc-server (new Rust/Axum binary)": {
+      "replaces": "rcc/api/index.mjs",
+      "routes": [
+        "GET/POST/PATCH/DELETE /api/queue/*",
+        "GET/POST /api/agents/*",
+        "GET/POST /api/heartbeat/*",
+        "GET/POST /api/projects/*",
+        "GET/POST /api/secrets/*",
+        "GET/POST /api/exec/*",
+        "GET/POST /bus/*  (SquirrelBus, SQLite-backed)",
+        "GET/POST /api/auth/*  (user auth, wq-SC-auth-001)",
+        "GET /health",
+        "WS /ws  (live updates to dashboard-ui)"
+      ],
+      "storage": "SQLite (same pattern as squirrelchat-server — already proven)",
+      "config": "rcc.json + env var fallback (wq-RCC-setup-001)",
+      "brain": "async background task in same process (tokio spawn), not a separate service",
+      "scout": "async background task (GitHub polling on interval)",
+      "bus": "SQLite-backed message store with SSE/WS broadcast"
+    },
+    "dashboard-ui (existing Leptos/WASM)": {
+      "change": "minor — update API base URLs if needed, otherwise unchanged",
+      "note": "Already talks to dashboard-server which proxies to rcc-server"
+    },
+    "squirrelchat-server (existing Rust)": {
+      "change": "retire squirrelchat/server.mjs (Node), squirrelchat-server Rust is already production",
+      "note": "Auth system (wq-SC-auth-001) should target the Rust server, not the Node one"
+    },
+    "dashboard-server (existing Rust)": {
+      "change": "proxy target changes from Node rcc/api to new rcc-server binary",
+      "note": "Minimal change — update RCC_URL env var"
+    }
+  },
+
+  "migration_phases": [
+    {
+      "phase": 1,
+      "name": "Foundation — rcc-server skeleton",
+      "work": [
+        "Create rcc/rcc-server/ Rust crate (Axum + SQLite + tokio)",
+        "Implement /health endpoint",
+        "Implement SQLite schema: agents, heartbeats, queue, projects, secrets, bus_messages",
+        "Implement /api/agents/* and /api/heartbeat/* (simplest, most critical for fleet health)",
+        "Wire into dashboard-server as RCC_URL target",
+        "Run alongside existing Node API (shadow mode — both running, compare outputs)"
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Queue + Brain",
+      "work": [
+        "Implement /api/queue/* with full CRUD + claim/complete/fail lifecycle",
+        "Implement brain as tokio background task: poll queue, route by capabilities, claim + dispatch",
+        "Implement /api/secrets/* (simple key/value store in SQLite)",
+        "Feature parity test against existing Node API"
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "SquirrelBus + Scout",
+      "work": [
+        "Implement /bus/* with SQLite backing + SSE broadcast",
+        "Implement GitHub scout as background task (replaces rcc/scout/github.mjs)",
+        "Implement /api/projects/*",
+        "Implement /api/exec/* (remote exec dispatch)"
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "Auth + User management",
+      "work": [
+        "Port wq-SC-auth-001 auth system to rcc-server (Rust, lettre for email)",
+        "Implement /api/auth/* in Rust",
+        "Wire Leptos frontend auth gate"
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "Cutover + cleanup",
+      "work": [
+        "Switch dashboard-server RCC_URL to rcc-server",
+        "Run Node API in read-only mode for 24h (smoke test)",
+        "Retire rcc/api/index.mjs",
+        "Retire squirrelchat/server.mjs",
+        "Delete rcc-hub/ entirely",
+        "Delete rcc/brain/, rcc/scout/, rcc/vector/ Node.js modules",
+        "Delete rcc/crush-server/, rcc/wasm-dashboard/, rcc/heartbeat-local/",
+        "Evaluate workqueue/scripts/*.mjs one by one"
+      ]
+    }
+  ],
+
+  "tokenhub_audit": {
+    "status": "scheduled",
+    "note": "jkh directive: same audit applies to tokenhub. File as separate task wq-TOKENHUB-audit-001, fire in 1 hour from now (2026-04-01T06:45:00Z). tokenhub has no significant active clients other than RCC fleet — loom never reached production. Potentially the same Rust migration applies.",
+    "tokenhub_location": "do-host1:8090, source likely in ~/Src or separate repo — Rocky to confirm"
+  },
+
+  "risks": [
+    "rcc/api/index.mjs has undocumented behavior accumulated over multiple generations — full feature parity requires careful audit (wq-RCC-audit-001 started this)",
+    "workqueue/scripts/*.mjs are openclaw-invoked cron scripts — rewriting them in Rust may not be worth it if openclaw can call a REST endpoint instead",
+    "Brain logic is complex (capability routing, stale claim expiry, dedup) — must not regress",
+    "SQLite migration: existing data in JSON files needs a one-time import at cutover"
+  ],
+
+  "open_questions": [
+    "Should rcc-server be a new crate or extend dashboard-server? (dashboard-server already exists and proxies everything — could merge them)",
+    "workqueue/scripts/*.mjs: rewrite in Rust, keep as Node CLI scripts, or replace with API calls?",
+    "What is the tokenhub source location? Rocky to confirm."
+  ]
+}

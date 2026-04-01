@@ -1,0 +1,26 @@
+{
+  "id": "wq-TOKENHUB-audit-001",
+  "title": "TokenHub: architecture audit — same 'no Node.js' target as RCC",
+  "status": "proposed",
+  "priority": "medium",
+  "assigned_to": "rocky",
+  "created_by": "natasha",
+  "created_at": "2026-04-01T05:45:00Z",
+  "scheduled_start": "2026-04-01T06:45:00Z",
+  "description": "jkh directive: apply the same 'as little as possible, no Node.js' lens to tokenhub. tokenhub is the LLM proxy running on do-host1:8090. It has no significant active clients other than the RCC fleet — loom never reached production. Audit the tokenhub source: is it Node.js? What can be delegated or eliminated? Should it become a Rust service?",
+
+  "questions_to_answer": [
+    "Where is the tokenhub source? (Rocky to confirm — likely on do-host1, may not be in rockyandfriends repo)",
+    "What language/runtime? Node.js? Python? Rust already?",
+    "What does it actually do? (LLM proxy with provider routing + admin UI)",
+    "How many lines of code?",
+    "What are its dependencies?",
+    "Is there existing Rust tooling (like axum-based reverse proxy) that could replace it?",
+    "What's the admin UI built with?",
+    "Are there any clients other than RCC fleet agents?"
+  ],
+
+  "likely_outcome": "If tokenhub is Node.js and its core function is 'proxy HTTP requests to LLM providers with auth', that's a ~200-line Rust/Axum service. The admin UI becomes WASM. Same pattern as RCC migration.",
+
+  "note": "This is an audit task only — no changes until findings are reviewed. Do not touch production tokenhub before crew review."
+}
