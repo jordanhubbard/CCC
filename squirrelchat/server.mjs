@@ -7,6 +7,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
+import { createHash, randomBytes } from 'node:crypto';
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,19 @@ try { db.exec('ALTER TABLE users ADD COLUMN token_hash TEXT'); } catch {}
 // Additive migrations for channels table
 try { db.exec('ALTER TABLE channels ADD COLUMN last_message_at INTEGER'); } catch {}
 
+// Email-based account verification table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pending_verifications (
+    token TEXT PRIMARY KEY,
+    name  TEXT NOT NULL,
+    email TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+    expires_at INTEGER NOT NULL
+  );
+`);
+try { db.exec('ALTER TABLE users ADD COLUMN email TEXT'); } catch {}
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email)'); } catch {}
+
 // Align reactions table — add user_id col if it only has from_agent
 try { db.exec('ALTER TABLE reactions ADD COLUMN user_id TEXT'); } catch {}
 // Backfill user_id from from_agent if exists
@@ -198,12 +212,16 @@ app.use((req, res, next) => {
 });
 app.use(express.static(join(__dirname, 'public')));
 
-// Auth middleware — accepts admin token OR any valid sc-token-<id>
+// Auth middleware — accepts admin token, hashed email-account tokens, or legacy sc-token-<id>
 function auth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   if (token === ADMIN_TOKEN) { req.userId = 'admin'; return next(); }
-  // sc-token-<user_id> format
+  // Email-account token: hashed → look up by token_hash
+  const hash  = hashToken(token);
+  const byHash = db.prepare('SELECT id FROM users WHERE token_hash = ?').get(hash);
+  if (byHash) { req.userId = byHash.id; return next(); }
+  // Legacy sc-token-<user_id> format (agents + name-claim)
   const match = token.match(/^sc-token-(.+)$/);
   if (match) {
     const userId = match[1];
@@ -403,6 +421,131 @@ app.get('/api/me', (req, res) => {
   const name = req.query.name || null;
   res.json({ id: name || 'anonymous', name: name || 'anonymous', role: 'user', needs_name: !name });
 });
+
+// ── Email-based account auth flow ─────────────────────────────────────────
+// Env vars: SC_SENDGRID_KEY (SendGrid API key), SC_FROM_EMAIL, SC_PUBLIC_URL
+
+const SENDGRID_KEY   = process.env.SC_SENDGRID_KEY  || '';
+const FROM_EMAIL     = process.env.SC_FROM_EMAIL     || 'noreply@squirrelchat.ai';
+const PUBLIC_URL     = process.env.SC_PUBLIC_URL     || `http://localhost:${PORT}`;
+
+function genToken(prefix) {
+  return prefix + '-' + randomBytes(24).toString('hex');
+}
+
+function hashToken(token) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+async function sendVerificationEmail(to, name, verifyUrl, isReset = false) {
+  if (!SENDGRID_KEY) {
+    console.warn(`[auth] SENDGRID not configured — verification email for ${to}: ${verifyUrl}`);
+    return;
+  }
+  const subject = isReset ? 'Reset your SquirrelChat token' : 'Verify your SquirrelChat account';
+  const html = `
+<div style="font-family:monospace;background:#1a1d21;color:#d1d2d3;padding:32px;max-width:480px;margin:0 auto;border-radius:8px;">
+  <h2 style="color:#4a9eff;margin:0 0 16px;">${isReset ? '🔑 Token Reset' : '🐿️ SquirrelChat'}</h2>
+  <p style="margin:0 0 8px;">Hi <b>${name}</b>,</p>
+  <p style="margin:0 0 20px;">${isReset ? 'Click below to get a new token:' : 'Click to verify your account and get your token:'}</p>
+  <a href="${verifyUrl}" style="background:#4a9eff;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:bold;">
+    ${isReset ? 'Reset Token →' : 'Verify Account →'}
+  </a>
+  <p style="margin:20px 0 0;color:#8f939b;font-size:12px;">Link expires in 1 hour. If you did not request this, ignore it.</p>
+</div>`;
+  await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${SENDGRID_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from:              { email: FROM_EMAIL },
+      personalizations:  [{ to: [{ email: to }], subject }],
+      content:           [{ type: 'text/html', value: html }],
+    }),
+  }).catch(e => console.error('[auth] SendGrid error:', e.message));
+}
+
+// POST /api/account/create — { name, email } → send verification email
+app.post('/api/account/create', async (req, res) => {
+  const { name, email } = req.body || {};
+  if (!name || !email) return res.status(400).json({ error: 'name and email required' });
+  const safeName  = name.trim().slice(0, 64);
+  const safeEmail = email.trim().toLowerCase().slice(0, 256);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) {
+    return res.status(400).json({ error: 'invalid email' });
+  }
+  const id = safeName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 32);
+  // Check if already exists with email
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(safeEmail);
+  if (existing) return res.status(409).json({ error: 'email already registered — use login or reset' });
+
+  const vtok     = genToken('sc-verify');
+  const expiresAt = Date.now() + 60 * 60 * 1000; // 1h
+  db.prepare('DELETE FROM pending_verifications WHERE email = ?').run(safeEmail);
+  db.prepare('INSERT INTO pending_verifications (token, name, email, expires_at) VALUES (?,?,?,?)')
+    .run(vtok, safeName, safeEmail, expiresAt);
+
+  const verifyUrl = `${PUBLIC_URL}/api/account/verify/${vtok}`;
+  await sendVerificationEmail(safeEmail, safeName, verifyUrl, false);
+  res.json({ ok: true, message: SENDGRID_KEY ? 'Verification email sent' : `Dev mode: ${verifyUrl}` });
+});
+
+// GET /api/account/verify/:token — click from email → create account, redirect with token
+app.get('/api/account/verify/:vtok', (req, res) => {
+  const vtok = req.params.vtok;
+  const row  = db.prepare('SELECT * FROM pending_verifications WHERE token = ?').get(vtok);
+  if (!row)          return res.redirect('/?auth_error=invalid_link');
+  if (Date.now() > row.expires_at) {
+    db.prepare('DELETE FROM pending_verifications WHERE token = ?').run(vtok);
+    return res.redirect('/?auth_error=link_expired');
+  }
+  const id    = row.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 32);
+  const token = genToken('sc-token');
+  const hash  = hashToken(token);
+  const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(id);
+  if (!existing) {
+    db.prepare('INSERT INTO users (id, name, email, role, token_hash) VALUES (?,?,?,\'user\',?)')
+      .run(id, row.name, row.email, hash);
+  } else {
+    db.prepare('UPDATE users SET token_hash = ?, email = ?, last_seen = ? WHERE id = ?')
+      .run(hash, row.email, Date.now(), id);
+  }
+  db.prepare('DELETE FROM pending_verifications WHERE token = ?').run(vtok);
+  // Redirect to /?verified=1&token=<tok> so SPA can pick it up
+  res.redirect(`/?verified=1&token=${encodeURIComponent(token)}&user_id=${encodeURIComponent(id)}&name=${encodeURIComponent(row.name)}`);
+});
+
+// POST /api/account/login — { token } OR { email } (if just email → re-send verify)
+app.post('/api/account/login', (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'token required' });
+  const hash = hashToken(token);
+  const user = db.prepare('SELECT id, name, email, role FROM users WHERE token_hash = ?').get(hash);
+  if (!user) return res.status(401).json({ error: 'Invalid token' });
+  db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').run(Date.now(), user.id);
+  return res.json({ ok: true, user });
+});
+
+// POST /api/account/reset — { email } → re-send verification/reset email
+app.post('/api/account/reset', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'email required' });
+  const safeEmail = email.trim().toLowerCase();
+  const user = db.prepare('SELECT id, name, email FROM users WHERE email = ?').get(safeEmail);
+  // Always respond OK to prevent email enumeration
+  if (user) {
+    const vtok     = genToken('sc-reset');
+    const expiresAt = Date.now() + 60 * 60 * 1000;
+    db.prepare('DELETE FROM pending_verifications WHERE email = ?').run(safeEmail);
+    db.prepare('INSERT INTO pending_verifications (token, name, email, expires_at) VALUES (?,?,?,?)')
+      .run(vtok, user.name, safeEmail, expiresAt);
+    const resetUrl = `${PUBLIC_URL}/api/account/verify/${vtok}`;
+    await sendVerificationEmail(safeEmail, user.name, resetUrl, true);
+  }
+  res.json({ ok: true, message: SENDGRID_KEY ? 'If that email is registered, a reset link was sent.' : `Dev: ${PUBLIC_URL}/api/account/verify/...` });
+});
+
+// ── Auth check enhancement: accept hashed sc-token-* alongside legacy format ──
+// (Existing auth middleware below also continues to work for agent tokens)
 
 // Login — name-claim: POST { name } → { token, user }
 // For jkh or other humans: claim a display name, get a persistent token
@@ -1181,6 +1324,13 @@ app.post('/sc/api/worklog/post', (req, res) => {
   const msg = worklogInsertMessage('worklog-system', text, 'worklog', dateHeader.id);
 
   res.json({ ok: true, message: msg, date_header_id: dateHeader.id });
+});
+
+// ── Route: /login — serve login page
+const LOGIN_HTML = readFileSync(join(__dirname, 'public', 'login.html'), 'utf8');
+app.get('/login', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(LOGIN_HTML);
 });
 
 // SPA catch-all — serve index.html for non-API routes
