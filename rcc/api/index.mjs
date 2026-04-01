@@ -314,9 +314,10 @@ async function warmHeartbeatsFromHistory() {
       if (!lines.length) continue;
       const last = JSON.parse(lines[lines.length - 1]);
       if (!last.agent) continue;
+      const agentKey = last.agent.toLowerCase(); // normalize casing
       const age = Date.now() - new Date(last.ts).getTime();
-      heartbeats[last.agent] = {
-        agent: last.agent,
+      heartbeats[agentKey] = {
+        agent: agentKey,
         ts: last.ts,
         status: age > STALE_MS ? 'stale' : (last.status || 'online'),
         host: last.host || null,
@@ -4369,7 +4370,7 @@ loadPackages();
     // ── POST /api/heartbeat/:agent ────────────────────────────────────────
     const hbMatch = path.match(/^\/api\/heartbeat\/([^/]+)$/);
     if (method === 'POST' && hbMatch) {
-      const agent = decodeURIComponent(hbMatch[1]);
+      const agent = decodeURIComponent(hbMatch[1]).toLowerCase(); // normalize casing
       const body = await readBody(req);
       const ts = new Date().toISOString();
       heartbeats[agent] = { agent, ts, status: 'online', ...body, _wasOnline: true };
