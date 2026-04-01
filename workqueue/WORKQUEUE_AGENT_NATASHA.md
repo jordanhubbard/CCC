@@ -13,11 +13,11 @@ You are the workqueue processor for **Natasha**. You run periodically via cron o
 
 0. **Heartbeat first** — POST to RCC so the dashboard shows you online:
    ```
-   POST https://rcc.jordanhubbard.net/api/heartbeat/natasha
-   Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+   POST https://rcc.example.com/api/heartbeat/natasha
+   Authorization: Bearer $RCC_AUTH_TOKEN
    {"status":"online","host":"sparky","ts":"<ISO-8601 now>"}
    ```
-1. **Sync** from API first: `GET https://rcc.jordanhubbard.net/api/queue` — merge by itemVersion (higher wins)
+1. **Sync** from API first: `GET https://rcc.example.com/api/queue` — merge by itemVersion (higher wins)
 2. **Read** `workqueue/queue.json` from workspace
 3. **Process** any `pending` items assigned to `natasha` or `all` (with routing check)
 4. **Sync** with peers (Rocky, Bullwinkle) via Mattermost DM
@@ -33,7 +33,7 @@ You are the workqueue processor for **Natasha**. You run periodically via cron o
 
 - Process items where `assignee == "natasha"` **or** `assignee == "all"` and `status == "pending"`
 - **For `assignee == "all"` items:** check routing:
-  1. Call `GET https://rcc.jordanhubbard.net/api/agents/best?task=<preferred_executor or inferred task>`
+  1. Call `GET https://rcc.example.com/api/agents/best?task=<preferred_executor or inferred task>`
   2. If response names `natasha`, claim and process it
   3. Otherwise skip — another agent will claim it
   4. Fallback if endpoint unreachable: claim if `preferred_executor` is `claude_cli`, `gpu`, or unset
@@ -95,11 +95,11 @@ Try channels in order (stop at first success per peer):
 ### Rocky
 1. **Mattermost DM** — `user:k8qtua6dbjfmfjk76o9bgaepua` (wait, this is Natasha's ID — Rocky's is below)
    Rocky's Mattermost user ID: `rocky` agent DM — use channel message tool with target rocky's user
-2. **Dashboard API** — `POST https://dashboard.jordanhubbard.net/api/queue` (itemVersion-merge)
+2. **Dashboard API** — `POST https://dashboard.example.com/api/queue` (itemVersion-merge)
 
 ### Bullwinkle
 1. **Mattermost DM** — send to `user:ww1wef9sktf8jg8be6q5zj1aye`
-2. **Dashboard API** — sync via `https://dashboard.jordanhubbard.net/api/queue`
+2. **Dashboard API** — sync via `https://dashboard.example.com/api/queue`
 
 ### Sync Message Format
 ```
@@ -141,8 +141,8 @@ When a new item has `assignee == "jkh"`:
 
 ## Dashboard
 
-- Dashboard: `https://dashboard.jordanhubbard.net/`
-- API: `https://dashboard.jordanhubbard.net/api/queue`
+- Dashboard: `https://dashboard.example.com/`
+- API: `https://dashboard.example.com/api/queue`
 - Do NOT publish static HTML to Azure Blob
 
 ## State File
