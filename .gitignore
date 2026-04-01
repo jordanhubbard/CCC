@@ -16,10 +16,15 @@ openclaw.json
 
 # RCC runtime state
 rcc/api/agents.json
+rcc/api/projects.json
 rcc/data/github-key.json
 rcc/data/secrets.json
 brain-state.json
 rcc/brain/brain-state.json
+
+# Generated configs (rendered from *.tmpl by make init-rcc)
+# These contain real hostnames/tokens — never commit them
+onboarding/ONBOARD_*.rendered.md
 
 # Queue state (runtime data, not source)
 workqueue/queue.json
