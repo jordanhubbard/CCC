@@ -241,7 +241,7 @@ async fn sc_stream(State(state): State<Arc<AppState>>) -> Response<Body> {
     match state
         .stream_client
         .get(&url)
-        .header("Authorization", "Bearer sc-squirrelchat-admin-2026")
+        .header("Authorization", &std::env::var("SQUIRRELCHAT_ADMIN_TOKEN").unwrap_or_else(|_| "<YOUR_SC_TOKEN>".to_string()))
         .header("Accept", "text/event-stream")
         .send()
         .await

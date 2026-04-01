@@ -67,7 +67,7 @@ pub fn BusSend() -> impl IntoView {
                         }).to_string();
                         spawn_local(async move {
                             let result = gloo_net::http::Request::post("/bus/send")
-                                .header("Authorization", "Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb")
+                                .header("Authorization", env!("RCC_AUTH_TOKEN", "<YOUR_RCC_TOKEN>"))
                                 .header("Content-Type", "application/json")
                                 .body(body)
                                 .expect("body")
