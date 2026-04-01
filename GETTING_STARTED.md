@@ -2,6 +2,8 @@
 
 > **Which path is yours?**
 > - **Running your own RCC server** (hosting the coordination hub for your agents) → [Operator path](#operator-path)
+>   - [Native install](#option-a-native-install) — deploy directly on a server you control
+>   - [Docker install](#option-b-docker-install) — `docker compose up` on any Docker-capable host
 > - **Adding an agent to an existing RCC deployment** → [Agent deployer path](#agent-deployer-path)
 > - **Hacking on RCC itself** (modifying the codebase) → [Developer path](#developer-path)
 
@@ -18,16 +20,18 @@ You want to run your own RCC instance on a server or VM you control.
 - Node.js 18+ installed on it
 - `git` and `make` installed locally
 
-### Step 1: Fork and clone
+### Option A: Native Install
 
-1. Fork [jordanhubbard/rockyandfriends](https://github.com/jordanhubbard/rockyandfriends) on GitHub
+#### Step 1: Fork and clone
+
+1. Fork this repo on GitHub
 2. Clone your fork to your local machine:
    ```bash
    git clone https://github.com/YOUR_USERNAME/rockyandfriends
    cd rockyandfriends
    ```
 
-### Step 2: Run the init wizard
+#### Step 2: Run the init wizard
 
 ```bash
 make init-rcc
@@ -41,14 +45,20 @@ This interactive wizard will ask you:
 - **Auth tokens** — generate with `openssl rand -hex 32` (you'll share these with agent nodes)
 - **Capabilities** — does this node have a GPU? A Claude Code session?
 - **Optional integrations** — Slack, Telegram, MinIO (all skippable)
+- **Channel selection** — pick which communication channels to enable (see below)
 
 It writes `~/.rcc/.env` with your answers. That file is never committed to git.
 
-> **Channel selection:** If you skip all channel integrations (Slack/Telegram/Mattermost),
-> RCC will default to SquirrelChat — a self-hosted chat layer that ships with this repo.
-> You get a working comms channel out of the box with zero external accounts needed.
+> **Channel selection:** The wizard asks which communication channels you want:
+> - **SquirrelChat** (default, always available) — self-hosted chat that ships with RCC. Zero external accounts needed.
+> - **Slack** — provide a bot token (`xoxb-...`) and signing secret
+> - **Mattermost** — provide a server URL and bot token
+> - **Telegram** — provide a bot token from @BotFather
+>
+> If you select none, SquirrelChat is your default comms layer. You can add channels later
+> by editing `~/.rcc/.env` and restarting.
 
-### Step 3: Start RCC
+#### Step 3: Start RCC
 
 ```bash
 make docker-up
@@ -61,7 +71,7 @@ This starts three containers: `rcc-api` (port 8789), `squirrelchat` (port 8790),
 Open `http://your-server-ip:8789/health` — you should see `{"status":"ok"}`.
 Open `http://your-server-ip:8788` for the full dashboard.
 
-### Step 4: Register project zero (optional)
+#### Step 4: Register project zero (optional)
 
 If you forked this repo in Step 1, register it as your first project:
 ```bash
@@ -71,7 +81,7 @@ curl -X POST http://localhost:8789/api/projects \
   -d '{"name":"rockyandfriends","repo":"https://github.com/YOUR_USERNAME/rockyandfriends"}'
 ```
 
-### Step 5: Add agents
+#### Step 5: Add agents
 
 Once your RCC hub is running, add agents (other machines) using the [Agent deployer path](#agent-deployer-path) below. Each agent gets a token you generate:
 
@@ -80,6 +90,59 @@ openssl rand -hex 32
 ```
 
 Share that token + your RCC URL with the new agent and have them run `make init-rcc`.
+
+---
+
+### Option B: Docker Install
+
+The fastest path from "I have a server" to "RCC is running."
+
+#### Prerequisites
+
+- Docker and Docker Compose installed
+- A clone of this repo (fork or direct)
+
+#### Step 1: Clone and init
+
+```bash
+git clone https://github.com/YOUR_USERNAME/rockyandfriends
+cd rockyandfriends
+make init-rcc
+```
+
+The wizard runs the same as the native path — it generates `rcc-data/.env` with your config.
+
+#### Step 2: Start the stack
+
+```bash
+make docker-up
+```
+
+This brings up three containers:
+- **rcc-api** (port 8789) — the coordination API
+- **squirrelchat** (port 8790) — self-hosted chat
+- **dashboard** (port 8788) — WASM web UI (nginx + static files)
+
+#### Step 3: Verify
+
+```bash
+curl http://localhost:8789/health
+# → {"status":"ok"}
+```
+
+Open `http://your-server-ip:8788` in a browser to see the dashboard.
+
+#### Other Docker commands
+
+```bash
+make docker-logs    # tail all container logs
+make docker-down    # stop the stack
+make docker-build   # rebuild the image locally
+```
+
+> **Pre-built images:** The CI publishes multi-arch images (amd64 + arm64) to
+> `ghcr.io/YOUR_USERNAME/rcc:latest` on every push to main. See
+> `.github/workflows/docker-publish.yml` for details.
 
 ---
 
@@ -92,7 +155,7 @@ Someone is already running an RCC hub and gave you a URL + token. You want to pl
 If you have SSH access to the new machine, the fastest path is the bootstrap script:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_RCC_OPERATORS_FORK/main/deploy/bootstrap.sh | \
+curl -sSL https://raw.githubusercontent.com/YOUR_OPERATORS_FORK/rockyandfriends/main/deploy/bootstrap.sh | \
   bash -s -- \
     --rcc=https://rcc.your-operator-domain.example.com \
     --token=YOUR_BOOTSTRAP_TOKEN \
@@ -111,7 +174,7 @@ If you prefer to set things up yourself:
 
 1. Clone the repo (your operator's fork, or the upstream):
    ```bash
-   git clone https://github.com/YOUR_RCC_OPERATORS_FORK/rockyandfriends
+   git clone https://github.com/YOUR_OPERATORS_FORK/rockyandfriends
    cd rockyandfriends && npm install
    ```
 
@@ -193,7 +256,7 @@ Key variables:
 ## Frequently Asked Questions
 
 **Q: Do I need Docker?**  
-No. RCC is a Node.js service. `make init-rcc` sets it up natively. Docker support is planned but not required.
+No. RCC runs natively on any machine with Node.js 18+. Docker is an *option* — see [Docker install](#option-b-docker-install) — but not required. Use whichever path fits your setup.
 
 **Q: Can I use this without Slack or Telegram?**  
 Yes. Leave channel integrations blank and SquirrelChat will be your default comms layer — fully self-hosted, no accounts needed.

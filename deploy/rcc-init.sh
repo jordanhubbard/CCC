@@ -169,10 +169,62 @@ if [ "$AGENT_HAS_GPU" = "true" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 5 — Optional integrations
+# STEP 5 — Communication Channels
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}Step 5: Optional Integrations${NC} (press enter to skip)"
+echo -e "${BOLD}Step 5: Communication Channels${NC}"
+echo ""
+echo "  Select which channels to enable (comma-separated, or press enter for SquirrelChat only):"
+echo ""
+echo "    squirrelchat  — Self-hosted chat (ships with RCC, always available)"
+echo "    slack          — Slack workspace integration"
+echo "    mattermost     — Mattermost server integration"
+echo "    telegram       — Telegram bot integration"
+echo ""
+echo "  Examples:  slack,telegram    or    slack    or    (blank for SquirrelChat only)"
+echo ""
+ask "Channels [squirrelchat]: "
+read -r CHANNEL_SELECTION
+CHANNEL_SELECTION="${CHANNEL_SELECTION:-squirrelchat}"
+
+# Parse channel selection
+SLACK_TOKEN=""
+SLACK_SIGNING_SECRET=""
+MATTERMOST_TOKEN=""
+MATTERMOST_URL=""
+TELEGRAM_TOKEN=""
+
+if echo "$CHANNEL_SELECTION" | grep -qi "slack"; then
+  echo ""
+  info "Configuring Slack..."
+  prompt SLACK_TOKEN "Slack bot token (xoxb-...)" ""
+  prompt SLACK_SIGNING_SECRET "Slack signing secret (from app settings → Basic Information)" ""
+fi
+
+if echo "$CHANNEL_SELECTION" | grep -qi "mattermost"; then
+  echo ""
+  info "Configuring Mattermost..."
+  prompt MATTERMOST_URL "Mattermost server URL (e.g. https://chat.example.com)" ""
+  prompt MATTERMOST_TOKEN "Mattermost bot/personal access token" ""
+fi
+
+if echo "$CHANNEL_SELECTION" | grep -qi "telegram"; then
+  echo ""
+  info "Configuring Telegram..."
+  prompt TELEGRAM_TOKEN "Telegram bot token (from @BotFather)" ""
+fi
+
+if [ "$CHANNEL_SELECTION" = "squirrelchat" ] || [ -z "$CHANNEL_SELECTION" ]; then
+  echo ""
+  success "SquirrelChat will be your default communication channel."
+  echo "  It starts automatically with the RCC stack — no external accounts needed."
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 6 — Optional Infrastructure
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo -e "${BOLD}Step 6: Optional Infrastructure${NC} (press enter to skip)"
 echo ""
 
 prompt NVIDIA_API_KEY "NVIDIA API key (for LLM inference)" ""
@@ -180,8 +232,6 @@ prompt MINIO_ENDPOINT "MinIO endpoint (e.g. http://10.0.0.5:9000)" ""
 prompt MINIO_ACCESS_KEY "MinIO access key" ""
 prompt MINIO_SECRET_KEY "MinIO secret key" ""
 MINIO_BUCKET="agents"
-prompt SLACK_TOKEN "Slack bot token (xoxb-...)" ""
-prompt TELEGRAM_TOKEN "Telegram bot token" ""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # WRITE .env
@@ -228,9 +278,11 @@ AZURE_BLOB_PUBLIC_URL=
 AZURE_BLOB_SAS_TOKEN=
 
 # ── Channel Integrations ───────────────────────────────────────────────────
+# Channels selected during init: ${CHANNEL_SELECTION}
 SLACK_TOKEN=${SLACK_TOKEN}
-MATTERMOST_TOKEN=
-MATTERMOST_URL=
+SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+MATTERMOST_URL=${MATTERMOST_URL}
+MATTERMOST_TOKEN=${MATTERMOST_TOKEN}
 TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
 EOF
 
