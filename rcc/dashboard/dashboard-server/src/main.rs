@@ -241,7 +241,7 @@ async fn sc_stream(State(state): State<Arc<AppState>>) -> Response<Body> {
     match state
         .stream_client
         .get(&url)
-        .header("Authorization", "Bearer sc-squirrelchat-admin-2026")
+        .header("Authorization", &std::env::var("SQUIRRELCHAT_ADMIN_TOKEN").unwrap_or_else(|_| "<YOUR_SC_TOKEN>".to_string()))
         .header("Accept", "text/event-stream")
         .send()
         .await
@@ -391,6 +391,26 @@ async fn activity_page() -> Response<Body> {
         .unwrap()
 }
 
+/// SPA index.html route — returns index.html with 200 for any deep-linked path.
+/// Used as the fallback route so /kanban, /agents, etc. all bootstrap the WASM app.
+async fn spa_index(State(state): State<Arc<AppState>>) -> Response<Body> {
+    let index_path = {
+        let dist = std::env::var("DASHBOARD_DIST").unwrap_or_else(|_| "dist".to_string());
+        format!("{}/index.html", dist)
+    };
+    match tokio::fs::read(&index_path).await {
+        Ok(bytes) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(Body::from(bytes))
+            .unwrap(),
+        Err(_) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("index.html not found"))
+            .unwrap(),
+    }
+}
+
 pub fn build_app(state: Arc<AppState>, dist: &str) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -400,9 +420,21 @@ pub fn build_app(state: Arc<AppState>, dist: &str) -> Router {
         .route("/bus/*path", get(bus_get).post(bus_post))
         .route("/s3/*path", get(s3_get).put(s3_put).delete(s3_delete))
         .route("/sc/*path", get(sc_get).post(sc_post).patch(sc_patch).delete(sc_delete))
+        // SPA deep-link routes — serve index.html for all named tab paths
+        // Synced with leptos_router routes in dashboard-ui/src/app.rs
+        .route("/geek-view",   get(spa_index))
+        .route("/kanban",      get(spa_index))
+        .route("/squirrelchat",get(spa_index))
+        .route("/agents",      get(spa_index))
+        .route("/issues",      get(spa_index))
+        .route("/providers",   get(spa_index))
+        .route("/services",    get(spa_index))
+        .route("/timeline",    get(spa_index))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state)
-        .fallback_service(ServeDir::new(dist).append_index_html_on_directories(true))
+        .fallback_service(
+            ServeDir::new(dist).append_index_html_on_directories(true)
+        )
 }
 
 /// Build AppState from environment / explicit values (used in tests and main).

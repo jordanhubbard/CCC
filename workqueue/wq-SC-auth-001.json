@@ -1,0 +1,78 @@
+{
+  "id": "wq-SC-auth-001",
+  "title": "SquirrelChat: proper account system with email verification and token management",
+  "status": "proposed",
+  "priority": "high",
+  "assigned_to": "all",
+  "created_by": "natasha",
+  "created_at": "2026-03-31T21:30:00Z",
+  "updated_at": "2026-03-31T21:38:00Z",
+  "updated_by": "natasha",
+  "update_notes": "R2: fold in Rocky's infrastructure check + redirect flow fix. ADMIN_TOKEN hashed on first boot. Verification redirect uses /?verified=1&token=<tok> query param so SPA can pick up token. Port 587 confirmed open to SendGrid. Blocker: SendGrid API key needed from jkh.",
+  "description": "Build a real account/auth system for SquirrelChat replacing the current name-claim flow. Triggered by jkh feedback that auth gate is in the wrong place (mid-send prompt vs. pre-UI gate). The immediate UX fix (hide #app until login) shipped in a4c5665. This task covers the full account system.",
+  "blockers": [
+    "SendGrid API key needed (SENDGRID_SMTP_PASS env var). jkh: do you have a SendGrid account, or should we create one? Outbound port 587 is confirmed open on do-host1."
+  ],
+  "requirements": [
+    "Registration: POST /api/register with {username, email} — sends HTML verification email with one-time link",
+    "Email link /api/verify?token=<otp> → creates user, issues persistent token, redirects to /?verified=1&token=<issued_tok> so SPA can pick it up",
+    "SPA boot: detect ?verified=1&token=... param, save to localStorage, clear URL param — do NOT show /login again after verification",
+    "Login page (not modal): username + token fields, 'remember me' saves to localStorage (default on)",
+    "Forgot token / reset: enter email → triggers re-verification flow, invalidates ALL existing tokens for that user",
+    "Token shown exactly once after verification — user encouraged to save to password manager",
+    "On return visit with no saved token: show login page (username + token)",
+    "On 401 mid-session: non-intrusive banner (already shipped), 'sign in again' → login page",
+    "Email must be confirmed within 1 hour or the pending registration expires",
+    "All users have: id, username, email (verified), created_at, last_seen",
+    "Username is immutable after registration",
+    "Multi-device support: multiple active tokens per user (tokens table), new login does not revoke existing tokens"
+  ],
+  "resolved_questions": {
+    "smtp": "SendGrid free tier (100/day) via lettre SMTP relay. Port 587 confirmed open on do-host1. No native outbound SMTP configured. Env vars: SENDGRID_SMTP_USER='apikey', SENDGRID_SMTP_PASS=<api_key>, SMTP_FROM. BLOCKER: key not yet in RCC secrets.",
+    "multi_device_tokens": "tokens table (id, user_id, token_hash, created_at, last_used_at). New login does NOT revoke existing tokens. Reset/forgot flow invalidates ALL tokens for that user. Scale is small so both per-device and single-token work — tokens table chosen for future-proofing at near-zero added complexity.",
+    "username_mutable": "Immutable after registration. @mention history and DM routing (dm-{a}-{b} canonical IDs) depend on stable usernames. Display name can be mutable later if needed.",
+    "admin_bootstrap": "ADMIN_TOKEN env var stays as permanent escape hatch. On first boot, hash it and store/compare the hash — consistent security model with user tokens, no plaintext comparison inline.",
+    "rate_limiting": "3 req/hour per IP on /api/register and /api/reset.",
+    "verification_redirect": "GET /api/verify redirects to /?verified=1&token=<issued_token>. SPA detects query params on boot, saves {username, token} to localStorage, clears URL. Avoids landing on /login with empty localStorage after clicking email link."
+  },
+  "proposed_implementation": {
+    "target_server": "squirrelchat-server (Rust/Axum, :8793) — ALL auth logic lives here. Node/Express (:8790) proxies /api/register, /api/verify, /api/reset, /api/login through to :8793 like all other /api/* routes. No auth logic in :8790.",
+    "backend_changes": [
+      "New DB table: pending_registrations(id, username, email, otp_hash, expires_at)",
+      "New DB table: tokens(id, user_id, token_hash, created_at, last_used_at) — replaces single token_hash on users",
+      "Alter users table: add email TEXT UNIQUE; username stays immutable; drop any plaintext token col",
+      "POST /api/register: validate username unique + email unique, insert pending_registration, send verification email via lettre + SendGrid SMTP relay",
+      "GET /api/verify?token=<otp>: look up pending, check expiry, create user row, generate sc-token, insert into tokens table, HTTP 302 redirect to /?verified=1&token=<issued_token>",
+      "POST /api/reset: look up email, DELETE all rows from tokens WHERE user_id = ..., insert new pending_registration, send email",
+      "POST /api/login: username + token → find matching token_hash in tokens table, update last_used_at, return user",
+      "ADMIN_TOKEN: on server startup, if ADMIN_TOKEN env var is set, hash it and compare against stored admin_token_hash — never compare plaintext inline",
+      "Auth middleware: validate Bearer token against tokens table on all protected routes"
+    ],
+    "frontend_changes": [
+      "Replace login modal with a proper /login route (full-page, not modal)",
+      "Add /register route: username + email form",
+      "Add /reset route: email input → 'check your email' confirmation",
+      "Boot: check for ?verified=1&token=... query params first — if present, save to localStorage, clear URL, proceed authenticated",
+      "Boot fallback: if no localStorage session and no verified param → redirect to /login",
+      "localStorage: save {username, token} on 'remember me' checkbox (default on)",
+      "Express server (:8790) proxies /api/register, /api/verify, /api/reset, /api/login to :8793 — no auth logic in Express layer"
+    ],
+    "email": [
+      "lettre crate (Rust) with SendGrid SMTP relay (smtp.sendgrid.net:587)",
+      "Env vars: SENDGRID_SMTP_USER='apikey', SENDGRID_SMTP_PASS=<SendGrid API key>, SMTP_FROM=noreply@squirrelchat.jordanhubbard.net",
+      "HTML email template: SquirrelChat branding, big CTA verify button, plain text fallback link, 1-hour expiry note"
+    ],
+    "security": [
+      "OTP stored as SHA-256 hash, not plaintext",
+      "Tokens stored as SHA-256(random_bytes(32)) — plaintext issued once, hash stored in DB",
+      "ADMIN_TOKEN: hash on startup, compare hashes — never plaintext in memory after init",
+      "Rate limit /api/register and /api/reset to 3 req/hour per IP (tower-governor middleware)",
+      "HTTPS only (already enforced by Caddy)"
+    ],
+    "dependencies": [
+      "lettre = '0.11' (Rust crate, SMTP email sending)",
+      "tower-governor (rate limiting middleware for Axum)",
+      "SendGrid account + API key — BLOCKER, needs jkh"
+    ]
+  }
+}

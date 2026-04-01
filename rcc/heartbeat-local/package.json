@@ -1,0 +1,13 @@
+{
+  "name": "rcc-heartbeat-local",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Offline heartbeat buffer for sparky — SQLite store + RCC replay",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.0.0"
+  }
+}

@@ -9,8 +9,8 @@
 import http from 'http';
 
 const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions';
-const GATEWAY_TOKEN = 'pottsylvania-7bef066943f98165051b4fc3';
-const BUS_TOKEN = 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';   // rotated 2026-03-23
+const GATEWAY_TOKEN = '<SQUIRRELBUS_GATEWAY_TOKEN>';
+const BUS_TOKEN = '<YOUR_RCC_TOKEN>';   // rotated 2026-03-23
 const PORT = 18799;
 
 function log(...args) {

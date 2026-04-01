@@ -18,7 +18,7 @@ const WORKSPACE = process.env.WORKSPACE || "/home/jkh/.openclaw/workspace";
 const MINIO_ENDPOINT = "http://100.89.199.14:9000";
 const MINIO_BUCKET = "agents";
 const MINIO_ACCESS = "rockymoose4810f4cc7d28916f";
-const MINIO_SECRET = "1b7a14087771df4bf85d6001fdd047a61348641bdf78aefd";
+const MINIO_SECRET = "<MINIO_SECRET_KEY>";
 const DRY_RUN = process.argv.includes("--dry-run");
 
 // ISO week string: YYYY-Www

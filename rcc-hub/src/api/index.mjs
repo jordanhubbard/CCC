@@ -3021,7 +3021,7 @@ if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
 
   # Configure mc alias for do-host1 MinIO
   MINIO_ENDPOINT="http://100.89.199.14:9000"
-  mc alias set do-host1 "\$MINIO_ENDPOINT" rocky2197fb96dde4618aa17f e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1 2>/dev/null && \\
+  mc alias set do-host1 "\$MINIO_ENDPOINT" <MINIO_ACCESS_KEY> <MINIO_SECRET_KEY> 2>/dev/null && \\
     echo "  ✅ mc alias configured (do-host1 MinIO)" || echo "  ⚠️  mc alias setup failed"
 
   # Install memory sync script

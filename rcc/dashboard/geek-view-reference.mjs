@@ -39,7 +39,7 @@ const execFileP = promisify(execFile);
 
 const app = express();
 const PORT = 8788;
-const AUTH_TOKEN = process.env.RCC_AUTH_TOKENS || process.env.RCC_AGENT_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const AUTH_TOKEN = process.env.RCC_AUTH_TOKENS || process.env.RCC_AGENT_TOKEN || '<YOUR_RCC_TOKEN>';
 const QUEUE_PATH = '/home/jkh/.openclaw/workspace/workqueue/queue.json';
 const MC_PATH = '/home/jkh/.local/bin/mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';

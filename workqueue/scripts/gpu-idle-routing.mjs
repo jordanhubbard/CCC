@@ -23,7 +23,7 @@ const STATE_FILE = join(WORKSPACE, 'workqueue/state-gpu-routing.json');
 
 const MINIO_ENDPOINT = 'http://100.89.199.14:9000';
 const MINIO_ACCESS = 'rockymoose4810f4cc7d28916f';
-const MINIO_SECRET = '1b7a14087771df4bf85d6001fdd047a61348641bdf78aefd';
+const MINIO_SECRET = '<MINIO_SECRET_KEY>';
 const HEALTH_KEY = 'agents/shared/natasha-gpu-health.json';
 
 const IDLE_THRESHOLD_PCT = 30;   // GPU % below which we consider "idle"

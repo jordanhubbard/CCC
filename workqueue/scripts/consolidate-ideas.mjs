@@ -30,7 +30,7 @@ const NOW = new Date().toISOString();
 const MINIO_HOST = '100.89.199.14';
 const MINIO_PORT = 9000;
 const MINIO_ACCESS_KEY = 'rockymoose4810f4cc7d28916f';
-const MINIO_SECRET_KEY = '1b7a14087771df4bf85d6001fdd047a61348641bdf78aefd';
+const MINIO_SECRET_KEY = '<MINIO_SECRET_KEY>';
 
 function log(...args) { console.log(new Date().toISOString(), '[consolidate-ideas]', ...args); }
 

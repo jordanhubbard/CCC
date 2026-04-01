@@ -37,7 +37,7 @@ export SHELL_ALLOWLIST="systemctl status,journalctl,df,free,uptime,nvidia-smi,gi
 
 **Send a shell exec:**
 ```bash
-curl -s -X POST http://146.190.134.110:8789/api/exec \
+curl -s -X POST https://rcc.example.com/api/exec \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
   -d '{
@@ -152,8 +152,8 @@ Appends the agent result to the exec record.
 SQUIRRELBUS_TOKEN=your-token \
 RCC_AUTH_TOKEN=your-rcc-token \
 AGENT_NAME=natasha \
-SQUIRRELBUS_URL=http://100.89.199.14:8788 \
-RCC_URL=http://100.89.199.14:8789 \
+SQUIRRELBUS_URL=https://dashboard.example.com \
+RCC_URL=https://rcc.example.com \
 node rcc/exec/agent-listener.mjs
 ```
 
@@ -221,9 +221,9 @@ sudo mkdir -p /etc/rcc
 
 # Write credentials (get these from Rocky or jkh):
 sudo tee /etc/rcc/env << 'ENVEOF'
-SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
-SQUIRRELBUS_URL=http://100.89.199.14:8788
-RCC_URL=http://146.190.134.110:8789
+SQUIRRELBUS_TOKEN=<YOUR_RCC_TOKEN>
+SQUIRRELBUS_URL=https://dashboard.example.com
+RCC_URL=https://rcc.example.com
 RCC_AUTH_TOKEN=<agent-specific-token>
 AGENT_NAME=peabody
 ALLOW_SHELL_EXEC=true
@@ -239,7 +239,7 @@ sudo systemctl status agent-listener
 
 ```bash
 # Check peabody GPU status
-curl -s -X POST http://146.190.134.110:8789/api/exec \
+curl -s -X POST https://rcc.example.com/api/exec \
   -H "Authorization: Bearer $RCC_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["peabody"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'

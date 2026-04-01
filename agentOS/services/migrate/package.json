@@ -1,0 +1,14 @@
+{
+  "name": "@agentos/migrate",
+  "version": "0.1.0",
+  "description": "agentOS live WASM slot migration between mesh peers",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

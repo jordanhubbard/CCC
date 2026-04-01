@@ -15,7 +15,7 @@ import { EventEmitter } from 'events';
 // ── Configuration ──────────────────────────────────────────────────────────
 
 const TOKENHUB_URL     = process.env.TOKENHUB_URL     || 'http://localhost:8090';
-const TOKENHUB_API_KEY = process.env.TOKENHUB_API_KEY || process.env.TOKENHUB_AGENT_KEY || 'tokenhub_1b8cdce9904ca32eea3d06624079b5bfd9baf5a0eec4e7d6f3dacdf4b6aeeb15';
+const TOKENHUB_API_KEY = process.env.TOKENHUB_API_KEY || process.env.TOKENHUB_AGENT_KEY || '<TOKENHUB_AGENT_KEY>';
 // Preferred models in priority order — brain tries each until one succeeds
 const BRAIN_MODELS = (process.env.BRAIN_MODELS || 'nemotron,nemotron-peabody,nemotron-sherman,nemotron-snidely,nemotron-dudley,llama-3.3-70b-instruct').split(',').map(s => s.trim()).filter(Boolean);
 const STATE_PATH       = process.env.BRAIN_STATE_PATH || './brain-state.json';

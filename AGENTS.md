@@ -223,28 +223,28 @@ Agents can be commanded remotely using the RCC exec API — no inbound SSH requi
 
 ```bash
 # Send exec (JS mode - default):
-curl -X POST http://146.190.134.110:8789/api/exec \
+curl -X POST https://rcc.example.com/api/exec \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["peabody"],"code":"process.version"}'
 
 # Send exec (shell mode - for approved commands):
-curl -X POST http://146.190.134.110:8789/api/exec \
+curl -X POST https://rcc.example.com/api/exec \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["all"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'
 
 # Get results:
-curl http://146.190.134.110:8789/api/exec/<exec-id> \
+curl https://rcc.example.com/api/exec/<exec-id> \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN"
 ```
 
 ### Running the listener daemon
 
 ```bash
-SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb \
-SQUIRRELBUS_URL=http://100.89.199.14:8788 \
-RCC_URL=http://146.190.134.110:8789 \
+SQUIRRELBUS_TOKEN=<YOUR_RCC_TOKEN> \
+SQUIRRELBUS_URL=https://dashboard.example.com \
+RCC_URL=https://rcc.example.com \
 RCC_AUTH_TOKEN=<agent-token> \
 AGENT_NAME=mynode \
 ALLOW_SHELL_EXEC=true \

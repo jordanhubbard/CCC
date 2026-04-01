@@ -193,8 +193,8 @@ Agents can be commanded remotely via SquirrelBus exec — no inbound SSH require
 ```bash
 # Quick start (manual):
 SQUIRRELBUS_TOKEN=<shared-secret> \
-SQUIRRELBUS_URL=http://100.89.199.14:8788 \
-RCC_URL=http://146.190.134.110:8789 \
+SQUIRRELBUS_URL=https://dashboard.example.com \
+RCC_URL=https://rcc.example.com \
 RCC_AUTH_TOKEN=<agent-token> \
 AGENT_NAME=mynode \
 ALLOW_SHELL_EXEC=true \
@@ -207,13 +207,13 @@ node /opt/rcc/rcc/exec/agent-listener.mjs
 
 ```bash
 # JS mode (default — sandboxed vm):
-curl -s -X POST http://146.190.134.110:8789/api/exec \
+curl -s -X POST https://rcc.example.com/api/exec \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["mynode"],"code":"Object.keys(process.env).length"}'
 
 # Shell mode (pre-approved commands only):
-curl -s -X POST http://146.190.134.110:8789/api/exec \
+curl -s -X POST https://rcc.example.com/api/exec \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["mynode"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'
@@ -223,7 +223,7 @@ curl -s -X POST http://146.190.134.110:8789/api/exec \
 
 ```bash
 EXEC_ID=$(curl -s ... | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-curl -s "http://146.190.134.110:8789/api/exec/$EXEC_ID" \
+curl -s "https://rcc.example.com/api/exec/$EXEC_ID" \
   -H "Authorization: Bearer $RCC_AUTH_TOKEN" | python3 -m json.tool
 ```
 

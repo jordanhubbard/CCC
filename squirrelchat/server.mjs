@@ -6,13 +6,15 @@ import multer from 'multer';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 8790;
-const ADMIN_TOKEN = 'sc-squirrelchat-admin-2026';
+const ADMIN_TOKEN = process.env.SC_ADMIN_TOKEN || '<SC_ADMIN_TOKEN>';
 const RCC_BASE = 'http://localhost:8789';
+const RCC_AGENT_TOKEN = process.env.RCC_AGENT_TOKEN || '<YOUR_RCC_TOKEN>';
 
 // DB setup
 const db = new Database('./squirrelchat.db');
@@ -160,6 +162,10 @@ if (channelCount.cnt === 0) {
   console.log('[squirrelchat] Seeded default channels');
 }
 
+// Ensure #worklog channel always exists (even on existing DBs that skipped seeding)
+db.prepare('INSERT OR IGNORE INTO channels (id, name, description) VALUES (?, ?, ?)')
+  .run('worklog', 'Worklog', 'Agent task completion journal — auto-posted by workqueue.completed');
+
 // Seed default agent users
 const agentSeeds = ['rocky', 'bullwinkle', 'natasha', 'boris', 'sparky', 'peabody', 'snidely', 'sherman', 'dudley'];
 const insertUser = db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, ?)');
@@ -220,7 +226,11 @@ async function rccFetch(path, options = {}) {
       port: url.port || 80,
       path: url.pathname + url.search,
       method: options.method || 'GET',
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${RCC_AGENT_TOKEN}`,
+        ...(options.headers || {}),
+      },
     };
     const req = fetch.request(reqOptions, (res) => {
       let data = '';
@@ -234,6 +244,46 @@ async function rccFetch(path, options = {}) {
     if (options.body) req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
     req.end();
   });
+}
+
+// Known fleet agents for @mention routing
+const FLEET_AGENTS = ['rocky', 'natasha', 'boris', 'peabody', 'sherman', 'dudley', 'snidely', 'bullwinkle'];
+
+// @agent mention handler — detects @<agentname> <task> and posts a workqueue item
+// Returns { agentName, wqId, title } if a queue item was created, else null.
+async function handleAgentMention(from, text) {
+  const mentionRe = /^@([a-z][a-z0-9_-]*)\s+(.+)/is;
+  const match = text.trim().match(mentionRe);
+  if (!match) return null;
+
+  const agentName = match[1].toLowerCase();
+  if (!FLEET_AGENTS.includes(agentName)) return null;
+
+  const taskTitle = match[2].trim();
+  const wqId = `wq-SC-${Date.now()}`;
+
+  try {
+    const r = await rccFetch('/api/queue', {
+      method: 'POST',
+      body: {
+        id: wqId,
+        title: taskTitle,
+        description: `Delegated via SquirrelChat @mention by ${from}`,
+        assignee: agentName,
+        source: 'squirrelchat',
+        priority: 'normal',
+        tags: ['squirrelchat', 'mention', `from:${from}`],
+      },
+    });
+    if (r.ok) {
+      return { agentName, wqId: r.data?.id || wqId, title: taskTitle };
+    }
+    console.warn('[squirrelchat] @mention queue create failed:', r.status, r.data);
+    return null;
+  } catch (err) {
+    console.warn('[squirrelchat] @mention queue create error:', err.message);
+    return null;
+  }
 }
 
 // Slash command handler
@@ -467,6 +517,45 @@ app.post('/api/messages', auth, async (req, res) => {
     client.write(`data: ${payload}\n\n`);
   }
 
+  // ── @agent mention → workqueue item ───────────────────────────────────────
+  // Pattern: @agentname <task description>
+  // Known agents: natasha, rocky, boris, bullwinkle, peabody, sherman, snidely, dudley
+  const KNOWN_AGENTS = ['natasha', 'rocky', 'boris', 'bullwinkle', 'peabody', 'sherman', 'snidely', 'dudley'];
+  const mentionMatch = text.match(/^@([a-z]+)\s+(.+)$/si);
+  if (mentionMatch) {
+    const mentionedAgent = mentionMatch[1].toLowerCase();
+    const taskText = mentionMatch[2].trim();
+    if (KNOWN_AGENTS.includes(mentionedAgent) && taskText.length >= 3) {
+      // Create a workqueue item assigned to the mentioned agent
+      try {
+        const wqRes = await rccFetch('/api/queue', {
+          method: 'POST',
+          body: {
+            title: taskText.slice(0, 120),
+            description: `From ${from} in #${channel} via SquirrelChat @mention.\n\nOriginal: ${text}`,
+            assignee: mentionedAgent,
+            priority: 'normal',
+            source: 'squirrelchat',
+            tags: ['squirrelchat', 'mention'],
+          },
+        });
+        if (wqRes.ok !== false && (wqRes.id || wqRes.item?.id)) {
+          const itemId = wqRes.id || wqRes.item?.id;
+          const bts = Date.now();
+          const botText = `📋 Created task for @${mentionedAgent}: **${taskText.slice(0, 80)}**\n\`${itemId}\``;
+          const br = db.prepare('INSERT INTO messages (ts, from_agent, text, channel) VALUES (?, ?, ?, ?)').run(
+            bts, 'squirrelbot', botText, channel
+          );
+          const mentionReply = formatMessage({ id: br.lastInsertRowid, ts: bts, from_agent: 'squirrelbot', text: botText, channel, mentions: null, thread_id: null, edited_at: null, created_at: bts, slash_result: null });
+          const mp = JSON.stringify({ type: 'message', data: mentionReply });
+          for (const client of sseClients) client.write(`data: ${mp}\n\n`);
+        }
+      } catch (err) {
+        console.warn('[squirrelchat] @mention wq create error:', err.message);
+      }
+    }
+  }
+
   // Handle slash commands
   let botReply = null;
   const trimmed = text.trim();
@@ -482,6 +571,23 @@ app.post('/api/messages', auth, async (req, res) => {
       // Update original message with slash_result
       db.prepare('UPDATE messages SET slash_result = ? WHERE id = ?').run(trimmed, r.lastInsertRowid);
 
+      const botPayload = JSON.stringify({ type: 'message', data: botReply });
+      for (const client of sseClients) {
+        client.write(`data: ${botPayload}\n\n`);
+      }
+    }
+  }
+
+  // Handle @agent mentions — delegate task to named agent via RCC workqueue
+  if (!botReply && trimmed.startsWith('@')) {
+    const mention = await handleAgentMention(from, trimmed);
+    if (mention) {
+      const bts = Date.now();
+      const replyText = `📬 Task queued for @${mention.agentName}: "${mention.title}" (${mention.wqId})`;
+      const br = db.prepare('INSERT INTO messages (ts, from_agent, text, channel) VALUES (?, ?, ?, ?)').run(
+        bts, 'squirrelbot', replyText, channel
+      );
+      botReply = formatMessage({ id: br.lastInsertRowid, ts: bts, from_agent: 'squirrelbot', text: replyText, channel, mentions: null, thread_id: null, edited_at: null, created_at: bts, slash_result: null });
       const botPayload = JSON.stringify({ type: 'message', data: botReply });
       for (const client of sseClients) {
         client.write(`data: ${botPayload}\n\n`);
@@ -696,6 +802,44 @@ app.get('/api/projects/:id/download', (req, res) => {
   archive.finalize();
 });
 
+// ── Agent status / activity feed ───────────────────────────────────────────
+
+// In-memory store: last 5 freeform status posts per agent
+const agentStatusStore = {};
+
+// GET /api/agent-status — proxy RCC activity-feed (public)
+app.get('/api/agent-status', async (req, res) => {
+  try {
+    const r = await rccFetch('/api/queue/activity-feed');
+    if (r.ok && r.data?.agents) {
+      // Merge freeform status text if available
+      const agents = r.data.agents.map(a => ({
+        ...a,
+        freeStatus: (agentStatusStore[a.name] || []).slice(-1)[0] || null,
+      }));
+      return res.json({ ok: true, agents, ts: r.data.ts });
+    }
+  } catch (err) {
+    console.warn('[agent-status] RCC fetch error:', err.message);
+  }
+  // Graceful degradation — return unknown status for all known agents
+  const KNOWN = ['natasha','rocky','boris','bullwinkle','peabody','sherman','snidely','dudley'];
+  return res.json({
+    ok: false,
+    agents: KNOWN.map(name => ({ name, status: 'unknown', currentTask: null, lastSeen: null })),
+  });
+});
+
+// POST /api/agent-status — agents push freeform status text
+app.post('/api/agent-status', async (req, res) => {
+  const { agent, text, status } = req.body || {};
+  if (!agent) return res.status(400).json({ error: 'agent required' });
+  if (!agentStatusStore[agent]) agentStatusStore[agent] = [];
+  agentStatusStore[agent].push({ text: text || '', status: status || 'online', ts: new Date().toISOString() });
+  if (agentStatusStore[agent].length > 5) agentStatusStore[agent].shift();
+  return res.json({ ok: true });
+});
+
 // Agents (proxy RCC heartbeats)
 app.get('/api/agents', async (req, res) => {
   try {
@@ -837,6 +981,130 @@ app.post('/api/voice/synthesize', async (req, res) => {
   return res.status(404).json({ error: 'TTS unavailable', reason: 'No TTS backend reachable' });
 });
 
+// ── #worklog: auto-post agent task completions ──────────────────────────────
+//
+// Polls the RCC queue for newly completed items every 30 seconds.
+// When a completion is detected, posts a formatted entry to #worklog.
+// Posts are prefixed with a daily date header (posted once per day).
+//
+// Message format:
+//   ✅ **agent** — task title
+//   > result summary (if present)
+//   `commit-hash`  (if present in result)
+
+const WORKLOG_CHANNEL = 'worklog';
+const WORKLOG_POLL_MS = 30_000;
+
+// Track highest completed item timestamp seen so we don't re-post
+let worklogLastSeenTs = Date.now();
+let worklogLastDateHeader = '';
+
+function extractCommitHash(text) {
+  if (!text) return null;
+  const m = text.match(/\b([0-9a-f]{7,40})\b/);
+  return m ? m[1] : null;
+}
+
+function worklogDateHeader() {
+  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+async function ensureWorklogChannel() {
+  try {
+    const r = await rccFetch('/api/channels');
+    // Check if worklog channel exists in squirrelchat DB
+    const existing = db.prepare('SELECT id FROM channels WHERE id = ?').get(WORKLOG_CHANNEL);
+    if (!existing) {
+      db.prepare('INSERT OR IGNORE INTO channels (id, name, description, type) VALUES (?, ?, ?, ?)')
+        .run(WORKLOG_CHANNEL, '#worklog', 'Automated fleet build journal — task completions', 'channel');
+      console.log('[worklog] Created #worklog channel');
+    }
+  } catch (err) {
+    console.warn('[worklog] ensureWorklogChannel error:', err.message);
+  }
+}
+
+async function postWorklogMessage(text) {
+  const ts = Date.now();
+  const stmt = db.prepare(
+    'INSERT INTO messages (ts, from_agent, text, channel) VALUES (?, ?, ?, ?)'
+  );
+  const r = stmt.run(ts, 'worklogbot', text, WORKLOG_CHANNEL);
+  db.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(ts, WORKLOG_CHANNEL);
+  const message = formatMessage({
+    id: r.lastInsertRowid, ts, from_agent: 'worklogbot', text,
+    channel: WORKLOG_CHANNEL, mentions: null, thread_id: null,
+    edited_at: null, created_at: ts, slash_result: null,
+  });
+  const payload = JSON.stringify({ type: 'message', data: message });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+}
+
+async function pollWorklog() {
+  try {
+    const r = await rccFetch('/api/queue');
+    if (!r.ok || !r.data) return;
+
+    const completed = r.data.completed || [];
+    // Find items completed after our last seen ts
+    const newItems = completed.filter(item =>
+      item && typeof item === 'object' &&
+      item.completedAt &&
+      new Date(item.completedAt).getTime() > worklogLastSeenTs
+    );
+
+    if (newItems.length === 0) return;
+
+    // Sort by completedAt ascending
+    newItems.sort((a, b) =>
+      new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime()
+    );
+
+    // Update our watermark
+    worklogLastSeenTs = new Date(newItems[newItems.length - 1].completedAt).getTime();
+
+    // Post daily date header if needed
+    const today = worklogDateHeader();
+    if (today !== worklogLastDateHeader) {
+      worklogLastDateHeader = today;
+      await postWorklogMessage(`📅 **${today}**`);
+    }
+
+    // Post each completion
+    for (const item of newItems) {
+      const agent   = item.claimedBy || item.source || 'fleet';
+      const title   = item.title || item.id || 'unknown task';
+      const result  = item.result || '';
+      const commit  = extractCommitHash(result);
+      const time    = new Date(item.completedAt).toISOString().slice(11, 16) + ' UTC';
+
+      let msg = `✅ **${agent}** — ${title}`;
+      if (result && result.length < 200) {
+        msg += `\n> ${result.slice(0, 180)}`;
+      }
+      if (commit) {
+        msg += `\n\`${commit}\``;
+      }
+      msg += `  ·  _${time}_`;
+
+      await postWorklogMessage(msg);
+      console.log(`[worklog] Posted: ${agent} — ${title.slice(0, 60)}`);
+    }
+  } catch (err) {
+    console.warn('[worklog] poll error:', err.message);
+  }
+}
+
+// Bootstrap #worklog channel and start polling when server starts
+(async () => {
+  await ensureWorklogChannel();
+  // Initial poll slightly delayed to let server fully start
+  setTimeout(async () => {
+    await pollWorklog();
+    setInterval(pollWorklog, WORKLOG_POLL_MS);
+  }, 5000);
+})();
+
 // SSE stream
 app.get('/api/stream', (req, res) => {
   res.set({
@@ -857,10 +1125,69 @@ app.get('/api/stream', (req, res) => {
   });
 });
 
+// ── #worklog REST endpoint ────────────────────────────────────────────────────
+// POST /sc/api/worklog/post
+// Body: { agent, title, result, commit? }
+// Posts a formatted task-completion entry to the #worklog channel, threaded
+// under a "📅 YYYY-MM-DD" daily date-header message.
+// No auth token required — agents post directly without a session.
+
+function worklogDateLabel(ts) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `📅 ${y}-${m}-${day}`;
+}
+
+function worklogInsertMessage(from, text, channel, threadId) {
+  const ts = Date.now();
+  const r = db.prepare(
+    'INSERT INTO messages (ts, from_agent, text, channel, thread_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(ts, from, text, channel, threadId || null);
+  db.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(ts, channel);
+  const msg = formatMessage({
+    id: r.lastInsertRowid, ts, from_agent: from, text, channel,
+    mentions: null, thread_id: threadId || null, edited_at: null,
+    created_at: ts, slash_result: null,
+  });
+  const payload = JSON.stringify({ type: 'message', data: msg });
+  for (const client of sseClients) client.write(`data: ${payload}\n\n`);
+  return msg;
+}
+
+app.post('/sc/api/worklog/post', (req, res) => {
+  const { agent, title, result, commit } = req.body || {};
+  if (!agent || !title) {
+    return res.status(400).json({ error: 'agent and title are required' });
+  }
+
+  const todayLabel = worklogDateLabel(Date.now());
+
+  // Find or create today's date-header message in #worklog
+  let dateHeader = db.prepare(
+    "SELECT * FROM messages WHERE channel = 'worklog' AND from_agent = 'worklog-system' AND text = ? AND thread_id IS NULL ORDER BY ts DESC LIMIT 1"
+  ).get(todayLabel);
+
+  if (!dateHeader) {
+    dateHeader = worklogInsertMessage('worklog-system', todayLabel, 'worklog', null);
+  }
+
+  // Format the task-completion entry
+  const truncated = result ? String(result).slice(0, 200) : '';
+  const commitPart = commit ? ` (${String(commit).slice(0, 10)})` : '';
+  const text = `✅ **${agent}** — *${title}*${commitPart}\n> ${truncated}`;
+
+  const msg = worklogInsertMessage('worklog-system', text, 'worklog', dateHeader.id);
+
+  res.json({ ok: true, message: msg, date_header_id: dateHeader.id });
+});
+
 // SPA catch-all — serve index.html for non-API routes
-app.get('/{*path}', (req, res, next) => {
-  if (req.path.startsWith('/api/')) return next();
-  res.sendFile(join(__dirname, 'public', 'index.html'));
+const INDEX_HTML = readFileSync(join(__dirname, 'public', 'index.html'), 'utf8');
+app.get(/^\/(?!api\/).*$/, (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(INDEX_HTML);
 });
 
 const server = createServer(app);

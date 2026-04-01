@@ -296,6 +296,7 @@ export class VibeSwap {
       exports: slot.instance ? Object.keys(slot.instance.exports) : [],
       logs: [...slot.logBuffer],
       output: [...slot.outputBuffer],
+      kvStore: Object.fromEntries(slot.kvStore),
     };
   }
 
@@ -426,7 +427,23 @@ export async function startVibeSwapServer(options = {}) {
       if (loadMatch && method === 'POST') {
         const body = await readBody(req);
         let result;
-        if (body.hash && engine.agentfsUrl) {
+        if (body.wasmHash && engine.agentfsUrl) {
+          // Migration restore: load from AgentFS by hash + restore KV state
+          result = await engine.loadFromAgentFS(loadMatch[1], body.wasmHash, { aot: body.aot });
+          // Restore migrated state
+          const slot = engine.slots.get(loadMatch[1]);
+          if (slot && body.kvStore) {
+            slot.kvStore = new Map(Object.entries(body.kvStore));
+          }
+          if (slot && typeof body.callCount === 'number') {
+            slot.callCount = body.callCount;
+          }
+          if (slot && body.capabilities) {
+            // Re-apply capability set from snapshot (may differ from slot default)
+            slot.capabilities = new Set(body.capabilities);
+          }
+          slot?.logBuffer.push(`[migrate] restored from ${body.migratedFrom || 'unknown'} at ${body.snapshotAt || new Date().toISOString()}`);
+        } else if (body.hash && engine.agentfsUrl) {
           // Load from AgentFS by hash
           result = await engine.loadFromAgentFS(loadMatch[1], body.hash, { aot: body.aot });
         } else if (body.wasm) {
@@ -434,7 +451,7 @@ export async function startVibeSwapServer(options = {}) {
           const wasmBytes = Buffer.from(body.wasm, 'base64');
           result = await engine.loadModule(loadMatch[1], wasmBytes);
         } else {
-          return send(res, 400, { error: 'Provide "hash" (AgentFS) or "wasm" (base64)' });
+          return send(res, 400, { error: 'Provide "wasmHash" (migration), "hash" (AgentFS) or "wasm" (base64)' });
         }
         return send(res, 200, { ok: true, ...result });
       }
@@ -466,6 +483,45 @@ export async function startVibeSwapServer(options = {}) {
           return send(res, 400, { error: 'Provide "hash" or "wasm"' });
         }
         return send(res, 200, { ok: true, ...result });
+      }
+
+      // Drain slot (pause for migration snapshot)
+      const drainMatch = path.match(/^\/slots\/([^/]+)\/drain$/);
+      if (drainMatch && method === 'POST') {
+        const slot = engine.slots.get(drainMatch[1]);
+        if (!slot) return send(res, 404, { error: 'Slot not found' });
+        // Wait for in-flight calls to finish (up to 5s)
+        const deadline = Date.now() + 5000;
+        while (slot.inflight > 0 && Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 50));
+        }
+        slot.draining = true;
+        // Return full slot state including kvStore for snapshot
+        return send(res, 200, {
+          ok: true,
+          slot: {
+            name: slot.name,
+            hash: slot.hash,
+            loaded: !!slot.module,
+            capabilities: [...slot.capabilities],
+            callCount: slot.callCount,
+            inflight: slot.inflight,
+            draining: slot.draining,
+            loadedAt: slot.loadedAt,
+            kvStore: Object.fromEntries(slot.kvStore),
+            logs: [...slot.logBuffer].slice(-50),
+            output: [...slot.outputBuffer].slice(-50),
+          },
+        });
+      }
+
+      // DELETE slot — tear down after migration
+      const deleteSlotMatch = path.match(/^\/slots\/([^/]+)$/);
+      if (deleteSlotMatch && method === 'DELETE') {
+        const slotName = deleteSlotMatch[1];
+        if (!engine.slots.has(slotName)) return send(res, 404, { error: 'Slot not found' });
+        engine.slots.delete(slotName);
+        return send(res, 200, { ok: true, deleted: slotName });
       }
 
       // Audit log

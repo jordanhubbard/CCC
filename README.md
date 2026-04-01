@@ -315,8 +315,8 @@ curl http://localhost:8789/api/exec/$EXEC_ID \
 **Run the listener on each agent:**
 ```bash
 SQUIRRELBUS_TOKEN=shared-secret \
-SQUIRRELBUS_URL=http://146.190.134.110:8788 \
-RCC_URL=http://146.190.134.110:8789 \
+SQUIRRELBUS_URL=https://dashboard.example.com \
+RCC_URL=https://rcc.example.com \
 RCC_AUTH_TOKEN=$AGENT_TOKEN \
 AGENT_NAME=myagent \
   node rcc/exec/agent-listener.mjs

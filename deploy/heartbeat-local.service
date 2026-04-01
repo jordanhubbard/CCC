@@ -1,0 +1,17 @@
+[Unit]
+Description=RCC Heartbeat Local Buffer (sparky offline resilience)
+After=network.target
+
+[Service]
+Type=simple
+User=jkh
+WorkingDirectory=/home/jkh/Src/rockyandfriends/rcc/heartbeat-local
+ExecStart=/usr/bin/node server.mjs
+Restart=always
+RestartSec=5
+Environment=HB_LOCAL_PORT=8790
+Environment=RCC_URL=http://146.190.134.110:8789
+EnvironmentFile=-/home/jkh/.rcc/env
+
+[Install]
+WantedBy=multi-user.target

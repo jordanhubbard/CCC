@@ -89,6 +89,8 @@ const COLLECTION_CONFIGS = {
       { name: 'ts',      data_type: DataType.VarChar, max_length: 32 },
     ],
   },
+  // Channel-scoped memory with platform+workspace+channel filtering
+  // NOT for cross-agent queries — use rcc_memory for those.
   // Sparky-local: uses 768-dim nomic-embed-text via ollama for zero-latency GPU ingest.
   // High-volume writes: daily memory files, SquirrelBus messages, queue items.
   // NOT for cross-agent queries — use rcc_memory for those.
@@ -101,6 +103,23 @@ const COLLECTION_CONFIGS = {
       { name: 'content', data_type: DataType.VarChar, max_length: 4096 },
       { name: 'source',  data_type: DataType.VarChar, max_length: 256 },
       { name: 'ts',      data_type: DataType.VarChar, max_length: 32 },
+    ],
+  },
+  // Channel-scoped memory: platform/workspace/channel/user/conv filtered recall
+  rcc_channel_memory: {
+    description: 'Channel-scoped agent memory — filtered by platform+workspace+channel for contextual recall',
+    fields: [
+      { name: 'id',           data_type: DataType.VarChar, is_primary_key: true, max_length: 128 },
+      { name: 'vector',       data_type: DataType.FloatVector, dim: EMBED_DIM },
+      { name: 'agent',        data_type: DataType.VarChar, max_length: 32 },
+      { name: 'content',      data_type: DataType.VarChar, max_length: 4096 },
+      { name: 'source',       data_type: DataType.VarChar, max_length: 256 },
+      { name: 'platform',     data_type: DataType.VarChar, max_length: 32 },
+      { name: 'workspace_id', data_type: DataType.VarChar, max_length: 128 },
+      { name: 'channel_id',   data_type: DataType.VarChar, max_length: 128 },
+      { name: 'user_id',      data_type: DataType.VarChar, max_length: 128 },
+      { name: 'conv_id',      data_type: DataType.VarChar, max_length: 128 },
+      { name: 'ts',           data_type: DataType.VarChar, max_length: 32 },
     ],
   },
 };
@@ -576,3 +595,86 @@ export async function searchAll(query, { k = 10 } = {}) {
 
 // ── Aliases for rcc/api/index.mjs imports ──────────────────────────────────
 export { vectorUpsert as upsert, vectorSearch as search, searchAll as vectorSearchAll };
+
+
+// ── Channel-scoped memory ──────────────────────────────────────────────────
+
+/**
+ * Ingest a memory snippet scoped to a platform/workspace/channel/user/conversation.
+ * Used for contextual recall filtered by chat scope.
+ *
+ * @param {string} id       - Unique id for this memory entry
+ * @param {string} content  - Text content to embed and store
+ * @param {object} scope    - {platform, workspace_id, channel_id, user_id, conv_id, agent, source}
+ */
+export async function channelMemoryIngest(id, content, scope = {}) {
+  const {
+    platform = '', workspace_id = '', channel_id = '',
+    user_id = '', conv_id = '', agent = AGENT_NAME, source = 'ingest',
+  } = scope;
+  await vectorUpsert('rcc_channel_memory', id, content, {
+    agent, content: content.slice(0, 4096), source: source.slice(0, 256),
+    platform: platform.slice(0, 32),
+    workspace_id: workspace_id.slice(0, 128),
+    channel_id: channel_id.slice(0, 128),
+    user_id: user_id.slice(0, 128),
+    conv_id: conv_id.slice(0, 128),
+    ts: new Date().toISOString().slice(0, 32),
+  });
+}
+
+/**
+ * Two-phase channel-scoped memory recall:
+ *   Phase 1: Read ~/.openclaw/memory/*.md as recency cache (file-based, fast)
+ *   Phase 2: Milvus vector search on rcc_channel_memory filtered by scope
+ *
+ * @param {string} query    - Semantic search query
+ * @param {object} scope    - {platform, workspace_id, channel_id, user_id}
+ * @param {object} opts     - {k: number (default 8), recencyLines: number (default 200)}
+ * @returns {object}        - {recency: string[], semantic: object[]}
+ */
+export async function channelMemoryRecall(query, scope = {}, opts = {}) {
+  const { platform = '', workspace_id = '', channel_id = '' } = scope;
+  const { k = 8, recencyLines = 200 } = opts;
+
+  // Phase 1: recency cache from ~/.openclaw/memory/*.md
+  let recency = [];
+  try {
+    const { readdir, readFile } = await import('fs/promises');
+    const { join, homedir } = await import('path');
+    const { default: os } = await import('os');
+    const memDir = join(os.homedir(), '.openclaw', 'workspace', 'memory');
+    const files = (await readdir(memDir).catch(() => []))
+      .filter(f => f.endsWith('.md'))
+      .sort()
+      .reverse()
+      .slice(0, 5); // last 5 daily files
+    const lines = [];
+    for (const f of files) {
+      const text = await readFile(join(memDir, f), 'utf8').catch(() => '');
+      lines.push(...text.split('\n'));
+      if (lines.length >= recencyLines) break;
+    }
+    // Simple keyword filter for relevance
+    const qWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    recency = lines
+      .filter(l => l.trim().length > 20)
+      .filter(l => qWords.some(w => l.toLowerCase().includes(w)))
+      .slice(0, 20);
+  } catch (_) { /* memory dir not available */ }
+
+  // Phase 2: Milvus vector search filtered by scope
+  let semantic = [];
+  try {
+    const filters = [];
+    if (platform)     filters.push(`platform == "${platform.replace(/"/g, '')}"`);
+    if (workspace_id) filters.push(`workspace_id == "${workspace_id.replace(/"/g, '')}"`);
+    if (channel_id)   filters.push(`channel_id == "${channel_id.replace(/"/g, '')}"`);
+
+    const filter = filters.length ? filters.join(' && ') : undefined;
+    semantic = await vectorSearch('rcc_channel_memory', query, k, filter);
+  } catch (_) { /* Milvus may not have data yet */ }
+
+  return { recency, semantic };
+}
+

@@ -50,6 +50,10 @@ web-sys = { version = "0.3", features = [
     "MediaStreamConstraints",
     "MediaStreamTrack",
     "Navigator",
+    "History",
+    "Location",
+    "Url",
+    "PopStateEvent",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

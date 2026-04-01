@@ -11,7 +11,7 @@
 #
 # Env vars:
 #   MINIO_ENDPOINT   default: http://100.89.199.14:9000
-#   MINIO_KEY        default: rocky2197fb96dde4618aa17f
+#   MINIO_KEY        default: <MINIO_ACCESS_KEY>
 #   MINIO_SECRET     default: (see script)
 #   MINIO_BUCKET     default: agents
 #   RELEASE          set to 1 for --release build (default: dev)
@@ -23,8 +23,8 @@ DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKSPACE_DIR="$(cd "$DASHBOARD_DIR/../.." && pwd)"
 
 MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://100.89.199.14:9000}"
-MINIO_KEY="${MINIO_KEY:-rocky2197fb96dde4618aa17f}"
-MINIO_SECRET="${MINIO_SECRET:-e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1}"
+MINIO_KEY="${MINIO_KEY:-<MINIO_ACCESS_KEY>}"
+MINIO_SECRET="${MINIO_SECRET:-<MINIO_SECRET_KEY>}"
 MINIO_BUCKET="${MINIO_BUCKET:-agents}"
 RELEASE="${RELEASE:-0}"
 

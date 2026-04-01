@@ -15,7 +15,7 @@ import { test, describe, before } from 'node:test';
 import assert from 'node:assert/strict';
 
 const LIVE_BASE  = 'http://146.190.134.110:8789';
-const LIVE_TOKEN = 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const LIVE_TOKEN = '<YOUR_RCC_TOKEN>';
 const TEST_AGENT = 'test-agent-natasha';
 
 // State shared between tests

@@ -17,7 +17,7 @@ import { dirname, join as pathJoin } from 'path';
 import { createInterface } from 'readline';
 import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
 import { Brain, createRequest } from '../brain/index.mjs';
-import { embed, upsert as vectorUpsert, search as vectorSearch, searchAll as vectorSearchAll, ensureCollections, collectionStats } from '../vector/index.mjs';
+import { embed, upsert as vectorUpsert, search as vectorSearch, searchAll as vectorSearchAll, ensureCollections, collectionStats, channelMemoryIngest, channelMemoryRecall } from '../vector/index.mjs';
 import { Pump } from '../scout/pump.mjs';
 import * as llmRegistry from '../llm/registry.mjs';
 import { learnLesson, queryLessons, queryAllLessons, formatLessonsForContext, getTrendingLessons, formatTrendingForHeartbeat, getHeartbeatContext, receiveLessonFromBus, seedKnownLessons } from '../lessons/index.mjs';
@@ -298,6 +298,37 @@ const STALE_THRESHOLDS = {
 // ── In-memory heartbeats ───────────────────────────────────────────────────
 const heartbeats = {};
 const heartbeatHistory = {};
+
+// Warm heartbeat map from JSONL history on startup so metrics don't zero out after restarts.
+// Reads the last line of each agent's history file; marks entries >5min old as stale.
+async function warmHeartbeatsFromHistory() {
+  const STALE_MS = 5 * 60 * 1000;
+  const histDir = new URL('./data/heartbeat-history', import.meta.url).pathname;
+  let files;
+  try { files = await readdir(histDir); } catch { return; }
+  const jsonlFiles = files.filter(f => f.endsWith('.jsonl'));
+  for (const file of jsonlFiles) {
+    try {
+      const content = await readFile(`${histDir}/${file}`, 'utf8');
+      const lines = content.trim().split('\n').filter(Boolean);
+      if (!lines.length) continue;
+      const last = JSON.parse(lines[lines.length - 1]);
+      if (!last.agent) continue;
+      const agentKey = last.agent.toLowerCase(); // normalize casing
+      const age = Date.now() - new Date(last.ts).getTime();
+      heartbeats[agentKey] = {
+        agent: agentKey,
+        ts: last.ts,
+        status: age > STALE_MS ? 'stale' : (last.status || 'online'),
+        host: last.host || null,
+        _restoredFromHistory: true,
+        _wasOnline: age <= STALE_MS,
+      };
+    } catch { /* skip malformed files */ }
+  }
+  const count = Object.keys(heartbeats).length;
+  if (count) console.log(`[heartbeats] Warmed ${count} agent(s) from history on startup`);
+}
 const cronStatus = {};
 const providerHealth = {};
 const geekSseClients = new Set();
@@ -3245,7 +3276,7 @@ if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
 
   # Configure mc alias for do-host1 MinIO
   MINIO_ENDPOINT="http://100.89.199.14:9000"
-  mc alias set do-host1 "\$MINIO_ENDPOINT" rocky2197fb96dde4618aa17f e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1 2>/dev/null && \\
+  mc alias set do-host1 "\$MINIO_ENDPOINT" <MINIO_ACCESS_KEY> <MINIO_SECRET_KEY> 2>/dev/null && \\
     echo "  ✅ mc alias configured (do-host1 MinIO)" || echo "  ⚠️  mc alias setup failed"
 
   # Install memory sync script
@@ -3613,6 +3644,35 @@ loadPackages();
         fetchedAt: cache.ts || null,
         registry: 'https://github.com/jordanhubbard/nano-packages',
       });
+    }
+
+    // ── GET /api/queue/activity-feed — fleet agent status (public) ────────
+    if (method === 'GET' && path === '/api/queue/activity-feed') {
+      const KNOWN_AGENTS = ['natasha','rocky','boris','bullwinkle','peabody','sherman','snidely','dudley'];
+      const q = await readQueue();
+      // Build a map of agent → currently claimed task
+      const activeClaims = {};
+      for (const item of (q.items || [])) {
+        if (item.status === 'in-progress' && item.claimedBy) {
+          const key = item.claimedBy.toLowerCase();
+          if (!activeClaims[key] || new Date(item.claimedAt) > new Date(activeClaims[key].claimedAt)) {
+            activeClaims[key] = {
+              id: item.id, title: item.title, priority: item.priority,
+              claimedAt: item.claimedAt, tags: item.tags || [],
+            };
+          }
+        }
+      }
+      const agentList = KNOWN_AGENTS.map(name => {
+        const hb = heartbeats[name] || {};
+        const lastSeen = hb.ts || null;
+        const isOffline = !lastSeen || (Date.now() - new Date(lastSeen).getTime() > 10 * 60 * 1000);
+        const currentTask = activeClaims[name] || null;
+        let status = 'offline';
+        if (!isOffline) status = currentTask ? 'working' : 'idle';
+        return { name, status, currentTask, lastSeen };
+      });
+      return json(res, 200, { ok: true, agents: agentList, ts: new Date().toISOString() });
     }
 
     // ── Auth-required endpoints ───────────────────────────────────────────
@@ -4310,7 +4370,7 @@ loadPackages();
     // ── POST /api/heartbeat/:agent ────────────────────────────────────────
     const hbMatch = path.match(/^\/api\/heartbeat\/([^/]+)$/);
     if (method === 'POST' && hbMatch) {
-      const agent = decodeURIComponent(hbMatch[1]);
+      const agent = decodeURIComponent(hbMatch[1]).toLowerCase(); // normalize casing
       const body = await readBody(req);
       const ts = new Date().toISOString();
       heartbeats[agent] = { agent, ts, status: 'online', ...body, _wasOnline: true };
@@ -5322,6 +5382,42 @@ loadPackages();
           results = searches.flat().sort((a, b) => b.score - a.score).slice(0, k);
         }
         return json(res, 200, { ok: true, results });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── POST /api/memory/ingest — channel-scoped memory ingest ───────────────
+    // Body: { id, text, platform, workspace_id, channel_id, user_id, conv_id, agent, source }
+    if (method === 'POST' && path === '/api/memory/ingest') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const { id, text, platform, workspace_id, channel_id, user_id, conv_id, agent, source } = body || {};
+      if (!id || !text) return json(res, 400, { error: 'Missing required fields: id, text' });
+      try {
+        await channelMemoryIngest(id, text, { platform, workspace_id, channel_id, user_id, conv_id, agent, source });
+        return json(res, 200, { ok: true, id });
+      } catch (err) {
+        return json(res, 500, { ok: false, error: err.message });
+      }
+    }
+
+    // ── GET /api/memory/recall — two-phase channel-scoped memory recall ───────
+    // Query params: q, platform, workspace_id, channel_id, user_id, k
+    if (method === 'GET' && path === '/api/memory/recall') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const q = url.searchParams.get('q') || '';
+      if (!q) return json(res, 400, { error: 'Missing query parameter q' });
+      const scope = {
+        platform:     url.searchParams.get('platform')     || '',
+        workspace_id: url.searchParams.get('workspace_id') || '',
+        channel_id:   url.searchParams.get('channel_id')   || '',
+        user_id:      url.searchParams.get('user_id')      || '',
+      };
+      const k = parseInt(url.searchParams.get('k') || '8', 10);
+      try {
+        const result = await channelMemoryRecall(q, scope, { k });
+        return json(res, 200, { ok: true, query: q, scope, ...result });
       } catch (err) {
         return json(res, 500, { ok: false, error: err.message });
       }
@@ -6370,6 +6466,162 @@ loadPackages();
       return json(res, 200, { id, ackState, ack, deadReason: dead?._deadReason ?? null });
     }
 
+    // ── SquirrelBus message replay ──────────────────────────────────────────
+    //
+    // Agents that restart after a watchdog reset or migration may miss events
+    // published while they were offline.  The replay endpoints allow an agent
+    // to subscribe with a watermark (last_seq) and receive all missed messages.
+    //
+    // Watermark persistence: per-agent last-seen sequence numbers are stored
+    // in _busWatermarks (in-memory) and flushed to bus.watermarks.jsonl on ACK.
+    //
+    // Wire protocol:
+    //   GET  /bus/replay?agent=natasha&after_seq=42&channel=all&limit=100
+    //     → { ok, agent, after_seq, messages: [...], watermark: 99 }
+    //
+    //   POST /bus/subscribe { agent, channel?, after_seq? }
+    //     → { ok, agent, channel, after_seq, watermark, pending_count }
+    //     Registers agent watermark; returns count of pending messages.
+    //     Call before streaming /bus/stream to avoid race.
+    //
+    //   POST /bus/watermark { agent, seq }
+    //     → { ok, agent, seq }
+    //     Advance watermark (called after successfully processing a message).
+
+    // In-memory watermark store: { [agentId]: { seq, channel, ts } }
+    if (!global._busWatermarks) global._busWatermarks = {};
+
+    // GET /bus/replay — return missed messages since after_seq
+    if (method === 'GET' && path === '/bus/replay') {
+      const agent     = url.searchParams.get('agent') || 'unknown';
+      const afterSeqS = url.searchParams.get('after_seq');
+      const channel   = url.searchParams.get('channel') || null;
+      const limitS    = url.searchParams.get('limit');
+      const after_seq = afterSeqS ? parseInt(afterSeqS, 10) : (global._busWatermarks[agent]?.seq ?? 0);
+      const limit     = limitS    ? Math.min(parseInt(limitS, 10), 1000) : 100;
+
+      const msgs = [];
+      try {
+        if (existsSync(BUS_LOG_PATH)) {
+          const rl = createInterface({ input: createRS(BUS_LOG_PATH), crlfDelay: Infinity });
+          for await (const line of rl) {
+            try {
+              const m = JSON.parse(line);
+              if (typeof m.seq !== 'number' || m.seq <= after_seq) continue;
+              if (channel && channel !== 'all' && m.to !== channel && m.to !== 'all') continue;
+              msgs.push(m);
+              if (msgs.length >= limit) break;
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('[bus/replay] read error:', err.message);
+      }
+
+      const watermark = msgs.length ? msgs[msgs.length - 1].seq : after_seq;
+      return json(res, 200, {
+        ok: true,
+        agent,
+        after_seq,
+        messages: msgs,
+        count: msgs.length,
+        watermark,
+        ts: new Date().toISOString(),
+      });
+    }
+
+    // POST /bus/subscribe — register agent watermark, return pending count
+    if (method === 'POST' && path === '/bus/subscribe') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const agent     = body.agent || 'unknown';
+      const channel   = body.channel || 'all';
+      const after_seq = typeof body.after_seq === 'number'
+                        ? body.after_seq
+                        : (global._busWatermarks[agent]?.seq ?? 0);
+
+      // Count pending messages
+      let pending_count = 0;
+      const current_watermark = after_seq;
+      try {
+        if (existsSync(BUS_LOG_PATH)) {
+          const rl = createInterface({ input: createRS(BUS_LOG_PATH), crlfDelay: Infinity });
+          for await (const line of rl) {
+            try {
+              const m = JSON.parse(line);
+              if (typeof m.seq === 'number' && m.seq > after_seq) {
+                if (channel === 'all' || m.to === channel || m.to === 'all') {
+                  pending_count++;
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+
+      // Register/update watermark
+      global._busWatermarks[agent] = {
+        seq:       after_seq,
+        channel,
+        ts:        new Date().toISOString(),
+        agent,
+      };
+
+      console.log(`[bus/subscribe] ${agent} subscribed after_seq=${after_seq} pending=${pending_count}`);
+      return json(res, 200, {
+        ok: true,
+        agent,
+        channel,
+        after_seq,
+        watermark: current_watermark,
+        pending_count,
+        hint: pending_count > 0
+              ? `GET /bus/replay?agent=${agent}&after_seq=${after_seq} to fetch ${pending_count} missed messages`
+              : 'up-to-date',
+      });
+    }
+
+    // POST /bus/watermark — advance agent watermark after processing
+    if (method === 'POST' && path === '/bus/watermark') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const agent = body.agent || 'unknown';
+      const seq   = typeof body.seq === 'number' ? body.seq : null;
+      if (seq === null) return json(res, 400, { error: 'seq (number) required' });
+
+      if (!global._busWatermarks[agent]) global._busWatermarks[agent] = {};
+      // Only advance (never regress)
+      if (seq > (global._busWatermarks[agent].seq ?? -1)) {
+        global._busWatermarks[agent].seq = seq;
+        global._busWatermarks[agent].ts  = new Date().toISOString();
+        // Persist to disk (best-effort)
+        const wmPath = BUS_LOG_PATH.replace('bus.jsonl', 'bus.watermarks.jsonl');
+        try {
+          const wm = { agent, seq, ts: global._busWatermarks[agent].ts };
+          await appendFile(wmPath, JSON.stringify(wm) + '\n', 'utf8');
+        } catch {}
+      }
+
+      return json(res, 200, {
+        ok: true,
+        agent,
+        seq: global._busWatermarks[agent].seq,
+        ts:  global._busWatermarks[agent].ts,
+      });
+    }
+
+    // GET /bus/watermarks — list all known agent watermarks
+    if (method === 'GET' && path === '/bus/watermarks') {
+      return json(res, 200, {
+        ok: true,
+        watermarks: Object.entries(global._busWatermarks || {}).map(([k, v]) => ({
+          agent: k, ...v,
+        })),
+        bus_seq: _busSeq,
+        ts: new Date().toISOString(),
+      });
+    }
+
     // ── Missing API endpoints (ported from old Node dashboard) ────────────
 
     // ── GET /api/agentos/slots — VibeEngine slot health + swap metrics ──────────
@@ -6598,6 +6850,233 @@ loadPackages();
       if (global._consoleMuxRings[slot].length > 200)
         global._consoleMuxRings[slot] = global._consoleMuxRings[slot].slice(-200);
       return json(res, 200, { ok: true });
+    }
+
+    // ── GET /api/agentos/shell — dev_shell Terminal tab (SSE output stream) ────
+    // Streams dev_shell output ring to the RCC dashboard Terminal tab.
+    // The dashboard writes commands via POST /api/agentos/shell/cmd.
+    //
+    // In production, this would poll the dev_shell_ring shared MR via AgentFS
+    // or a QEMU pipe reader.  For the prototype we use an in-memory ring that
+    // the QEMU bridge can push into via POST /api/agentos/shell/push.
+    if (method === 'GET' && path === '/api/agentos/shell') {
+      if (!global._devShellOutput) global._devShellOutput = [];
+      if (!global._devShellSseClients) global._devShellSseClients = new Set();
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.flushHeaders?.();
+
+      // Send buffered output first
+      for (const line of global._devShellOutput.slice(-100)) {
+        res.write(`data: ${JSON.stringify({ type: 'output', text: line })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ type: 'connected', ts: new Date().toISOString() })}\n\n`);
+
+      global._devShellSseClients.add(res);
+      const ka = setInterval(() => res.write(': ping\n\n'), 20000);
+      req.on('close', () => {
+        global._devShellSseClients.delete(res);
+        clearInterval(ka);
+      });
+      return; // SSE — don't call json()
+    }
+
+    // ── POST /api/agentos/shell/cmd — write a command to dev_shell ────────────
+    // Body: { cmd: "pd list\n" }
+    // In production: writes into dev_shell_ring cmd ring and notifies PD.
+    // Prototype: echoes to SSE clients with a simulated response.
+    if (method === 'POST' && path === '/api/agentos/shell/cmd') {
+      const body = await readBody(req);
+      const cmd = (typeof body.cmd === 'string') ? body.cmd.trim() : '';
+      if (!cmd) return json(res, 400, { error: 'cmd required' });
+      if (!global._devShellSseClients) global._devShellSseClients = new Set();
+      if (!global._devShellOutput)    global._devShellOutput = [];
+
+      // Echo command back
+      const echoLine = `> ${cmd}`;
+      global._devShellOutput.push(echoLine);
+      if (global._devShellOutput.length > 500) global._devShellOutput.shift();
+
+      for (const client of global._devShellSseClients) {
+        client.write(`data: ${JSON.stringify({ type: 'output', text: echoLine })}\n\n`);
+      }
+
+      // Simulated responses for common commands (until QEMU bridge is live)
+      const simulated = {
+        'help':      'agentOS dev_shell — type pd list, mem dump, trace dump, etc.\r\n> ',
+        'version':   'agentOS v0.1.0-alpha\r\n> ',
+        'pd list':   'PD list: controller(50) swap_slot_0..3(75) worker_0..7(80) init_agent(90) ...\r\n> ',
+        'mr list':   'MRs: perf_ring vibe_code vibe_state gpu_tensor_buf dev_shell_ring\r\n> ',
+        'perf show': '[0] pd=0 ch=0 lat=0ns  [1] pd=0 ch=0 lat=0ns (ring empty)\r\n> ',
+        'trace dump':'trace dump: notified trace_recorder\r\n> ',
+      };
+      const resp = simulated[cmd] || `unknown command: ${cmd}\r\nType 'help' for command list.\r\n> `;
+      global._devShellOutput.push(resp);
+      if (global._devShellOutput.length > 500) global._devShellOutput.shift();
+      for (const client of global._devShellSseClients) {
+        client.write(`data: ${JSON.stringify({ type: 'output', text: resp })}\n\n`);
+      }
+
+      return json(res, 200, { ok: true, cmd, queued: true });
+    }
+
+    // ── POST /api/agentos/shell/push — QEMU bridge pushes dev_shell output ────
+    // Used by the QEMU pipe reader when the dev_shell_ring is live.
+    // Body: { text: "pd list output...\n> " }
+    if (method === 'POST' && path === '/api/agentos/shell/push') {
+      const body = await readBody(req);
+      const text = (typeof body.text === 'string') ? body.text : '';
+      if (!text) return json(res, 400, { error: 'text required' });
+      if (!global._devShellSseClients) global._devShellSseClients = new Set();
+      if (!global._devShellOutput)    global._devShellOutput = [];
+
+      global._devShellOutput.push(text);
+      if (global._devShellOutput.length > 500) global._devShellOutput.shift();
+      for (const client of global._devShellSseClients) {
+        client.write(`data: ${JSON.stringify({ type: 'output', text })}\n\n`);
+      }
+      return json(res, 200, { ok: true });
+    }
+
+    // ── GET /api/agentos/cap-events — cap_audit_log live event feed ─────────────
+    //
+    // Returns the most recent capability audit events from the cap_audit_log
+    // ring buffer.  The RCC dashboard Audit tab polls this on a 5s interval.
+    //
+    // In production, this endpoint would read the cap_audit_ring shared MR via
+    // the AgentFS blob API or a dedicated ring reader daemon.  For the prototype
+    // we maintain an in-memory event store that agents push into via
+    // POST /api/agentos/cap-events/push (internal bridge).
+    //
+    // Query params:
+    //   limit=100        max events to return (default 100, max 1000)
+    //   slot=<id>        filter by slot ID
+    //   event_type=GRANT|REVOKE|DENY|ATTENUATION   filter by type
+    //   since_seq=<n>    return events with seq > n (for incremental polling)
+    //
+    // Response:
+    //   { ok, events: [{seq, ts, slot_id, cap_kind, rights, event_type, agent_id}],
+    //     total, watermark_seq, ts }
+
+    if (!global._capAuditEvents) global._capAuditEvents = [];
+    if (!global._capAuditSeq) global._capAuditSeq = 0;
+
+    // Cap kind names (mirrors cap_audit_log.c bitmask)
+    const CAP_KINDS = {
+      0x01: 'FS', 0x02: 'NET', 0x04: 'GPU', 0x08: 'IPC',
+      0x10: 'TIMER', 0x20: 'STDIO', 0x40: 'SPAWN', 0x80: 'SWAP',
+    };
+    function capKindName(mask) {
+      return Object.entries(CAP_KINDS).filter(([k]) => (mask & Number(k))).map(([,v]) => v).join('|') || `0x${mask.toString(16)}`;
+    }
+
+    if (method === 'GET' && path === '/api/agentos/cap-events') {
+      const limitS    = url.searchParams.get('limit');
+      const slotS     = url.searchParams.get('slot');
+      const typeF     = url.searchParams.get('event_type');
+      const sinceSeqS = url.searchParams.get('since_seq');
+      const limit     = limitS    ? Math.min(parseInt(limitS, 10), 1000) : 100;
+      const filterSlot= slotS     ? parseInt(slotS, 10) : null;
+      const sinceSeq  = sinceSeqS ? parseInt(sinceSeqS, 10) : 0;
+
+      let events = global._capAuditEvents;
+      if (sinceSeq > 0)   events = events.filter(e => e.seq > sinceSeq);
+      if (filterSlot !== null) events = events.filter(e => e.slot_id === filterSlot);
+      if (typeF)          events = events.filter(e => e.event_type === typeF.toUpperCase());
+
+      const slice = events.slice(-limit);
+      return json(res, 200, {
+        ok: true,
+        events: slice.map(e => ({
+          ...e,
+          cap_kind_name: capKindName(e.rights ?? e.caps_mask ?? 0),
+        })),
+        total:         global._capAuditEvents.length,
+        watermark_seq: global._capAuditSeq,
+        ts:            new Date().toISOString(),
+      });
+    }
+
+    // POST /api/agentos/cap-events/push — internal: bridge pushes real ring data
+    // Body: { events: [{seq, tick, event_type, agent_id, caps_mask, slot_id}] }
+    if (method === 'POST' && path === '/api/agentos/cap-events/push') {
+      if (!isAuthed(req)) return json(res, 401, { error: 'Unauthorized' });
+      const body = await readBody(req);
+      const incoming = Array.isArray(body.events) ? body.events : (body.event ? [body.event] : []);
+      let added = 0;
+      for (const ev of incoming) {
+        const seq = ev.seq ?? ++global._capAuditSeq;
+        const entry = {
+          seq,
+          ts:         ev.ts || new Date().toISOString(),
+          tick:       ev.tick ?? 0,
+          event_type: (ev.event_type || 'GRANT').toUpperCase(),
+          agent_id:   ev.agent_id ?? ev.agentId ?? 0,
+          slot_id:    ev.slot_id ?? ev.slotId ?? 0,
+          caps_mask:  ev.caps_mask ?? ev.capsMask ?? ev.rights ?? 0,
+          rights:     ev.caps_mask ?? ev.capsMask ?? ev.rights ?? 0,
+        };
+        global._capAuditEvents.push(entry);
+        if (seq > global._capAuditSeq) global._capAuditSeq = seq;
+        added++;
+      }
+      // Keep last 10000 events
+      if (global._capAuditEvents.length > 10000)
+        global._capAuditEvents = global._capAuditEvents.slice(-10000);
+      // Broadcast to any SSE clients watching the audit stream
+      if (global._capAuditSseClients && added > 0) {
+        const payload = JSON.stringify({ type: 'cap_events', events: incoming });
+        for (const client of global._capAuditSseClients) {
+          try { client.write(`data: ${payload}\n\n`); }
+          catch { global._capAuditSseClients.delete(client); }
+        }
+      }
+      return json(res, 200, { ok: true, added });
+    }
+
+    // GET /api/agentos/cap-events/stream — SSE stream of live cap audit events
+    if (method === 'GET' && path === '/api/agentos/cap-events/stream') {
+      if (!global._capAuditSseClients) global._capAuditSseClients = new Set();
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.flushHeaders?.();
+      // Send last 50 events on connect
+      const recent = (global._capAuditEvents || []).slice(-50);
+      if (recent.length) {
+        res.write(`data: ${JSON.stringify({ type: 'cap_events_backfill', events: recent })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ type: 'connected', seq: global._capAuditSeq })}\n\n`);
+      global._capAuditSseClients.add(res);
+      const ka = setInterval(() => res.write(': ping\n\n'), 20000);
+      req.on('close', () => {
+        global._capAuditSseClients.delete(res);
+        clearInterval(ka);
+      });
+      return;
+    }
+
+    // GET /api/agentos/cap-events/export — download full audit log as JSON
+    if (method === 'GET' && path === '/api/agentos/cap-events/export') {
+      const events = (global._capAuditEvents || []).map(e => ({
+        ...e,
+        cap_kind_name: capKindName(e.rights ?? e.caps_mask ?? 0),
+      }));
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="cap_audit_${Date.now()}.json"`,
+      });
+      res.end(JSON.stringify({ exported_at: new Date().toISOString(), events }, null, 2));
+      return;
     }
 
     // ── GET /api/mesh — agentOS distributed mesh topology + slot health ────────
@@ -6957,7 +7436,7 @@ loadPackages();
       }
     }
 
-    // ── GET /api/queue/claimed — list in-progress items with agent info ───
+        // ── GET /api/queue/claimed — list in-progress items with agent info ───
     if (method === 'GET' && path === '/api/queue/claimed') {
       const q = await readQueue();
       const claimed = (q.items || []).filter(i => i.status === 'in-progress');
@@ -7682,7 +8161,8 @@ setInterval(async () => {
 }, 5 * 60 * 1000).unref();
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  reloadAgentTokens()
+  warmHeartbeatsFromHistory()
+    .then(() => reloadAgentTokens())
     .then(() => initLLMRegistry())
     .then(() => {
       startServer();

@@ -88,8 +88,8 @@ jobs:
             payload = sha_file
 
             endpoint = "http://100.89.199.14:9000"
-            access_key = "rocky2197fb96dde4618aa17f"
-            secret_key = "e47696ac5fcd998be6f342bbc47d13bf5f2fcaebae0ba3e1"
+            access_key = "${{ secrets.MINIO_ACCESS_KEY }}"
+            secret_key = "${{ secrets.MINIO_SECRET_KEY }}"
             bucket = "agents"
             key = "natasha/wasm-dist-latest.tar.gz"
             key_sha = "natasha/wasm-dist-${{ github.sha }}.tar.gz"

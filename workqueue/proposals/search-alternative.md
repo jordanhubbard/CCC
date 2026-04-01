@@ -77,7 +77,7 @@ capability until it resets. This is the second budget-related outage today (afte
 
 2. **Phase 2 (next):** Deploy SearXNG on Rocky
    - `docker run -p 8080:8080 searxng/searxng`
-   - All agents query via `http://100.89.199.14:8080/search?q={query}&format=json`
+   - All agents query via `https://search.example.com/search?q={query}&format=json`
    - Tailscale-only, no public exposure
 
 3. **Phase 3 (optional):** Build an OpenClaw skill that tries SearXNG first, falls back to browser, falls back to Brave

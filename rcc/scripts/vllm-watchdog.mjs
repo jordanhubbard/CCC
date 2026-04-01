@@ -11,7 +11,7 @@
 const DRY_RUN = process.argv.includes('--dry-run');
 
 const RCC_URL       = process.env.RCC_URL       || 'http://localhost:8789';
-const RCC_AUTH      = process.env.RCC_AUTH_TOKEN || 'rcc-agent-rocky-20maaghccmbmnby63so';
+const RCC_AUTH      = process.env.RCC_AUTH_TOKEN || '<YOUR_AGENT_TOKEN>';
 const HEALTH_TIMEOUT = 5000; // ms
 
 const FLEET = [

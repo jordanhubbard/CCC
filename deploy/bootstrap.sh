@@ -114,7 +114,7 @@ if [[ -d "$RCC_WORKSPACE/.git" ]]; then
   warn "Already cloned — pulling latest"
   git -C "$RCC_WORKSPACE" pull --ff-only
 else
-  git clone https://github.com/jordanhubbard/rockyandfriends.git "$RCC_WORKSPACE"
+  git clone "${RCC_REPO:-https://github.com/jordanhubbard/rockyandfriends.git}" "$RCC_WORKSPACE"
 fi
 success "RCC workspace ready"
 

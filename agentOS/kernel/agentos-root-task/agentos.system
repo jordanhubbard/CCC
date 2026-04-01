@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  agentos.system — seL4 Microkit System Description File
+  Target: riscv64 (simulation) / ARM64 (Sparky)
+
+  Protection Domain priorities:
+    200  cap_audit_log   capability audit trail
+    180  watchdog        heartbeat / reset monitor
+    160  quota_pd        per-slot CPU quota enforcement
+    150  mem_profiler    memory high-watermark tracker
+    140  vmm_shmem       VMM shared memory (zero-copy WASM <-> CUDA)
+    100  fault_handler   WASM slot exception handler
+
+  Channel allocation:
+     0-  9  reserved / root task internal
+    10- 49  cap_audit_log channels
+    50- 79  watchdog channels
+    80- 99  quota_pd channels
+   100-109  vmm_shmem channels  ← THIS FILE
+   110-129  mem_profiler channels
+   130-149  fault_handler channels
+   150+     future expansion
+-->
+<system>
+
+  <!-- ── Memory Regions ─────────────────────────────────────────────────── -->
+
+  <!-- vmm_shmem 512 KB status ring — exported to Linux via VMM driver -->
+  <memory_region name="vmm_shmem_ring"
+                 size="0x80000"
+                 page_size="0x1000" />
+
+  <!-- ── Protection Domains ────────────────────────────────────────────── -->
+
+  <!--
+    vmm_shmem — Passive PD, priority 140
+    Manages the 8-slot shared memory region table and exports the status ring.
+    Channels 100-107: one channel per WASM agent slot (0-7).
+    Channel 108: reserved for future Linux VMM status channel.
+    Channel 109: reserved.
+  -->
+  <protection_domain name="vmm_shmem"
+                     priority="140"
+                     passive="true">
+    <program_image path="vmm_shmem.elf" />
+
+    <!-- Status ring mapped read-write so the PD can update it -->
+    <map mr="vmm_shmem_ring"
+         vaddr="0x5000000"
+         perms="rw"
+         cached="false"
+         setvar_vaddr="vmm_shmem_ring_vaddr" />
+  </protection_domain>
+
+  <!--
+    wasm_slot_0 through wasm_slot_7 — WASM agent execution slots (stubs).
+    Each slot gets a protected channel to vmm_shmem so it can map/unmap/sync
+    shared GPU buffers without kernel involvement after initial setup.
+
+    NOTE: Full slot PD definitions (ELF images, memory regions, scheduling
+    contexts) will be added when the WASM runtime PD is committed.
+  -->
+
+  <!-- Repeat for slots 1-7 with incrementing channel IDs and priorities -->
+  <!-- Omitted here for brevity — follow the same pattern as slot_0 -->
+
+  <!-- ── Channels ───────────────────────────────────────────────────────── -->
+
+  <!-- wasm_slot_0 <-> vmm_shmem (channel 100) -->
+  <!-- <channel>
+    <end pd="wasm_slot_0" id="100" />
+    <end pd="vmm_shmem"   id="100" />
+  </channel> -->
+
+  <!-- wasm_slot_1 <-> vmm_shmem (channel 101) -->
+  <!-- <channel>
+    <end pd="wasm_slot_1" id="101" />
+    <end pd="vmm_shmem"   id="101" />
+  </channel> -->
+
+  <!-- wasm_slot_2 <-> vmm_shmem (channel 102) -->
+  <!-- wasm_slot_3 <-> vmm_shmem (channel 103) -->
+  <!-- wasm_slot_4 <-> vmm_shmem (channel 104) -->
+  <!-- wasm_slot_5 <-> vmm_shmem (channel 105) -->
+  <!-- wasm_slot_6 <-> vmm_shmem (channel 106) -->
+  <!-- wasm_slot_7 <-> vmm_shmem (channel 107) -->
+
+  <!--
+    Channel 108: vmm_shmem <-> Linux VMM notification
+    When the Linux VMM driver maps the status ring it signals this channel
+    to request a fresh STATUS snapshot.
+  -->
+  <!-- <channel>
+    <end pd="linux_vmm_pd" id="108" />
+    <end pd="vmm_shmem"    id="108" />
+  </channel> -->
+
+  <!--
+    Status ring exported read-only to Linux VMM driver.
+    The Linux side maps this MR via /dev/mem or a custom driver that the
+    root task configures at boot.
+  -->
+  <!-- <map mr="vmm_shmem_ring" pd="linux_vmm_pd" vaddr="0x7000000" perms="r" cached="false" /> -->
+
+</system>

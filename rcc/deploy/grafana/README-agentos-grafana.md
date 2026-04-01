@@ -33,7 +33,7 @@ scrape_configs:
           host: 'sparky'
           agent: 'natasha'
     metrics_path: '/api/agentos/metrics'
-    bearer_token: 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb'
+    bearer_token: '<YOUR_RCC_TOKEN>'
 ```
 
 Then reload Prometheus:

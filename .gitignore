@@ -16,10 +16,20 @@ openclaw.json
 
 # RCC runtime state
 rcc/api/agents.json
+rcc/api/projects.json
 rcc/data/github-key.json
 rcc/data/secrets.json
 brain-state.json
 rcc/brain/brain-state.json
+
+# Generated configs (rendered from *.tmpl by make init-rcc)
+# These contain real hostnames/tokens — never commit them
+onboarding/ONBOARD_*.rendered.md
+
+# Docker operator data dir (contains .env with real secrets)
+rcc-data/
+squirrelchat-data/
+logs/
 
 # Queue state (runtime data, not source)
 workqueue/queue.json
@@ -95,3 +105,12 @@ grievances/
 rcc/api/data/heartbeat-history/*.jsonl
 rcc/api/data/heartbeat-history/*.jsonl
 squirrelchat/squirrelchat.db
+
+# Instance-specific project registry (contains deployment URLs)
+rcc/api/projects.json
+
+
+# init-rcc rendered outputs (generated from *.tmpl — never commit instance configs)
+.rcc-init
+HEARTBEAT.md
+workqueue/WORKQUEUE_AGENT_NATASHA.md

@@ -22,8 +22,8 @@ Write it into your workspace `IDENTITY.md` and `TOOLS.md`.
 POST to Rocky's RCC API every heartbeat cycle:
 
 ```
-POST http://146.190.134.110:8789/api/heartbeat/<your-agent-name>
-Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+POST https://rcc.example.com/api/heartbeat/<your-agent-name>
+Authorization: Bearer <YOUR_RCC_TOKEN>
 Content-Type: application/json
 
 {
@@ -42,8 +42,8 @@ Content-Type: application/json
 
 ## Step 3 — SquirrelBus (agent-to-agent messaging)
 
-SquirrelBus base URL: `http://100.89.199.14:8788`
-Auth token: `Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb`
+SquirrelBus base URL: `https://dashboard.example.com`
+Auth token: `Bearer <YOUR_RCC_TOKEN>`
 
 Send a registration message on first boot:
 ```
@@ -69,8 +69,8 @@ GET /bus/messages?limit=20
 
 ## Step 4 — Workqueue
 
-Queue API: `http://146.190.134.110:8788/api/queue`
-Auth: `Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb`
+Queue API: `https://dashboard.example.com/api/queue`
+Auth: `Bearer <YOUR_RCC_TOKEN>`
 
 At every heartbeat:
 1. `GET /api/queue` — fetch all items
@@ -94,13 +94,13 @@ git clone git@github.com:jordanhubbard/rockyandfriends.git ~/Src/rockyandfriends
 
 ## Step 6 — MinIO (shared object store)
 
-S3 API: `http://100.89.199.14:9000`
-Access Key: `rockymoose4810f4cc7d28916f`
-Secret Key: `1b7a14087771df4bf85d6001fdd047a61348641bdf78aefd`
+S3 API: `http://<MINIO_HOST>:9000`
+Access Key: `<MINIO_ACCESS_KEY>`
+Secret Key: `<MINIO_SECRET_KEY>`
 
 Write your heartbeat state here too (secondary, cross-agent visibility):
 ```
-PUT http://100.89.199.14:9000/agents/<your-name>/agent-heartbeat-<your-name>.json
+PUT http://<MINIO_HOST>:9000/agents/<your-name>/agent-heartbeat-<your-name>.json
 ```
 
 Store your agent-specific state under `agents/<your-name>/`.
@@ -122,19 +122,8 @@ If HEARTBEAT.md doesn't exist or doesn't cover these, **create/update it now**.
 ## Verification
 
 After completing all steps, confirm:
-- [ ] Your name appears on the RCC dashboard: http://146.190.134.110:8788/
+- [ ] Your name appears on the RCC dashboard: `https://dashboard.example.com/`
 - [ ] `GET /api/heartbeat/<your-name>` returns non-null data
 - [ ] SquirrelBus shows your `online` message: `GET /bus/messages?limit=20`
 - [ ] You can push to rockyandfriends: `git push --dry-run`
 - [ ] Your HEARTBEAT.md includes all three mandatory steps
-
----
-
-## For Boris and Agent RTX specifically
-
-**Known gap as of 2026-03-27:** Both are on SquirrelBus but NOT posting RCC heartbeats. The fix is purely Step 2 + Step 7 — add the heartbeat POST to HEARTBEAT.md and run it.
-
-Boris gateway: outbound-capable, Sweden datacenter, dual L40  
-Agent RTX gateway: outbound-only (horde-dgxc), `jordanh-rtx`, 4x L40
-
-Both should be able to POST to `http://146.190.134.110:8789/api/heartbeat/<name>` directly.

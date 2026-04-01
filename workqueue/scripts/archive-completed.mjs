@@ -33,7 +33,7 @@ const ARCHIVE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MINIO_HOST = '100.89.199.14';
 const MINIO_PORT = 9000;
 const MINIO_ACCESS_KEY = 'rockymoose4810f4cc7d28916f';
-const MINIO_SECRET_KEY = '1b7a14087771df4bf85d6001fdd047a61348641bdf78aefd';
+const MINIO_SECRET_KEY = '<MINIO_SECRET_KEY>';
 const MINIO_ARCHIVE_KEY = 'agents/shared/workqueue-archive.jsonl';
 
 function log(...args) {

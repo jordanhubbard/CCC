@@ -28,7 +28,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 const OLLAMA_BASE_URL  = process.env.OLLAMA_BASE_URL  || 'http://localhost:11434';
 const OLLAMA_MODEL     = 'nomic-embed-text';
 const RCC_URL          = process.env.RCC_URL          || 'http://100.89.199.14:8789';
-const RCC_TOKEN        = process.env.RCC_TOKEN        || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const RCC_TOKEN        = process.env.RCC_TOKEN        || '<YOUR_RCC_TOKEN>';
 const DEDUP_THRESHOLD  = parseFloat(process.env.DEDUP_THRESHOLD || '0.85');
 const DEDUP_LOG_PATH   = process.env.DEDUP_LOG_PATH   || '/tmp/wq-dedup-skips.jsonl';
 
