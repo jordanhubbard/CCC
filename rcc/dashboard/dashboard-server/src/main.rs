@@ -423,8 +423,10 @@ pub fn build_app(state: Arc<AppState>, dist: &str) -> Router {
         // SPA deep-link routes — serve index.html for all named tab paths
         // Synced with leptos_router routes in dashboard-ui/src/app.rs
         .route("/geek-view",   get(spa_index))
+        .route("/geek_view",   get(spa_index))  // alias
         .route("/kanban",      get(spa_index))
         .route("/squirrelchat",get(spa_index))
+        .route("/chat",        get(spa_index))   // alias
         .route("/agents",      get(spa_index))
         .route("/issues",      get(spa_index))
         .route("/providers",   get(spa_index))
