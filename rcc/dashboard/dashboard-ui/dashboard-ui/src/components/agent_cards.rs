@@ -49,6 +49,22 @@ fn relative_time(ts: &str) -> String {
     }
 }
 
+/// Parse an ISO-8601 timestamp string to seconds since Unix epoch.
+fn parse_iso_to_epoch(ts: &str) -> Option<u64> {
+    let (date_part, time_part) = ts.split_once('T')?;
+    let mut dp = date_part.split('-');
+    let y: u64 = dp.next()?.parse().ok()?;
+    let m: u64 = dp.next()?.parse().ok()?;
+    let d: u64 = dp.next()?.parse().ok()?;
+    let time_clean = time_part.trim_end_matches('Z');
+    let mut tp = time_clean.split(':');
+    let h: u64 = tp.next()?.parse().ok()?;
+    let mi: u64 = tp.next()?.parse().ok()?;
+    let s: f64 = tp.next().unwrap_or("0").parse().ok()?;
+    let days = days_since_epoch(y, m, d);
+    Some(days * 86400 + h * 3600 + mi * 60 + s as u64)
+}
+
 fn days_since_epoch(y: u64, m: u64, d: u64) -> u64 {
     // Gregorian days since 1970-01-01 (close enough for display purposes)
     let y = if m <= 2 { y - 1 } else { y };
@@ -94,10 +110,27 @@ pub fn AgentCards() -> impl IntoView {
                     }
                     names.sort();
 
-                    // Filter out decommissioned
+                    // Filter out decommissioned and agents inactive for >24h
+                    let now_ms = js_sys::Date::now() as u64;
+                    let now_secs = now_ms / 1000;
+                    let cutoff_24h = now_secs.saturating_sub(86400);
+
                     let names: Vec<String> = names.into_iter().filter(|n| {
                         let hb = hb_map.get(n);
-                        !hb.map(|h| h.decommissioned.unwrap_or(false)).unwrap_or(false)
+                        // Always exclude decommissioned agents
+                        if hb.map(|h| h.decommissioned.unwrap_or(false)).unwrap_or(false) {
+                            return false;
+                        }
+                        // Check last-seen from /api/agents (more authoritative)
+                        let agent_last_seen = agent_list.iter()
+                            .find(|a| a.name.as_deref() == Some(n.as_str()))
+                            .and_then(|a| a.last_seen.as_deref())
+                            .and_then(parse_iso_to_epoch);
+                        // Fall back to heartbeat timestamp
+                        let hb_ts = hb.and_then(|h| h.ts.as_deref()).and_then(parse_iso_to_epoch);
+                        let last_active = agent_last_seen.or(hb_ts).unwrap_or(0);
+                        // Only show agents active within the last 24 hours
+                        last_active >= cutoff_24h
                     }).collect();
 
                     if names.is_empty() {
