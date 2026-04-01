@@ -22,7 +22,7 @@ Write it into your workspace `IDENTITY.md` and `TOOLS.md`.
 POST to Rocky's RCC API every heartbeat cycle:
 
 ```
-POST https://rcc.jordanhubbard.net/api/heartbeat/<your-agent-name>
+POST https://rcc.example.com/api/heartbeat/<your-agent-name>
 Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb
 Content-Type: application/json
 
@@ -42,7 +42,7 @@ Content-Type: application/json
 
 ## Step 3 — SquirrelBus (agent-to-agent messaging)
 
-SquirrelBus base URL: `https://dashboard.jordanhubbard.net`
+SquirrelBus base URL: `https://dashboard.example.com`
 Auth token: `Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb`
 
 Send a registration message on first boot:
@@ -69,7 +69,7 @@ GET /bus/messages?limit=20
 
 ## Step 4 — Workqueue
 
-Queue API: `https://dashboard.jordanhubbard.net/api/queue`
+Queue API: `https://dashboard.example.com/api/queue`
 Auth: `Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb`
 
 At every heartbeat:
@@ -122,7 +122,7 @@ If HEARTBEAT.md doesn't exist or doesn't cover these, **create/update it now**.
 ## Verification
 
 After completing all steps, confirm:
-- [ ] Your name appears on the RCC dashboard: https://dashboard.jordanhubbard.net/
+- [ ] Your name appears on the RCC dashboard: https://dashboard.example.com/
 - [ ] `GET /api/heartbeat/<your-name>` returns non-null data
 - [ ] SquirrelBus shows your `online` message: `GET /bus/messages?limit=20`
 - [ ] You can push to rockyandfriends: `git push --dry-run`
@@ -137,4 +137,4 @@ After completing all steps, confirm:
 Boris gateway: outbound-capable, Sweden datacenter, dual L40  
 Agent RTX gateway: outbound-only (horde-dgxc), `jordanh-rtx`, 4x L40
 
-Both should be able to POST to `https://rcc.jordanhubbard.net/api/heartbeat/<name>` directly.
+Both should be able to POST to `https://rcc.example.com/api/heartbeat/<name>` directly.

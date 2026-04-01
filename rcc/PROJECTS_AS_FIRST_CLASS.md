@@ -94,7 +94,7 @@ Already exists at `POST /api/projects/:owner/:repo/channel`.
 Create channels in Slack, then register them:
 ```bash
 # Register #project-agentos as the channel for jordanhubbard/agentos
-curl -X POST https://rcc.jordanhubbard.net/api/projects/jordanhubbard%2Fagentos/channel \
+curl -X POST https://rcc.example.com/api/projects/jordanhubbard%2Fagentos/channel \
   -H "Authorization: Bearer $RCC_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"channel_id": "C...", "workspace": "omgjkh", "channel_name": "project-agentos"}'

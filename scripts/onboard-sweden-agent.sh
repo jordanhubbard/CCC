@@ -45,7 +45,7 @@ $SSH "cat > ~/.openclaw/openclaw.json" << JSONEOF
   },
   "env": {
     "vars": {
-      "RCC_URL": "https://api.jordanhubbard.net",
+      "RCC_URL": "https://api.example.com",
       "RCC_AGENT_TOKEN": "${RCC_TOKEN}"
     }
   },
@@ -147,7 +147,7 @@ $SSH "cat > ~/.openclaw/workspace/IDENTITY.md" << IDEOF
 
 - **Name:** ${AGENT_DISPLAY}
 - **Agent:** ${AGENT_NAME}
-- **RCC:** https://api.jordanhubbard.net
+- **RCC:** https://api.example.com
 IDEOF
 
 # SOUL.md
@@ -168,11 +168,11 @@ $SSH "cat > ~/.openclaw/workspace/HEARTBEAT.md" << HBEOF
 
 ## Each heartbeat:
 1. POST heartbeat to RCC:
-   \`curl -s -X POST https://api.jordanhubbard.net/api/heartbeat/${AGENT_NAME} -H "Content-Type: application/json" -H "Authorization: Bearer ${RCC_TOKEN}" -d "{\"status\":\"online\",\"host\":\"${AGENT_NAME}\",\"ts\":\"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"\`
+   \`curl -s -X POST https://api.example.com/api/heartbeat/${AGENT_NAME} -H "Content-Type: application/json" -H "Authorization: Bearer ${RCC_TOKEN}" -d "{\"status\":\"online\",\"host\":\"${AGENT_NAME}\",\"ts\":\"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"\`
 2. POST heartbeat to SquirrelChat:
-   \`curl -s -X POST https://chat.jordanhubbard.net/api/agents/${AGENT_NAME}/heartbeat -H "Content-Type: application/json" -d "{\"status\":\"online\",\"host\":\"${AGENT_NAME}\"}" \`
-3. Check RCC health: \`curl -s https://api.jordanhubbard.net/health\`
-4. Check queue: \`curl -s https://api.jordanhubbard.net/api/queue -H "Authorization: Bearer ${RCC_TOKEN}"\`
+   \`curl -s -X POST https://chat.example.com/api/agents/${AGENT_NAME}/heartbeat -H "Content-Type: application/json" -d "{\"status\":\"online\",\"host\":\"${AGENT_NAME}\"}" \`
+3. Check RCC health: \`curl -s https://api.example.com/health\`
+4. Check queue: \`curl -s https://api.example.com/api/queue -H "Authorization: Bearer ${RCC_TOKEN}"\`
 5. Claim and work any pending items assigned to ${AGENT_NAME} or all
 HBEOF
 
@@ -192,7 +192,7 @@ $SSH "cat > ~/.openclaw/workspace/TOOLS.md" << TOOLSEOF
 - Model: NVIDIA-Nemotron-3-Super-120B-A12B-FP8
 
 ## RCC
-- URL: https://api.jordanhubbard.net
+- URL: https://api.example.com
 - Agent token: ${RCC_TOKEN}
 TOOLSEOF
 
@@ -238,5 +238,5 @@ echo ""
 echo "⚠️  Still needed:"
 echo "   1. Add tunnel public key to Rocky's authorized_keys for tunnel user"
 echo "   2. sudo supervisorctl start vllm-tunnel  (once tunnel key is authorized)"
-echo "   3. Verify: curl https://api.jordanhubbard.net/api/agents | jq '.[] | select(.name==\"${AGENT_NAME}\")'"
+echo "   3. Verify: curl https://api.example.com/api/agents | jq '.[] | select(.name==\"${AGENT_NAME}\")'"
 echo ""

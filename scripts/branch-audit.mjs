@@ -5,7 +5,7 @@
 
 import { execSync } from 'child_process';
 
-const RCC_URL = process.env.RCC_URL || 'https://api.jordanhubbard.net';
+const RCC_URL = process.env.RCC_URL || 'https://api.example.com';
 const RCC_TOKEN = process.env.RCC_AGENT_TOKEN || process.env.BUS_TOKEN || '';
 const SLACK_TOKEN = process.env.SLACK_OMGJKH_TOKEN || process.env.SLACK_BOT_TOKEN || '';
 const SLACK_CHANNEL = process.env.SLACK_AGENT_CHANNEL || '#rockyandfriends';

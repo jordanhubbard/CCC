@@ -35,7 +35,7 @@ VALID_CATEGORIES="bug improvement feature pattern refactor security"
 VALID_READINESS="idea-only partially-implemented implementation-complete tested"
 
 # --- RCC config ---
-RCC_URL="${RCC_URL:-https://api.jordanhubbard.net}"
+RCC_URL="${RCC_URL:-https://api.example.com}"
 RCC_TOKEN="${RCC_AGENT_TOKEN:-}"
 if [ -z "$RCC_TOKEN" ]; then
   # Try sourcing from ~/.rcc/.env
