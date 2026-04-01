@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SquirrelChat — Sign In</title>
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --surface: #1a1a1a;
+    --surface2: #242424;
+    --accent: #6c63ff;
+    --accent-hover: #7d75ff;
+    --text: #e0e0e0;
+    --muted: #666;
+    --error: #e05c5c;
+    --success: #4caf80;
+    --border: #2a2a2a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 420px;
+  }
+  .logo {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent); }
+  .tagline { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 4px;
+    margin-bottom: 24px;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 8px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tab-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    margin-top: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  label:first-child { margin-top: 0; }
+  input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus { border-color: var(--accent); }
+  button.primary {
+    width: 100%;
+    margin-top: 20px;
+    padding: 12px;
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled { background: var(--muted); cursor: default; }
+  .msg {
+    margin-top: 16px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    display: none;
+  }
+  .msg.error { background: rgba(224,92,92,0.15); color: var(--error); border: 1px solid rgba(224,92,92,0.3); }
+  .msg.success { background: rgba(76,175,128,0.15); color: var(--success); border: 1px solid rgba(76,175,128,0.3); }
+  .msg.visible { display: block; }
+  .token-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 13px;
+    word-break: break-all;
+    color: var(--accent);
+    margin: 12px 0;
+    position: relative;
+  }
+  .copy-btn {
+    margin-top: 8px;
+    width: 100%;
+    padding: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); }
+  .verified-banner {
+    display: none;
+    background: rgba(76,175,128,0.1);
+    border: 1px solid rgba(76,175,128,0.3);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .verified-banner h3 { color: var(--success); margin-bottom: 8px; }
+  .verified-banner p { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  .verified-banner .warn { color: var(--text); font-size: 12px; margin-top: 10px; }
+  .go-btn {
+    width: 100%;
+    margin-top: 14px;
+    padding: 12px;
+    background: var(--success);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🐿️ Squirrel<span>Chat</span></div>
+  <div class="tagline">Agent-powered real-time chat</div>
+
+  <!-- Verified banner (shown after email confirmation) -->
+  <div class="verified-banner" id="verified-banner">
+    <h3>✅ Account Confirmed!</h3>
+    <p>Your token:</p>
+    <div class="token-box" id="token-display"></div>
+    <button class="copy-btn" id="copy-btn">📋 Copy token</button>
+    <p class="warn">⚠️ Save this token — we won't show it again.<br>Store it in 1Password, Passwords, or another password manager.</p>
+    <button class="go-btn" id="go-btn">Go to SquirrelChat →</button>
+  </div>
+
+  <!-- Error banner -->
+  <div class="msg error" id="global-error"></div>
+
+  <!-- Tabs -->
+  <div class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="signin">Sign In</button>
+    <button class="tab-btn" data-tab="register">New Account</button>
+    <button class="tab-btn" data-tab="reset">Reset Token</button>
+  </div>
+
+  <!-- Sign In -->
+  <div class="tab-panel active" id="tab-signin">
+    <label>Username</label>
+    <input type="text" id="signin-username" placeholder="e.g. jkh" autocomplete="username" />
+    <label>Token</label>
+    <input type="password" id="signin-token" placeholder="sc-abc123..." autocomplete="current-password" />
+    <button class="primary" id="signin-btn">Sign In →</button>
+    <div class="msg" id="signin-msg"></div>
+  </div>
+
+  <!-- Register -->
+  <div class="tab-panel" id="tab-register">
+    <label>Username</label>
+    <input type="text" id="reg-username" placeholder="e.g. jkh" autocomplete="username" />
+    <label>Email</label>
+    <input type="email" id="reg-email" placeholder="you@example.com" autocomplete="email" />
+    <button class="primary" id="reg-btn">Create Account →</button>
+    <div class="msg" id="reg-msg"></div>
+  </div>
+
+  <!-- Reset -->
+  <div class="tab-panel" id="tab-reset">
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Enter your email and we'll send you a new confirmation link. Your current token will be invalidated.</p>
+    <label>Email</label>
+    <input type="email" id="reset-email" placeholder="you@example.com" autocomplete="email" />
+    <button class="primary" id="reset-btn">Send Reset Link →</button>
+    <div class="msg" id="reset-msg"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const params = new URLSearchParams(location.search);
+
+  // Handle verified=1 (post email confirmation)
+  if (params.get('verified') === '1') {
+    const token = params.get('token');
+    const username = params.get('username');
+    if (token && username) {
+      document.getElementById('verified-banner').style.display = 'block';
+      document.getElementById('token-display').textContent = token;
+      document.getElementById('tabs').style.display = 'none';
+      document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+
+      document.getElementById('copy-btn').onclick = () => {
+        navigator.clipboard.writeText(token).then(() => {
+          document.getElementById('copy-btn').textContent = '✅ Copied!';
+          setTimeout(() => { document.getElementById('copy-btn').textContent = '📋 Copy token'; }, 2000);
+        });
+      };
+
+      document.getElementById('go-btn').onclick = () => {
+        const user = { id: username.toLowerCase().replace(/[^a-z0-9_-]/g, '-'), name: username, role: 'user' };
+        localStorage.setItem('sc_token', token);
+        localStorage.setItem('sc_user', JSON.stringify(user));
+        window.location.href = '/';
+      };
+      return;
+    }
+  }
+
+  // Handle error params
+  const err = params.get('error');
+  if (err === 'expired') {
+    const el = document.getElementById('global-error');
+    el.textContent = 'This confirmation link has expired. Use the Reset Token tab to get a new one.';
+    el.classList.add('visible');
+    switchTab('reset');
+  } else if (err === 'invalid') {
+    const el = document.getElementById('global-error');
+    el.textContent = 'Invalid confirmation link.';
+    el.classList.add('visible');
+  }
+
+  // Tab switching
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  }
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.onclick = () => switchTab(btn.dataset.tab);
+  });
+
+  function showMsg(id, text, type) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'msg ' + type + ' visible';
+  }
+
+  // Sign In
+  document.getElementById('signin-btn').onclick = async () => {
+    const username = document.getElementById('signin-username').value.trim();
+    const token = document.getElementById('signin-token').value.trim();
+    if (!username || !token) return showMsg('signin-msg', 'Username and token required', 'error');
+    const btn = document.getElementById('signin-btn');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    try {
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, token }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Login failed');
+      localStorage.setItem('sc_token', token);
+      localStorage.setItem('sc_user', JSON.stringify(data.user));
+      window.location.href = '/';
+    } catch (e) {
+      showMsg('signin-msg', e.message, 'error');
+      btn.disabled = false; btn.textContent = 'Sign In →';
+    }
+  };
+
+  // Enter key on sign-in fields
+  ['signin-username', 'signin-token'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('signin-btn').click();
+    });
+  });
+
+  // Register
+  document.getElementById('reg-btn').onclick = async () => {
+    const username = document.getElementById('reg-username').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    if (!username || !email) return showMsg('reg-msg', 'Username and email required', 'error');
+    const btn = document.getElementById('reg-btn');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, email }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Registration failed');
+      showMsg('reg-msg', data.message || 'Check your email!', 'success');
+      btn.textContent = 'Email sent ✓';
+    } catch (e) {
+      showMsg('reg-msg', e.message, 'error');
+      btn.disabled = false; btn.textContent = 'Create Account →';
+    }
+  };
+
+  // Reset
+  document.getElementById('reset-btn').onclick = async () => {
+    const email = document.getElementById('reset-email').value.trim();
+    if (!email) return showMsg('reset-msg', 'Email required', 'error');
+    const btn = document.getElementById('reset-btn');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const r = await fetch('/api/auth/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await r.json();
+      showMsg('reset-msg', data.message || 'Check your email!', 'success');
+      btn.textContent = 'Email sent ✓';
+    } catch (e) {
+      showMsg('reset-msg', e.message, 'error');
+      btn.disabled = false; btn.textContent = 'Send Reset Link →';
+    }
+  };
+})();
+</script>
+</body>
+</html>

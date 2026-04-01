@@ -7,6 +7,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
+import { createHash, createHmac, randomBytes } from 'crypto';
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,12 @@ const PORT = process.env.PORT || 8790;
 const ADMIN_TOKEN = process.env.SC_ADMIN_TOKEN || '<SC_ADMIN_TOKEN>';
 const RCC_BASE = 'http://localhost:8789';
 const RCC_AGENT_TOKEN = process.env.RCC_AGENT_TOKEN || '<YOUR_RCC_TOKEN>';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || null;
+const SC_FROM_EMAIL = process.env.SC_FROM_EMAIL || 'noreply@jordanhubbard.net';
+const SC_BASE_URL = process.env.SC_BASE_URL || 'https://chat.jordanhubbard.net';
+const DEV_MODE = process.env.SQUIRRELCHAT_DEV_MODE === '1';
+const TOKEN_SECRET = process.env.SC_TOKEN_SECRET || 'squirrelchat-dev-secret';
+const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
 // DB setup
 const db = new Database('./squirrelchat.db');
@@ -103,6 +110,22 @@ try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT \'user\''); } catch {}
 // Rename users.token → users.token_hash if needed (backward compat — just add alias col)
 try { db.exec('ALTER TABLE users ADD COLUMN token_hash TEXT'); } catch {}
+// Email verification fields
+try { db.exec('ALTER TABLE users ADD COLUMN email TEXT'); } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN confirmed INTEGER DEFAULT 0'); } catch {}
+
+// Pending email confirmations (registration + reset)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pending_confirmations (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL,
+    otp_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used INTEGER DEFAULT 0
+  )
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_pending_email ON pending_confirmations(email)'); } catch {}
 
 // Additive migrations for channels table
 try { db.exec('ALTER TABLE channels ADD COLUMN last_message_at INTEGER'); } catch {}
@@ -198,21 +221,64 @@ app.use((req, res, next) => {
 });
 app.use(express.static(join(__dirname, 'public')));
 
-// Auth middleware — accepts admin token OR any valid sc-token-<id>
+// Rate limiting (in-memory, per-IP)
+const rateLimitMap = new Map();
+function rateLimit(key, maxPerHour = 3) {
+  const now = Date.now();
+  const windowMs = 3600000;
+  const hits = (rateLimitMap.get(key) || []).filter(t => now - t < windowMs);
+  if (hits.length >= maxPerHour) return false;
+  hits.push(now);
+  rateLimitMap.set(key, hits);
+  return true;
+}
+
+// Email sending (Resend API or DEV_MODE console fallback)
+async function sendConfirmationEmail(email, username, otp) {
+  const confirmUrl = `${SC_BASE_URL}/api/auth/confirm?t=${otp}`;
+  if (DEV_MODE || !RESEND_API_KEY) {
+    console.log(`[DEV] Confirmation URL for ${username} <${email}>: ${confirmUrl}`);
+    return;
+  }
+  const html = `<div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+    <h2 style="color:#1a1a2e">🐿️ SquirrelChat</h2>
+    <p>Hi <strong>${username}</strong>,</p>
+    <p>Click below to confirm your account. This link expires in 1 hour.</p>
+    <a href="${confirmUrl}" style="display:inline-block;padding:12px 24px;background:#6c63ff;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold">Confirm My Account →</a>
+    <p style="color:#888;font-size:12px;margin-top:24px">Or paste: <a href="${confirmUrl}">${confirmUrl}</a><br>If you did not request this, ignore this email.</p>
+  </div>`;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: SC_FROM_EMAIL, to: email, subject: 'Confirm your SquirrelChat account', html }),
+    });
+  } catch (e) {
+    console.error('[squirrelchat] Email send failed:', e.message);
+  }
+}
+
+// Auth middleware — accepts admin token, legacy sc-token-<id>, or new HMAC sc-<hex> tokens
 function auth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   if (token === ADMIN_TOKEN) { req.userId = 'admin'; return next(); }
-  // sc-token-<user_id> format
+  // Legacy sc-token-<user_id> format (agents + pre-existing users)
   const match = token.match(/^sc-token-(.+)$/);
   if (match) {
     const userId = match[1];
     const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
     if (user) { req.userId = userId; return next(); }
-    // Auto-create user on first login (new name-claim token)
+    // Auto-create user on first login (name-claim, legacy)
     db.prepare('INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, \'user\')').run(userId, userId);
     req.userId = userId;
     return next();
+  }
+  // New-style HMAC token: sc-<64 hex chars>
+  if (token.startsWith('sc-') && token.length > 20) {
+    const hash = createHmac('sha256', TOKEN_SECRET).update(token).digest('hex');
+    const user = db.prepare('SELECT id FROM users WHERE token_hash = ? AND confirmed = 1').get(hash);
+    if (user) { req.userId = user.id; return next(); }
   }
   return res.status(401).json({ error: 'Unauthorized' });
 }
@@ -403,6 +469,76 @@ app.get('/api/me', (req, res) => {
   const name = req.query.name || null;
   res.json({ id: name || 'anonymous', name: name || 'anonymous', role: 'user', needs_name: !name });
 });
+
+// ── Email-verified auth routes (wq-SC-auth-001) ──────────────────────────────
+
+// POST /api/auth/register — start email verification
+app.post('/api/auth/register', async (req, res) => {
+  if (!rateLimit((req.ip || '') + ':register')) return res.status(429).json({ error: 'Too many requests' });
+  const { username, email } = req.body || {};
+  if (!username || !/^[a-zA-Z0-9_-]{3,32}$/.test(username)) return res.status(400).json({ error: 'username must be 3-32 chars, alphanumeric/dash/underscore' });
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'valid email required' });
+  const userId = username.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const takenUser = db.prepare('SELECT id FROM users WHERE id = ? AND confirmed = 1').get(userId);
+  if (takenUser) return res.status(409).json({ error: 'Username already taken' });
+  const takenEmail = db.prepare('SELECT id FROM users WHERE email = ? AND confirmed = 1').get(email);
+  if (takenEmail) return res.status(409).json({ error: 'Email already registered' });
+  // Clear expired pending confirmations for this email
+  db.prepare('DELETE FROM pending_confirmations WHERE email = ? AND expires_at < ?').run(email, Date.now());
+  const otp = crypto.randomUUID();
+  db.prepare('INSERT OR REPLACE INTO pending_confirmations (id, username, email, otp_hash, expires_at, used) VALUES (?, ?, ?, ?, ?, 0)')
+    .run(otp, username, email, sha256(otp), Date.now() + 3600000);
+  await sendConfirmationEmail(email, username, otp);
+  res.json({ ok: true, message: 'Check your email to confirm your account' });
+});
+
+// GET /api/auth/confirm?t=<otp> — complete registration from email link
+app.get('/api/auth/confirm', (req, res) => {
+  const otp = req.query.t;
+  if (!otp) return res.redirect('/login?error=invalid');
+  const row = db.prepare('SELECT * FROM pending_confirmations WHERE id = ? AND used = 0').get(otp);
+  if (!row || row.expires_at < Date.now()) return res.redirect('/login?error=expired');
+  if (row.otp_hash !== sha256(otp)) return res.redirect('/login?error=invalid');
+  const token = 'sc-' + randomBytes(32).toString('hex');
+  const token_hash = createHmac('sha256', TOKEN_SECRET).update(token).digest('hex');
+  const userId = row.username.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  db.prepare('INSERT OR REPLACE INTO users (id, name, email, token_hash, confirmed, role) VALUES (?, ?, ?, ?, 1, \'user\')')
+    .run(userId, row.username, row.email, token_hash);
+  db.prepare('UPDATE pending_confirmations SET used = 1 WHERE id = ?').run(otp);
+  res.redirect(`/login?verified=1&token=${encodeURIComponent(token)}&username=${encodeURIComponent(row.username)}`);
+});
+
+// POST /api/auth/login — token-based login (for human users)
+app.post('/api/auth/login', (req, res) => {
+  const { username, token } = req.body || {};
+  if (!username || !token) return res.status(400).json({ error: 'username and token required' });
+  const userId = username.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const user = db.prepare('SELECT * FROM users WHERE id = ? AND confirmed = 1').get(userId);
+  if (!user) return res.status(401).json({ error: 'Invalid username or token' });
+  const hash = createHmac('sha256', TOKEN_SECRET).update(token).digest('hex');
+  if (hash !== user.token_hash) return res.status(401).json({ error: 'Invalid username or token' });
+  res.json({ ok: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+});
+
+// POST /api/auth/reset — request token reset via email
+app.post('/api/auth/reset', async (req, res) => {
+  if (!rateLimit((req.ip || '') + ':reset')) return res.status(429).json({ error: 'Too many requests' });
+  const { email } = req.body || {};
+  const SAFE = { ok: true, message: 'If that email is registered, you will receive a reset link' };
+  if (!email) return res.json(SAFE);
+  const user = db.prepare('SELECT * FROM users WHERE email = ? AND confirmed = 1').get(email);
+  if (user) {
+    db.prepare('DELETE FROM pending_confirmations WHERE email = ?').run(email);
+    db.prepare('UPDATE users SET token_hash = NULL WHERE email = ?').run(email);
+    const otp = crypto.randomUUID();
+    db.prepare('INSERT INTO pending_confirmations (id, username, email, otp_hash, expires_at, used) VALUES (?, ?, ?, ?, ?, 0)')
+      .run(otp, user.name, email, sha256(otp), Date.now() + 3600000);
+    await sendConfirmationEmail(email, user.name, otp);
+  }
+  res.json(SAFE);
+});
+
+// ── End email-verified auth routes ───────────────────────────────────────────
 
 // Login — name-claim: POST { name } → { token, user }
 // For jkh or other humans: claim a display name, get a persistent token
