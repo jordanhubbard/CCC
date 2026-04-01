@@ -128,7 +128,7 @@ button.primary { margin-top: 10px; background: var(--accent); border: none; padd
 </style>
 </head>
 <body>
-<div id="app">
+<div id="app" style="display:none">
   <nav class="sidebar">
     <header>
       <span>SquirrelChat</span>
@@ -210,8 +210,27 @@ const state = {
 };
 const API_BASE = '/api';
 const headers = () => ({ 'Content-Type': 'application/json', ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) });
+function showSessionExpiredBanner() {
+  let banner = document.getElementById('session-expired-banner');
+  if (banner) return; // already showing
+  banner = document.createElement('div');
+  banner.id = 'session-expired-banner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:#fff;text-align:center;padding:10px 16px;font-size:14px;';
+  banner.innerHTML = 'Session expired — <a href="#" style="color:#fff;font-weight:bold;text-decoration:underline;" id="banner-relogin">sign in again</a>';
+  document.body.prepend(banner);
+  document.getElementById('banner-relogin').onclick = (e) => {
+    e.preventDefault();
+    banner.remove();
+    logout();
+  };
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  if (res.status === 401) {
+    showSessionExpiredBanner();
+    throw new Error('Unauthorized');
+  }
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -391,10 +410,6 @@ async function sendMessage(threadId = null) {
   const box = threadId ? document.getElementById('thread-input') : document.getElementById('composer');
   const text = box.value.trim();
   if (!text) return;
-  if (!state.user || !state.token) {
-    document.getElementById('login-modal').style.display = 'flex';
-    return;
-  }
   await api('/messages', {
     method: 'POST',
     body: JSON.stringify({ from: state.user.id || state.user.name, text, channel: state.currentChannel.id, mentions: [], thread_id: threadId }),
@@ -497,7 +512,6 @@ function setupSSE() {
 }
 function setupLogin() {
   const modal = document.getElementById('login-modal');
-  if (!state.user || !state.token) modal.style.display = 'flex';
   document.getElementById('login-btn').onclick = async () => {
     const nameVal = document.getElementById('login-name').value.trim();
     const tokenVal = document.getElementById('login-token').value.trim();
@@ -528,6 +542,7 @@ function setupLogin() {
       localStorage.setItem('sc_user', JSON.stringify(user));
       localStorage.setItem('sc_token', token);
       modal.style.display = 'none';
+      document.getElementById('app').style.display = '';
       init();
     } catch (err) {
       alert('Login failed: ' + err.message);
@@ -769,7 +784,13 @@ setInterval(loadAgentStatus, 15000);
 setupLogin();
 setupEvents();
 setupMicButton();
-if (state.user && state.token) init();
+if (state.user && state.token) {
+  document.getElementById('app').style.display = '';
+  init();
+} else {
+  // No saved session — show login modal immediately, app stays hidden
+  document.getElementById('login-modal').style.display = 'flex';
+}
 
 // Handle browser back/forward navigation between channels
 window.addEventListener('popstate', (e) => {
