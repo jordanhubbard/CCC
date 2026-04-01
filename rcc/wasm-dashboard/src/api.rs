@@ -168,6 +168,28 @@ pub async fn fetch_providers() -> Result<Vec<Provider>, String> {
         .map_err(|e| e.to_string())
 }
 
+// ── Cap audit events ──────────────────────────────────────────────────────────
+
+pub async fn fetch_cap_events(limit: u32, slot: Option<u32>, event_type: Option<&str>) -> Result<crate::types::CapEventsResponse, String> {
+    let mut url = format!("/api/agentos/cap-events?limit={}", limit);
+    if let Some(s) = slot       { url.push_str(&format!("&slot={}", s)); }
+    if let Some(t) = event_type { url.push_str(&format!("&type={}", t)); }
+
+    let resp = Request::get(&url)
+        .header("Authorization", &auth_header())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    resp.json::<crate::types::CapEventsResponse>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
 pub async fn fetch_calendar() -> Result<Vec<CalEvent>, String> {

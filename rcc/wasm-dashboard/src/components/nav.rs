@@ -8,6 +8,7 @@ const TABS: &[Tab] = &[
     Tab::Providers,
     Tab::Projects,
     Tab::Calendar,
+    Tab::Audit,
     Tab::GeekView,
     Tab::Settings,
 ];

@@ -9,6 +9,7 @@ pub enum Tab {
     Providers,
     Projects,
     Calendar,
+    Audit,
     GeekView,
     Settings,
 }
@@ -22,10 +23,37 @@ impl Tab {
             Tab::Providers => "⚡ Providers",
             Tab::Projects  => "Projects",
             Tab::Calendar  => "Calendar",
+            Tab::Audit     => "🔍 Audit",
             Tab::GeekView  => "🖥️ Geek View",
             Tab::Settings  => "⚙️ Settings",
         }
     }
+}
+
+// ── Cap audit event (mirrors cap_audit_entry_t from cap_audit_log.c) ─────────
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CapEvent {
+    pub seq:        u64,
+    pub ts:         u64,
+    pub tick:       String,
+    pub event_type: String,
+    pub slot_id:    u32,
+    pub agent_id:   u32,
+    pub caps_mask:  String,
+    pub caps_names: Vec<String>,
+}
+
+// ── Cap events response ───────────────────────────────────────────────────────
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapEventsResponse {
+    pub events:        Vec<CapEvent>,
+    pub total_in_ring: u64,
+    pub slots:         Vec<u32>,
+    pub event_types:   Vec<String>,
+    pub cap_classes:   Vec<String>,
+    pub generated_at:  u64,
 }
 
 // ── Queue item ────────────────────────────────────────────────────────────────

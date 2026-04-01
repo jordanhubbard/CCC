@@ -12,6 +12,7 @@ use crate::components::{
     appeal_queue::AppealQueue,
     kanban::KanbanBoard,
     bus::BusTab,
+    audit::AuditTab,
     geek_view::GeekView,
     metrics::MetricsPanel,
     providers::ProvidersPanel,
@@ -97,6 +98,9 @@ fn App() -> impl IntoView {
                     }.into_any(),
                     Tab::Bus => view! {
                         <BusTab />
+                    }.into_any(),
+                    Tab::Audit => view! {
+                        <AuditTab />
                     }.into_any(),
                     Tab::Providers => view! {
                         <ProvidersPanel />

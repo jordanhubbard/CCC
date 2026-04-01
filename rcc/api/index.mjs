@@ -7367,6 +7367,79 @@ loadPackages();
       });
     }
 
+    // ── GET /api/agentos/cap-events — cap_audit_log ring buffer events ─────
+    // Returns recent GRANT/REVOKE/ATTENUATION/DENY events from the agentOS
+    // cap_audit_log PD (cap_audit_log.c, commit 1cfffeb).
+    // Data source: synthetic ring simulation matching the on-disk format
+    // described in cap_audit_log.c (cap_audit_entry_t, 32 bytes/entry).
+    // When sparky AgentFS integration is live the ring can be fetched over
+    // /api/agentfs/<sparky>/cap_audit_ring and parsed in-process.
+    if (method === 'GET' && path.startsWith('/api/agentos/cap-events')) {
+      const url   = new URL(`http://h${req.url}`);
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '200', 10), 500);
+      const filterSlot = url.searchParams.get('slot');     // filter by slot_id
+      const filterType = url.searchParams.get('type');     // GRANT|REVOKE|ATTENUATION|DENY
+      const exportJson = url.searchParams.get('export') === '1';
+
+      const now     = Date.now();
+      const window  = 60 * 60 * 1000; // 1 hour of history
+      const TYPES   = ['GRANT','REVOKE','ATTENUATION','DENY'];
+      const CAP_CLASSES = {
+        FS:0x01, NET:0x02, GPU:0x04, IPC:0x08, TIMER:0x10, STDIO:0x20, SPAWN:0x40, SWAP:0x80
+      };
+      const CAP_NAMES = Object.keys(CAP_CLASSES);
+
+      function sr(n, s2) { return ((n * 2053 + s2 * 6271) % 997) / 997; }
+      const seed = Math.floor(now / 30000); // re-seed every 30s for stable display
+
+      const entries = [];
+      for (let i = 0; i < 300; i++) {
+        const slotId   = Math.floor(sr(i, seed) * 8);
+        const typIdx   = Math.floor(sr(i + 100, seed) * TYPES.length);
+        const evType   = TYPES[typIdx];
+        // build a caps_mask from 1-3 random cap bits
+        let caps = 0;
+        const nc = 1 + Math.floor(sr(i + 200, seed) * 2);
+        for (let b = 0; b < nc; b++) {
+          const cIdx = Math.floor(sr(i * 10 + b, seed) * CAP_NAMES.length);
+          caps |= CAP_CLASSES[CAP_NAMES[cIdx]];
+        }
+        const capNames = CAP_NAMES.filter(n => caps & CAP_CLASSES[n]);
+        const ts   = Math.floor(now - window + sr(i + 300, seed) * window);
+        const seq  = 1000 + i;
+        const tick = 0x1000000 + i * 0x800 + Math.floor(sr(i + 400, seed) * 0x100);
+        entries.push({
+          seq,
+          ts,
+          tick: `0x${tick.toString(16).toUpperCase()}`,
+          event_type: evType,
+          slot_id: slotId,
+          agent_id: 100 + slotId * 10 + Math.floor(sr(i + 500, seed) * 5),
+          caps_mask: `0x${caps.toString(16).padStart(2,'0').toUpperCase()}`,
+          caps_names: capNames,
+        });
+      }
+      entries.sort((a, b) => b.ts - a.ts); // newest first
+
+      let filtered = entries;
+      if (filterSlot !== null) filtered = filtered.filter(e => e.slot_id === parseInt(filterSlot, 10));
+      if (filterType)          filtered = filtered.filter(e => e.event_type === filterType.toUpperCase());
+      filtered = filtered.slice(0, limit);
+
+      if (exportJson) {
+        res.setHeader('Content-Disposition', 'attachment; filename="cap-audit-export.json"');
+        return json(res, 200, { events: filtered, exported_at: new Date(now).toISOString(), count: filtered.length });
+      }
+      return json(res, 200, {
+        events:       filtered,
+        total_in_ring: entries.length,
+        slots:         [0,1,2,3,4,5,6,7],
+        event_types:   TYPES,
+        cap_classes:   CAP_NAMES,
+        generated_at:  now,
+      });
+    }
+
     // ── GET /api/agentos/events — synthetic agentOS lifecycle events ──────
     if (method === 'GET' && path.startsWith('/api/agentos/events')) {
       const now = Date.now();
