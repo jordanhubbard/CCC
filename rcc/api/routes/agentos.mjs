@@ -464,4 +464,79 @@ export default function registerRoutes(app, state) {
     state._tlCache = { ts: now, data: tlResult };
     return json(res, 200, tlResult);
   });
+
+  // ── GET /api/agentos/wasm-profiles — WASM slot profiler snapshot ─────────
+  // Returns per-slot CPU%, mem, tick counters, and call-stack frame breakdown.
+  // Data feeds the Profiler tab SVG flame graph in the wasm-dashboard.
+  // Polls agentOS console WS server at sparky:8790/api/agentos/profiler/snapshot
+  // when available; falls back to synthetic jitter for disconnected dev mode.
+  app.on('GET', '/api/agentos/wasm-profiles', async (req, res) => {
+    const now = Date.now();
+    const PROFILE_TTL = 2000; // 2s cache — matches dashboard poll interval
+    if (state._profileCache && (now - state._profileCache.ts) < PROFILE_TTL) {
+      return json(res, 200, state._profileCache.data);
+    }
+
+    const SPARKY_CONSOLE = process.env.SPARKY_CONSOLE_URL || 'http://100.87.229.125:8790';
+
+    let data = null;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const r = await fetch(`${SPARKY_CONSOLE}/api/agentos/profiler/snapshot`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.ok) data = await r.json();
+    } catch { /* sparky offline — use synthetic */ }
+
+    if (!data) {
+      // Synthetic profiler snapshot — stable jitter seeded on 2s buckets
+      const j = (base, range = 200, seed2 = 0) =>
+        Math.max(0, base + Math.floor(((((now / 2000) + seed2 + base) * 2053) % range) - range / 2));
+
+      data = {
+        ts: now,
+        slots: [
+          {
+            id: 0, name: 'inference_worker',
+            cpu_pct: Math.min(99, Math.max(1, j(42, 10, 0))),
+            mem_kb:  j(8192, 512, 1),
+            ticks:   j(12450, 200, 2),
+            frames: [
+              { fn: 'matmul_f32',   ticks: j(5200, 400, 3),  depth: 0 },
+              { fn: 'softmax',      ticks: j(2100, 200, 4),  depth: 1 },
+              { fn: 'embed_lookup', ticks: j(1800, 150, 5),  depth: 1 },
+              { fn: 'layer_norm',   ticks: j(900,  100, 6),  depth: 2 },
+              { fn: 'rms_norm',     ticks: j(620,  80,  7),  depth: 2 },
+              { fn: 'rope_enc',     ticks: j(480,  60,  8),  depth: 3 },
+            ],
+          },
+          {
+            id: 1, name: 'event_handler',
+            cpu_pct: Math.min(99, Math.max(1, j(8, 4, 10))),
+            mem_kb:  j(512, 64, 11),
+            ticks:   j(2340, 150, 12),
+            frames: [
+              { fn: 'dispatch_event', ticks: j(1200, 100, 13), depth: 0 },
+              { fn: 'cap_check',      ticks: j(600,  80,  14), depth: 1 },
+              { fn: 'ring_enqueue',   ticks: j(340,  60,  15), depth: 2 },
+            ],
+          },
+          {
+            id: 2, name: 'vibe_validator',
+            cpu_pct: Math.min(99, Math.max(1, j(15, 6, 20))),
+            mem_kb:  j(2048, 256, 21),
+            ticks:   j(4110, 300, 22),
+            frames: [
+              { fn: 'wasm_validate', ticks: j(2800, 200, 23), depth: 0 },
+              { fn: 'section_parse', ticks: j(1100, 100, 24), depth: 1 },
+              { fn: 'type_check',    ticks: j(540,  80,  25), depth: 2 },
+            ],
+          },
+        ],
+      };
+    }
+
+    state._profileCache = { ts: now, data };
+    return json(res, 200, data);
+  });
 }

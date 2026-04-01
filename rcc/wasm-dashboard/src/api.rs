@@ -168,6 +168,24 @@ pub async fn fetch_providers() -> Result<Vec<Provider>, String> {
         .map_err(|e| e.to_string())
 }
 
+// ── WASM profiler snapshot ────────────────────────────────────────────────────
+
+pub async fn fetch_wasm_profiles() -> Result<crate::types::ProfileSnapshot, String> {
+    let resp = Request::get("/api/agentos/wasm-profiles")
+        .header("Authorization", &auth_header())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.ok() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    resp.json::<crate::types::ProfileSnapshot>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ── Cap audit events ──────────────────────────────────────────────────────────
 
 pub async fn fetch_cap_events(limit: u32, slot: Option<u32>, event_type: Option<&str>) -> Result<crate::types::CapEventsResponse, String> {

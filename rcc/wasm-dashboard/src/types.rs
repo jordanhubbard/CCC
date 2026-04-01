@@ -10,6 +10,7 @@ pub enum Tab {
     Projects,
     Calendar,
     Audit,
+    Profiler,
     GeekView,
     Settings,
 }
@@ -24,10 +25,36 @@ impl Tab {
             Tab::Projects  => "Projects",
             Tab::Calendar  => "Calendar",
             Tab::Audit     => "🔍 Audit",
+            Tab::Profiler  => "🔥 Profiler",
             Tab::GeekView  => "🖥️ Geek View",
             Tab::Settings  => "⚙️ Settings",
         }
     }
+}
+
+// ── WASM profiler types ───────────────────────────────────────────────────────
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ProfileFrame {
+    #[serde(rename = "fn")]
+    pub fn_name: String,
+    pub ticks:   u64,
+    pub depth:   u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SlotProfile {
+    pub id:      u32,
+    pub name:    String,
+    pub cpu_pct: u32,
+    pub mem_kb:  u32,
+    pub ticks:   u64,
+    pub frames:  Vec<ProfileFrame>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProfileSnapshot {
+    pub ts:    u64,
+    pub slots: Vec<SlotProfile>,
 }
 
 // ── Cap audit event (mirrors cap_audit_entry_t from cap_audit_log.c) ─────────
