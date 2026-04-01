@@ -1,7 +1,7 @@
 use gloo_net::http::Request;
 use crate::types::{QueueItem, HeartbeatMap, BusMessage, Project, CalEvent, Provider};
 
-pub const AUTH_TOKEN: &str = "wq-5dcad756f6d3e345c00b5cb3dfcbdedb";
+pub const AUTH_TOKEN: &str = env!("RCC_AUTH_TOKEN", "Set RCC_AUTH_TOKEN at build time");
 
 fn auth_header() -> String {
     format!("Bearer {}", AUTH_TOKEN)
