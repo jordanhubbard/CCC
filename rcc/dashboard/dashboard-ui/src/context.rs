@@ -14,7 +14,39 @@ async fn fetch_queue() -> QueueResponse {
     let Ok(resp) = gloo_net::http::Request::get("/api/queue").send().await else {
         return QueueResponse::default();
     };
-    resp.json::<QueueResponse>().await.unwrap_or_default()
+    // Try typed deserialization first.
+    // If it fails (e.g., unexpected fields in 1000+ completed items),
+    // fall back to raw text + serde_json with lossy item parsing.
+    match resp.text().await {
+        Ok(text) => {
+            // Try full parse
+            if let Ok(q) = serde_json::from_str::<QueueResponse>(&text) {
+                return q;
+            }
+            // Full parse failed — try parsing items individually
+            // (completed array is huge and may contain non-standard fields)
+            if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text) {
+                let items = raw.get("items")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| serde_json::from_value::<crate::types::QueueItem>(v.clone()).ok())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let completed = raw.get("completed")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| serde_json::from_value::<crate::types::QueueItem>(v.clone()).ok())
+                            .collect::<Vec<_>>()
+                    });
+                return QueueResponse { items, completed };
+            }
+            QueueResponse::default()
+        }
+        Err(_) => QueueResponse::default(),
+    }
 }
 
 async fn fetch_heartbeats() -> HeartbeatMap {
