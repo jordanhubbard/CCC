@@ -1,0 +1,58 @@
+{
+  "id": "wq-SC-auth-001",
+  "title": "SquirrelChat: proper account system with email verification and token management",
+  "status": "proposed",
+  "priority": "high",
+  "assigned_to": "all",
+  "created_by": "natasha",
+  "created_at": "2026-03-31T21:30:00Z",
+  "description": "Build a real account/auth system for SquirrelChat replacing the current name-claim flow. Triggered by jkh feedback that auth gate is in the wrong place (mid-send prompt vs. pre-UI gate). The immediate UX fix (hide #app until login) shipped in a4c5665. This task covers the full account system.",
+  "requirements": [
+    "Registration: POST /api/register with {username, email} — sends HTML verification email with one-time link",
+    "Email link /verify?token=<otp> → creates user, issues persistent token, redirects to UI showing token with copy prompt",
+    "Login page (not modal): username + token fields, 'remember me' saves to localStorage",
+    "Forgot token / reset: enter email → triggers re-verification flow, invalidates old token",
+    "Token shown exactly once after verification — user encouraged to save to password manager",
+    "On return visit with no saved token: show login page (username + token)",
+    "On 401 mid-session: non-intrusive banner (already shipped), 'sign in again' → login page",
+    "Email must be confirmed within 1 hour or the pending registration expires",
+    "All users have: id, username, email (verified), token_hash, created_at, last_seen"
+  ],
+  "open_questions": [
+    "SMTP config: do we have an outbound email provider on do-host1? (sendgrid, SES, postfix?)",
+    "Should username be changeable after registration?",
+    "Multi-device: does one token work everywhere or per-device tokens?",
+    "Admin bootstrap: how does the first admin account get created (env var token stays as escape hatch?)",
+    "Rate limiting on /register and /reset to prevent abuse?"
+  ],
+  "proposed_implementation": {
+    "backend_changes": [
+      "New DB table: pending_registrations(id, username, email, otp_hash, expires_at)",
+      "Alter users table: add email TEXT UNIQUE, add token_hash (already exists), drop plaintext token col",
+      "POST /api/register: validate username unique + email unique, insert pending_registration, send email via nodemailer",
+      "GET /api/verify?token=<otp>: look up pending, check expiry, create user row, generate sc-token, return redirect to /?verified=1&token=<tok>",
+      "POST /api/reset: look up email, invalidate existing token, insert new pending_registration, send email",
+      "POST /api/login stays for token-based auth (username + token → verify, return user)",
+      "Keep ADMIN_TOKEN env var as escape hatch for agents/admin"
+    ],
+    "frontend_changes": [
+      "Replace login modal with a proper /login route (full-page, not modal)",
+      "Add /register route: username + email form",
+      "Add /verify route: handles redirect from email link, shows token with copy button",
+      "Add /reset route: email input → 'check your email' confirmation",
+      "localStorage: save {username, token} on 'remember me' checkbox (default on)",
+      "Boot: if no localStorage session → redirect to /login"
+    ],
+    "email": [
+      "nodemailer with SMTP config from env (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM)",
+      "HTML email template: SquirrelChat branding, big CTA button, fallback text link",
+      "1-hour expiry on verification links"
+    ],
+    "security": [
+      "OTP stored as SHA-256 hash, not plaintext",
+      "Token stored as bcrypt hash (or SHA-256 with salt) — plaintext never in DB",
+      "Rate limit /register and /reset to 3 req/hour per IP",
+      "HTTPS only (already enforced by Caddy)"
+    ]
+  }
+}
