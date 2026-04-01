@@ -1,0 +1,115 @@
+{
+  "id": "wq-RCC-audit-001",
+  "title": "RCC: full codebase audit — architecture conformance, legacy cleanup, 'as little as possible' refactor",
+  "status": "proposed",
+  "priority": "high",
+  "assigned_to": "all",
+  "created_by": "natasha",
+  "created_at": "2026-04-01T05:01:00Z",
+  "description": "Comprehensive audit of the RCC codebase against the original design philosophy in README.md: 'as much as necessary, as little as possible.' 10-30 reform tasks have been filed recently — this audit should reconcile them against what's actually in the code, identify legacy baggage from earlier generations, and produce a prioritized cleanup plan. Delegate as much as possible to openclaw, tokenhub, linux itself.",
+
+  "design_philosophy": {
+    "source": "rcc/README.md",
+    "principles": [
+      "As much as necessary, as little as possible",
+      "Delegate to: openclaw, tokenhub, linux itself (systemd, cron, ssh, etc.)",
+      "Bottom-up from necessity — no over-engineering for cases that don't exist yet",
+      "Every component exists because something broke or didn't exist yet",
+      "Abstractions extracted from working code, not invented in advance",
+      "Heterogeneous hardware must work without privileged network topology assumptions"
+    ]
+  },
+
+  "known_problems": {
+    "rcc_api_index_mjs": {
+      "lines": 8176,
+      "note": "Single file with 8000+ lines. God object. Contains: REST API, auth, secrets, Slack integration, SquirrelBus, brain orchestration, agent registry, queue management, tunnel management, tokenhub wiring, dashboard HTML/JS inline, email (missing), and more. Should be multiple focused modules.",
+      "delegation_candidates": [
+        "Auth/user management → dedicated auth module (wq-SC-auth-001 started this)",
+        "Dashboard HTML/JS → already in dashboard-server, should not be inlined here",
+        "Brain/pump logic → rcc/brain/ already exists, may be duplicated in api/",
+        "Slack integration → openclaw handles Slack; RCC shouldn't need its own Slack layer",
+        "Tunnel management → SSH + systemd; linux handles this",
+        "Tokenhub wiring → tokenhub is the LLM proxy; RCC should just call it, not manage it"
+      ]
+    },
+    "config_scatter": {
+      "note": "50+ process.env vars scattered across index.mjs with no central config schema. wq-RCC-setup-001 proposes rcc.json to consolidate, but that work hasn't started."
+    },
+    "recent_reform_tasks": {
+      "note": "wq-RCC-setup-001 (first-run TUI), wq-SC-auth-001 (auth system), wq-API-1775019456431 (config consolidation) + others. Need reconciliation — some may be duplicates or superseded."
+    }
+  },
+
+  "audit_scope": [
+    {
+      "area": "rcc/api/index.mjs",
+      "questions": [
+        "What does each route do — is it still needed or superseded?",
+        "What can be delegated to openclaw (Slack, messaging, TTS)?",
+        "What can be delegated to tokenhub (all LLM calls)?",
+        "What can be delegated to linux (systemd, cron, SSH tunnels)?",
+        "Which HTML/JS is inlined that should live in dashboard-ui?",
+        "Which env vars have no corresponding config UI or docs?"
+      ]
+    },
+    {
+      "area": "rcc/brain/",
+      "questions": [
+        "Is brain logic duplicated between brain/index.mjs and api/index.mjs?",
+        "Does the pump still match the workqueue schema (SCHEMA.md)?",
+        "Is preferred_executor routing still accurate vs current agent capabilities?"
+      ]
+    },
+    {
+      "area": "rcc/dashboard/",
+      "questions": [
+        "Is the Leptos WASM dashboard the canonical UI or is there still HTML inlined in api/?",
+        "Does the dashboard-server proxy cover all routes or are some still served directly from the Node API?"
+      ]
+    },
+    {
+      "area": "squirrelchat/",
+      "questions": [
+        "Does server.mjs have duplicate auth logic vs the new auth system in f7075c3?",
+        "Is SquirrelChat a dependency of RCC or a standalone service? Should it be decoupled?"
+      ]
+    },
+    {
+      "area": "workqueue/",
+      "questions": [
+        "Reconcile all wq-*.json files — are any superseded, duplicate, or conflicting?",
+        "Does queue.json schema match SCHEMA.md?",
+        "Are the .bak files safe to delete?"
+      ]
+    },
+    {
+      "area": "deploy/",
+      "questions": [
+        "Does the install/onboarding script still match current RCC architecture?",
+        "Is the curl|sh install story complete or aspirational?",
+        "Which systemd units are current vs legacy?"
+      ]
+    }
+  ],
+
+  "deliverables": [
+    "Audit report: what's in the code vs what README says should be there",
+    "Deletion candidates: legacy code, dead routes, superseded modules",
+    "Delegation map: what should move to openclaw / tokenhub / linux",
+    "Consolidated wq list: merge/close duplicate reform tasks, prioritize what's left",
+    "Refactor plan: how to break api/index.mjs into focused modules without breaking production",
+    "Config schema: proposed rcc.json structure covering all current process.env vars"
+  ],
+
+  "approach": {
+    "method": "Spawn a sub-agent (Claude Code or Codex) with read-only access to do the audit pass. Output a structured report. Crew reviews before any deletions happen.",
+    "constraint": "Audit first, delete never without crew review. Production is live on do-host1.",
+    "priority_order": [
+      "1. Identify what can be deleted entirely (dead code, superseded features)",
+      "2. Identify what can be delegated out (shrinks RCC's surface area)",
+      "3. Identify what needs to be split into modules (api/index.mjs decomposition)",
+      "4. Identify what's missing vs the architecture (config management, setup TUI)"
+    ]
+  }
+}
