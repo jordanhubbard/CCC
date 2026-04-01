@@ -17,7 +17,7 @@ const RCC_URL    = process.env.RCC_URL    || 'http://146.190.134.110:8789';
 const RCC_TOKEN  = process.env.RCC_AUTH_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const AGENT_NAME = process.env.AGENT_NAME || 'natasha';
 const INTERVAL_MS = 15 * 60 * 1000; // 15 min
-const TIMEOUT_MS  = 30_000;
+const TIMEOUT_MS  = 90_000; // cold-start for 18-32GB models can take 60-90s
 const TEST_PROMPT = 'Reply with exactly: OK';
 
 const MODELS_TO_CHECK = [
@@ -54,15 +54,32 @@ async function checkModel(model) {
 
 async function restartModel(model) {
   console.log(`[watchdog] restarting ${model}…`);
+  // Stop via API (graceful unload from VRAM)
   try {
-    await execFileAsync('ollama', ['stop', model], { timeout: 15000 });
-  } catch (_) {}
-  try {
-    await execFileAsync('ollama', ['run', model, '--keepalive', '0', '--verbose'], {
-      timeout: 60000,
-      env: { ...process.env, OLLAMA_KEEP_ALIVE: '0' },
+    await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, keep_alive: 0 }),
     });
   } catch (_) {}
+  // Brief pause to let model unload
+  await new Promise(r => setTimeout(r, 3000));
+  // Warm it back up via API (not `ollama run` which opens interactive mode)
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, prompt: 'OK', stream: false, options: { num_predict: 1 } }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    console.log(`[watchdog] ${model} reloaded`);
+  } catch (err) {
+    clearTimeout(timer);
+    console.log(`[watchdog] ${model} reload failed: ${err.message}`);
+  }
 }
 
 async function pushStatus() {
