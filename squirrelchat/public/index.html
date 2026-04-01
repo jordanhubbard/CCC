@@ -216,13 +216,8 @@ function showSessionExpiredBanner() {
   banner = document.createElement('div');
   banner.id = 'session-expired-banner';
   banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:#fff;text-align:center;padding:10px 16px;font-size:14px;';
-  banner.innerHTML = 'Session expired — <a href="#" style="color:#fff;font-weight:bold;text-decoration:underline;" id="banner-relogin">sign in again</a>';
+  banner.innerHTML = 'Session expired — <a href="/login" style="color:#fff;font-weight:bold;text-decoration:underline;">sign in again</a>';
   document.body.prepend(banner);
-  document.getElementById('banner-relogin').onclick = (e) => {
-    e.preventDefault();
-    banner.remove();
-    logout();
-  };
 }
 
 async function api(path, opts = {}) {
@@ -388,10 +383,7 @@ function signOut() {
   if (!confirm('Sign out of SquirrelChat?')) return;
   localStorage.removeItem('sc_user');
   localStorage.removeItem('sc_token');
-  state.user = null;
-  state.token = '';
-  document.getElementById('me-badge').textContent = '…';
-  document.getElementById('login-modal').style.display = 'flex';
+  location.href = '/login';
 }
 async function selectChannel(id) {
   state.currentChannel = state.channels.find(c => c.id === id) || { id, name: id };
@@ -511,43 +503,8 @@ function setupSSE() {
   evt.onerror = () => { evt.close(); setTimeout(setupSSE, 2000); };
 }
 function setupLogin() {
-  const modal = document.getElementById('login-modal');
-  document.getElementById('login-btn').onclick = async () => {
-    const nameVal = document.getElementById('login-name').value.trim();
-    const tokenVal = document.getElementById('login-token').value.trim();
-    if (!nameVal) return alert('Name required');
-    try {
-      let token, user;
-      if (tokenVal) {
-        // Token provided — verify it against /api/me
-        const r = await fetch('/api/me', { headers: { Authorization: `Bearer ${tokenVal}` } });
-        const data = await r.json();
-        if (data.id === 'anonymous' || data.needs_name) throw new Error('Invalid token');
-        token = tokenVal;
-        user = data;
-      } else {
-        // Name-claim login
-        const r = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: nameVal }),
-        });
-        if (!r.ok) throw new Error(await r.text());
-        const data = await r.json();
-        token = data.token;
-        user = data.user;
-      }
-      state.user = user;
-      state.token = token;
-      localStorage.setItem('sc_user', JSON.stringify(user));
-      localStorage.setItem('sc_token', token);
-      modal.style.display = 'none';
-      document.getElementById('app').style.display = '';
-      init();
-    } catch (err) {
-      alert('Login failed: ' + err.message);
-    }
-  };
+  // Auth is now handled by /login page — nothing to wire up here.
+  // Legacy modal is kept in DOM but never shown; app redirects to /login instead.
 }
 function setupEvents() {
   document.getElementById('send').onclick = () => sendMessage();
@@ -788,8 +745,8 @@ if (state.user && state.token) {
   document.getElementById('app').style.display = '';
   init();
 } else {
-  // No saved session — show login modal immediately, app stays hidden
-  document.getElementById('login-modal').style.display = 'flex';
+  // No saved session — redirect to /login (proper landing page, no modal)
+  location.href = '/login';
 }
 
 // Handle browser back/forward navigation between channels
