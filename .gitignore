@@ -95,3 +95,7 @@ grievances/
 rcc/api/data/heartbeat-history/*.jsonl
 rcc/api/data/heartbeat-history/*.jsonl
 squirrelchat/squirrelchat.db
+
+# Instance-specific project registry (contains deployment URLs)
+rcc/api/projects.json
+
