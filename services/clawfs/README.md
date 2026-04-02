@@ -1,13 +1,13 @@
 # AgentFS — Content-Addressed WASM Module Store
 
-Part of [agentOS](../../README.md). Owned by Natasha 🦊, runs on sparky.
+Part of the CCC services layer. Owned by Natasha 🦊, runs on sparky.
 
 ## What It Does
 
 Stores WASM modules by their SHA-256 hash. Same bytes = same hash = same module, always.
 Modules are immutable once stored. Backend is MinIO (S3-compatible).
 
-Integrates with the agentOS hot-swap demo: the vibe-swap slot requests a module by hash,
+Integrates with the CCC vibe-swap demo: the vibe-swap slot requests a module by hash,
 AgentFS streams it. Rocky/Bullwinkle can pull modules over Tailscale.
 
 ## API

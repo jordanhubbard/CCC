@@ -1,6 +1,6 @@
 /**
  * AgentFS test suite
- * Run: node --test agentOS/services/agentfs/agentfs.test.mjs
+ * Run: node --test services/clawfs/clawfs.test.mjs
  */
 
 import { test, describe, before, after } from 'node:test';

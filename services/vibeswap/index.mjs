@@ -1,5 +1,5 @@
 /**
- * agentOS VibeSwap — WASM hot-load pipeline with capability-gated execution
+ * CCC VibeSwap — WASM hot-load pipeline with capability-gated execution
  *
  * Flow: agent submits module → AgentFS stores by hash → VibeSwap validates →
  *       loads into capability-gated slot → executes → returns result

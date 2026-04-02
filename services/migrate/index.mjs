@@ -1,5 +1,5 @@
 /**
- * agentOS MigrateAgent — live WASM slot migration between mesh peers
+ * CCC MigrateAgent — live WASM slot migration between mesh peers
  *
  * Serialises a running VibeSwap slot (module hash, KV store, cap mask,
  * call counters, log history) into a portable snapshot, ships it to a
@@ -365,7 +365,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[agentOS] MigrateAgent running on http://localhost:${PORT} (node=${NODE_NAME})`);
-  console.log(`[agentOS] VibeSwap: ${VIBESWAP_URL} | AgentFS: ${AGENTFS_URL}`);
-  console.log(`[agentOS] ClawBus: ${SQUIRRELBUS || 'disabled'}`);
+  console.log(`[CCC] MigrateAgent running on http://localhost:${PORT} (node=${NODE_NAME})`);
+  console.log(`[CCC] VibeSwap: ${VIBESWAP_URL} | AgentFS: ${AGENTFS_URL}`);
+  console.log(`[CCC] ClawBus: ${SQUIRRELBUS || 'disabled'}`);
 });

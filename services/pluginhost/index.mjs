@@ -1,5 +1,5 @@
 /**
- * agentOS PluginHost — WASM hot-swap service (vibe-swap demo)
+ * CCC PluginHost — WASM hot-swap service (vibe-swap demo)
  *
  * REST API:
  *   GET  /pluginhost/health            Health + active slot inventory

@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=jkh
-WorkingDirectory=/home/jkh/.openclaw/workspace/agentOS/services/agentfs
+WorkingDirectory=/home/jkh/.openclaw/workspace/services/clawfs
 
 # Pre-start: verify MinIO is reachable before accepting connections.
 # Fails fast if MINIO_ENDPOINT is wrong or credentials are missing.

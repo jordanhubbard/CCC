@@ -1,5 +1,5 @@
 /**
- * agentOS AgentFS — content-addressed WASM module store
+ * CCC ClawFS — content-addressed WASM module store
  *
  * REST API:
  *   POST   /agentfs/modules          upload WASM blob → returns {hash, size, url}
@@ -42,7 +42,7 @@ import { tmpdir } from 'os';
 import { writeFile, unlink, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { DecisionJournal } from '../../../rcc/decision-journal/index.mjs';
+import { DecisionJournal } from '../../rcc/decision-journal/index.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const _dj = new DecisionJournal({ agent: 'natasha', silent: true });
 import {
