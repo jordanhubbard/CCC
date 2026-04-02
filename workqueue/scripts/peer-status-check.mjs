@@ -10,7 +10,7 @@
  * Usage: node peer-status-check.mjs [--dry-run]
  *
  * Designed to be called by any agent (natasha/rocky/bullwinkle).
- * Each agent writes its own view; Rocky's dashboard can aggregate.
+ * Each agent writes its own view; CCC dashboard can aggregate.
  */
 
 import https from 'https';

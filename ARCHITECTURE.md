@@ -14,7 +14,7 @@ A distributed AI agent coordination platform designed around the realities of ho
 
 ## Components
 
-### 1. Claw Command Center (RCC) — The Hub
+### 1. Claw Command Center (CCC) — The Hub
 
 A cheap Azure CPU VM. The hub of all coordination.
 
@@ -28,7 +28,7 @@ A cheap Azure CPU VM. The hub of all coordination.
 - The one component that **cannot** go dark. Agent death is recoverable (work lease expires). Hub death means nobody knows anything.
 - Exposes a health endpoint: `GET /health` → `{ok, lastLlmResponseAge, queueDepth, agents}`
 
-**Services running on RCC:**
+**Services running on CCC:**
 - `rcc-api` — REST API (HTTPS only), auth via user tokens
 - `rcc-dashboard` — Web UI (Claw Command Center dashboard)
 - `rcc-brain` — The LLM request queue + retry engine
@@ -43,16 +43,16 @@ A cheap Azure CPU VM. The hub of all coordination.
 Anything with a Claude/Codex CLI session in tmux, or any machine running OpenClaw.
 
 **Key properties:**
-- Outbound-only connectivity is sufficient — agents reach out to RCC, RCC doesn't reach in
+- Outbound-only connectivity is sufficient — agents reach out to CCC, CCC doesn't reach in
 - Intelligence: Claude CLI (interactive, SSO-auth'd by human) or NVIDIA keys (batch/async)
 - Registration: agent runs `rocky register <rcc-url> <token>` → gets its own agent token
-- Heartbeat: POST to RCC every N minutes with status, queue depth, GPU util, etc.
+- Heartbeat: POST to CCC every N minutes with status, queue depth, GPU util, etc.
 - Work lease: when claiming a work item, lease expires after TTL — another agent can reclaim
 
 **Agent types:**
 - `full` — Full VM, inbound+outbound, can run ClawBus receive endpoint
-- `container` — GPU container, outbound-only, polls RCC for messages
-- `local` — Home PC/desktop, NAT'd, polls RCC
+- `container` — GPU container, outbound-only, polls CCC for messages
+- `local` — Home PC/desktop, NAT'd, polls CCC
 - `spark` — DGX Spark, treated like `local` unless network allows more
 
 ---
@@ -63,7 +63,7 @@ Anything with a Claude/Codex CLI session in tmux, or any machine running OpenCla
 |------|-------|--------|---------|
 | Public | Azure Blob Storage | Internet (HTTPS, read-only public) | Published assets, renders, public docs |
 | Private Cloud | Azure Blob Storage | HTTPS + SAS token | In-progress work, agent-to-agent file transfer via cloud |
-| Local/Fast | MinIO (on RCC or agent cluster) | Internal network + key | High-speed inter-agent storage, queue state, logs |
+| Local/Fast | MinIO (on CCC or agent cluster) | Internal network + key | High-speed inter-agent storage, queue state, logs |
 
 RCC's `rcc-storage` service abstracts all three tiers behind a single API. Agents don't need to know which tier they're talking to.
 
@@ -73,7 +73,7 @@ RCC's `rcc-storage` service abstracts all three tiers behind a single API. Agent
 
 Each human gets:
 - A unique `username` + `bearer token` (HTTPS only, never in URLs)
-- Optional: one or more SSH public keys → SSH access to RCC for CLI
+- Optional: one or more SSH public keys → SSH access to CCC for CLI
 - Role: `owner` (first human, can add/remove others) or `collaborator`
 
 The "boss" (owner) can invite collaborators. Each collaborator can see the dashboard, post to the work queue, and message agents. Only the owner can add/remove agents and other humans.
@@ -85,10 +85,10 @@ The "boss" (owner) can invite collaborators. Each collaborator can see the dashb
 ```
 Human installs OpenClaw on GPU machine
 Human runs: rocky register https://rcc.example.com
-Rocky CLI prompts for RCC token
-RCC creates agent record, returns agent token
+Rocky CLI prompts for CCC token
+CCC creates agent record, returns agent token
 Agent stores token, starts heartbeat cron
-Agent appears on RCC dashboard
+Agent appears on CCC dashboard
 ```
 
 For Claude CLI agents (the gold standard):
@@ -100,7 +100,7 @@ Agent is now online and full-intelligence
 Human runs: rocky register https://rcc.example.com
 ```
 
-RCC doesn't automate the SSO login. It accepts the agent once it's running.
+CCC doesn't automate the SSO login. It accepts the agent once it's running.
 
 ---
 
@@ -206,7 +206,7 @@ Every agent node has two potential "workers" attached to it:
 
 ```
 jkh
- └── RCC (Rocky) — nervous system, queue, routing
+ └── CCC (Rocky) — nervous system, queue, routing
       ├── Rocky's Claude CLI (tmux) — fixed cost, parallel
       ├── Bullwinkle node
       │    └── Bullwinkle's Claude CLI (tmux) — fixed cost, parallel
@@ -220,11 +220,11 @@ jkh
 
 **Key insight:** Each agent node IS its own mini-hub. The inference key handles
 coordination/API traffic. The Claude CLI handles the actual intelligent work.
-RCC routes to the right worker based on task type.
+CCC routes to the right worker based on task type.
 
 ### Agent Registry Schema (capabilities)
 
-When an agent registers with RCC, it declares its capabilities:
+When an agent registers with CCC, it declares its capabilities:
 
 ```json
 {
@@ -251,7 +251,7 @@ When an agent registers with RCC, it declares its capabilities:
 
 ### Routing Rules
 
-RCC dispatch uses `preferred_executor` on each work item:
+CCC dispatch uses `preferred_executor` on each work item:
 
 | Task type | Preferred executor | Reason |
 |-----------|-------------------|--------|
@@ -260,7 +260,7 @@ RCC dispatch uses `preferred_executor` on each work item:
 | Complex reasoning / code gen | `claude_cli` | Fixed cost, powerful |
 | Multi-step orchestration | `claude_cli` | Parallel subagents, no token anxiety |
 | GPU render / simulation | `gpu` (direct) | Not an LLM job at all |
-| Routing decision (RCC brain) | `inference_key` (with fallback chain) | Hub must always work even if CLIs are down |
+| Routing decision (CCC brain) | `inference_key` (with fallback chain) | Hub must always work even if CLIs are down |
 
 **The golden rule:** Never route expensive reasoning to a metered agent without
 explicit override. Never route GPU work to an LLM. Keep the hub's inference key

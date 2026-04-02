@@ -1,4 +1,4 @@
-# Crash Reporting for Rocky's Services
+# Crash Reporting for CCC Services
 
 Automatic crash detection and task filing for Node.js services.
 

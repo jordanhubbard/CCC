@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * WQ Dashboard — Rocky's unified workqueue + ClawBus dashboard
+ * WQ Dashboard — CCC unified workqueue + ClawBus dashboard
  * Port 8788, dark theme, live data, client-side rendering
  */
 

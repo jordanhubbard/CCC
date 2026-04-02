@@ -21,7 +21,7 @@ Currently only Bullwinkle can write to Google Drive (via `gog` as jkh). Rocky an
 ## Options Evaluated
 
 ### Option A: Tailscale + MinIO (S3-compatible) on Rocky
-**What:** Run MinIO on do-host1 (Rocky's always-on VPS). All agents use S3 API.
+**What:** Run MinIO on do-host1 (CCC always-on hub). All agents use S3 API.
 - ✅ All agents read/write via standard S3 SDK/CLI
 - ✅ Rocky is always-on, so the store is always available
 - ✅ S3 API is well-supported, fast, versioned
@@ -77,7 +77,7 @@ Currently only Bullwinkle can write to Google Drive (via `gog` as jkh). Rocky an
 
 **Primary: Option A (MinIO on Rocky) + Option D (Cloudflare R2) as hybrid**
 
-- **MinIO on Rocky** for internal collaboration — workqueue sync, handoffs, fast file exchange between agents. Always available (Rocky's always-on), fast over Tailscale, S3 API.
+- **MinIO on CCC for internal collaboration — workqueue sync, handoffs, fast file exchange between agents. Always available (CCC hub, always-on), fast over Tailscale, S3 API.
 - **Cloudflare R2** for external publishing — media assets, public links, anything shared outside the tailnet. Free egress, managed, reliable.
 - **Google Drive** demoted to optional/archive — keep for existing shared folder, but stop using it as primary.
 

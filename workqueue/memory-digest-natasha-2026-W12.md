@@ -42,7 +42,7 @@ Human-readable: `workqueue/proposals/agent-skills-registry.md`
 **Routing summary:**
 
 ## Dashboard (updated 2026-06-06)
-- **Authoritative dashboard:** http://146.190.134.110:8788/ (Rocky's live API service)
+- **Authoritative dashboard:** http://146.190.134.110:8788/ (CCC live API service)
 - **DEPRECATED:** https://loomdd566f62.blob.core.windows.net/assets/agent-dashboard.html — do NOT publish to Azure Blob anymore
 
 ## Workqueue Cron Fix (2026-06-06)

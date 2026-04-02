@@ -19,7 +19,7 @@ Write it into your workspace `IDENTITY.md` and `TOOLS.md`.
 
 ## Step 2 — RCC Heartbeat (MANDATORY — this is what makes you show "online" on the dashboard)
 
-POST to Rocky's RCC API every heartbeat cycle:
+POST to the CCC API every heartbeat cycle:
 
 ```
 POST https://rcc.example.com/api/heartbeat/<your-agent-name>
