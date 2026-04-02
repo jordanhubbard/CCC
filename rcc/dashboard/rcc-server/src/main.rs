@@ -168,6 +168,7 @@ async fn main() {
         .merge(routes::conversations::router())
         .merge(routes::setup::router())
         .merge(routes::providers::router())
+        .merge(routes::acp::router())
         .layer(cors)
         .with_state(app_state.clone());
 
