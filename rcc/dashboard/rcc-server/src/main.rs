@@ -85,6 +85,7 @@ async fn main() {
         .merge(routes::geek::router())
         .merge(routes::ui::router())
         .merge(routes::agentos::router())
+        .merge(routes::memory::router())
         .layer(cors)
         .with_state(app_state.clone());
 
