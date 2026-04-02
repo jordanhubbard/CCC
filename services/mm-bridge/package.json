@@ -1,0 +1,17 @@
+{
+  "name": "mm-bridge",
+  "version": "1.0.0",
+  "description": "Mattermost ↔ SquirrelChat bidirectional message bridge",
+  "type": "module",
+  "main": "bridge.mjs",
+  "scripts": {
+    "start": "node bridge.mjs",
+    "dev": "BRIDGE_LOG_LEVEL=debug node bridge.mjs"
+  },
+  "dependencies": {
+    "eventsource": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
