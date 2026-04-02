@@ -546,6 +546,38 @@ AUTOSTART
   success "Gateway autostart wired into .bashrc (survives container restarts)"
 fi
 
+# ── 9e. Install agentfs-sync ──────────────────────────────────────────────
+AGENTFS_BIN="/usr/local/bin/agentfs-sync"
+AGENTFS_SVC="/etc/systemd/system/agentfs-sync.service"
+AGENTFS_SVC_SRC="$RCC_WORKSPACE/rcc/agentfs-sync/agentfs-sync.service"
+
+if [[ ! -f "$AGENTFS_BIN" ]]; then
+  info "Downloading agentfs-sync from MinIO..."
+  # Use public endpoint so agents without LAN access can reach it
+  _AGENTFS_URL="http://146.190.134.110:9000/agents/shared/bin/agentfs-sync"
+  if curl -sf --max-time 30 -o /tmp/agentfs-sync "$_AGENTFS_URL" 2>/dev/null; then
+    sudo install -m 755 /tmp/agentfs-sync "$AGENTFS_BIN"
+    rm -f /tmp/agentfs-sync
+    success "agentfs-sync installed from MinIO"
+  else
+    warn "agentfs-sync not yet deployed to MinIO — run after first build"
+  fi
+fi
+
+if [[ -f "$AGENTFS_BIN" ]]; then
+  if [[ -f "$AGENTFS_SVC_SRC" ]]; then
+    info "Installing agentfs-sync systemd service..."
+    mkdir -p "$HOME/.rcc/logs"
+    sed "s/AGENT_USER/$(whoami)/g" "$AGENTFS_SVC_SRC" | sudo tee "$AGENTFS_SVC" > /dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl enable agentfs-sync
+    sudo systemctl restart agentfs-sync 2>/dev/null || sudo systemctl start agentfs-sync 2>/dev/null || true
+    success "agentfs-sync service enabled and started"
+  else
+    warn "agentfs-sync service template not found in workspace — skipping service install"
+  fi
+fi
+
 # ── 10. Hardware fingerprint + heartbeat ─────────────────────────────────
 info "Collecting hardware fingerprint..."
 
