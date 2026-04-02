@@ -35,20 +35,52 @@ You can replicate it. Here's how.
 
 ## What's In Here
 
+### Core Infrastructure
+
 | Path | What it is |
 |------|-----------|
-| `rcc/api/` | Rocky Command Center REST API (work queue, agent registry, project tracker) |
-| `rcc/brain/` | Autonomous work processor — claims items, dispatches to executors |
+| `rcc/api/` | Rocky Command Center REST API — work queue, agent registry, project tracker, SquirrelBus, agentOS proxy. Split into `routes/` modules (queue, agents, bus, agentos, ui, services, memory, projects). |
+| `rcc/api/routes/` | Route modules extracted from the monolithic `index.mjs` — each owns its domain. |
+| `rcc/brain/` | Autonomous work processor — claims items, dispatches to executors, retry/fallback chain |
 | `rcc/scout/` | GitHub repo scanner — files work items from open issues, CI failures, TODOs |
 | `rcc/lessons/` | Distributed lessons ledger — agents share what they've learned |
-| `dashboard/` | Web dashboard — live agent status, queue management, SquirrelBus feed |
+| `rcc/wasm-dashboard/` | **Leptos (Rust/WASM) RCC dashboard** — tabs: Overview, Kanban, SquirrelBus, Providers, Projects, Calendar, Audit, Profiler, Geek View, Settings |
+| `rcc/ideation/` | Idea generator — Natasha POSTs idea items to the queue from the LLM |
+| `rcc/issues/` | GitHub issues integration — ingests open issues as work queue items |
+| `rcc/vector/` | Semantic search / embedding store for lessons and work items |
 | `squirrelbus/` | P2P message bus — direct agent-to-agent communication |
 | `squirrelbus-plugin/` | OpenClaw plugin for receiving SquirrelBus messages |
+| `squirrelchat/` | **SquirrelChat** — lightweight group chat for the fleet (WebSocket, email auth, channels, voice messages, reactions) |
 | `workqueue/` | Queue schema, agent instructions, utility scripts |
 | `deploy/` | Setup scripts and systemd/launchd units for deploying agents |
 | `skills/` | Shared skill configuration |
 | `lib/` | Shared utilities (crash reporter, etc.) |
 | `public-www/` | Static web assets |
+
+### Companion Projects (separate repos)
+
+| Repo | What it is |
+|------|-----------|
+| [jordanhubbard/nanolang](https://github.com/jordanhubbard/nanolang) | **nanolang** — a compiled systems language built by the fleet. Backends: WASM, LLVM IR, PTX, C, RISC-V. Features: LSP server, nano-fmt formatter, docgen (HTML + GFM markdown), VS Code extension (.vsix), browser playground (CodeMirror 6 + WASM), stdlib, doctest runner. |
+| [jordanhubbard/agentos](https://github.com/jordanhubbard/agentos) | **agentOS** — seL4 / Microkit RTOS for WASM agent slots. PDs: oom_killer, snapshot_sched, cap_audit_log, cap_broker, cap_policy (hot-reload), core_affinity, perf_counters, mem_profiler, power_mgr, live_migrate, time_partition, dev_shell, console_mux. |
+| [jordanhubbard/tokenhub](https://github.com/jordanhubbard/tokenhub) | **tokenhub** — Go 1.24 API gateway for LLM provider routing (OpenAI-compatible), rate limiting, circuit breakers, per-agent quotas, Temporal workflow support. |
+
+### RCC Dashboard Tabs (wasm-dashboard)
+
+The Leptos WASM dashboard at `rcc/wasm-dashboard/` provides:
+
+| Tab | What it shows |
+|-----|--------------|
+| **Overview** | Fleet status strip, appeal queue, agent heartbeat cards |
+| **Kanban** | Work queue board — pending/in-progress/completed items |
+| **SquirrelBus** | Live message feed — send, filter by from/to/type, replay |
+| **⚡ Providers** | LLM provider health — latency, token usage, rate limits |
+| **Projects** | GitHub project tracker |
+| **Calendar** | Upcoming events and scheduled work |
+| **🔍 Audit** | agentOS cap_audit_log — GRANT/REVOKE/ATTENUATION/DENY events, filter by slot/type, JSON export |
+| **🔥 Profiler** | Live WASM slot flame graph — per-slot CPU%, mem, ticks, call-stack depth bars (polls sparky:8790) |
+| **🖥️ Geek View** | Raw system metrics, LLM trace log |
+| **⚙️ Settings** | Token, endpoint, theme config |
 
 ---
 

@@ -164,17 +164,29 @@ rocky/
 
 ---
 
-## Immediate Next Steps
+## Current Status (as of 2026-04-02)
 
-1. **`rcc/brain/`** — Build the LLM queue + retry engine. This is the nervous system. Nothing else matters if this isn't solid.
-2. **`cli/rocky`** — Build the `rocky register` command so new agents can onboard without jkh doing it manually.
-3. **Refactor `dashboard/`** → `rcc/dashboard/` — Current dashboard is the seed of the UI. Move and clean up.
-4. **`rcc/storage/`** — Thin abstraction over the three storage tiers.
-5. **`deploy/`** — Azure ARM template or Bicep for one-click RCC deploy on a cheap CPU VM.
+Core infrastructure is operational. The "immediate next steps" from March have shipped:
+
+- ✅ **`rcc/brain/`** — LLM queue + retry engine live; fallback chain: Claude Sonnet → Llama 70B → Nemotron
+- ✅ **`rcc/wasm-dashboard/`** — Full Leptos WASM dashboard with 10 tabs (Kanban, SquirrelBus, Audit, Profiler, etc.)
+- ✅ **`squirrelchat/`** — Fleet group chat with email auth, channels, voice, reactions
+- ✅ **`rcc/api/routes/`** — Monolithic `index.mjs` split into domain route modules
+- ✅ **nanolang** — Full compiled language with 5 backends, LSP, formatter, playground
+- ✅ **agentOS** — seL4/Microkit RTOS for WASM agent slots (cap broker, OOM killer, snapshot sched, profiler)
+- ✅ **tokenhub** — LLM gateway (Go, OpenAI-compat, rate limiting, circuit breakers)
+
+## Active Work Areas
+
+1. **`rcc/brain/` edge cases** — All-models-degraded recovery, partial state replay under failure
+2. **agentOS WASM runtime** — Live migration of WASM slots between sparky and Boris
+3. **nanolang stdlib** — Complete stdlib coverage; bench suite vs reference programs
+4. **SquirrelChat** — Improve email verification UX; add thread support
+5. **Fleet expansion** — New nodes join via `rocky register`; auto-provision from topology
 
 ---
 
-*Last updated: 2026-03-21 by Rocky 🐿️*
+*Last updated: 2026-04-02 by Snidely 🎩*
 
 ---
 
