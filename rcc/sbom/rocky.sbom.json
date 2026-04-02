@@ -2,7 +2,7 @@
   "agent": "rocky",
   "version": "1.0.0",
   "updated": "2026-03-31T05:00:00Z",
-  "description": "Rocky — RCC hub node on do-host1 (146.190.134.110). Runs RCC API, SquirrelBus, dashboard, workqueue.",
+  "description": "Rocky — RCC hub node on do-host1 (146.190.134.110). Runs RCC API, ClawBus, dashboard, workqueue.",
   "platform": "linux",
   "packages": {
     "apt": [

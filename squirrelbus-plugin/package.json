@@ -1,7 +1,7 @@
 {
   "name": "squirrelbus-receiver",
   "version": "1.0.0",
-  "description": "OpenClaw plugin: receive SquirrelBus push messages from Rocky and inject as system events",
+  "description": "OpenClaw plugin: receive ClawBus push messages from Rocky and inject as system events",
   "type": "module",
   "main": "index.js",
   "openclaw": {

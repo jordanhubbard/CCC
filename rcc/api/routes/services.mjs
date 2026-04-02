@@ -644,7 +644,7 @@ export default function registerRoutes(app, state) {
       });
       busSent = busResp.ok;
     } catch (busErr) {
-      console.warn('[rcc-api] SquirrelBus broadcast failed:', busErr.message);
+      console.warn('[rcc-api] ClawBus broadcast failed:', busErr.message);
     }
 
     const logRecord = {

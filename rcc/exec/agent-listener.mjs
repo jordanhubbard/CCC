@@ -1,7 +1,7 @@
 /**
- * rcc/exec/agent-listener.mjs — SquirrelBus subscriber + remote code executor
+ * rcc/exec/agent-listener.mjs — ClawBus subscriber + remote code executor
  *
- * Listens on SquirrelBus for `rcc.exec` messages, verifies HMAC signatures,
+ * Listens on ClawBus for `rcc.exec` messages, verifies HMAC signatures,
  * executes code in a sandboxed vm.runInNewContext() (JS mode) or via
  * child_process.execFile (shell mode), and POSTs results back to the RCC API.
  *
@@ -261,9 +261,9 @@ async function handleExecMessage(message) {
   }
 }
 
-// ── Subscribe to SquirrelBus via SSE stream ────────────────────────────────
+// ── Subscribe to ClawBus via SSE stream ────────────────────────────────
 async function subscribe() {
-  console.log(`[exec-listener] Connecting to SquirrelBus at ${SQUIRRELBUS_URL}/bus/stream`);
+  console.log(`[exec-listener] Connecting to ClawBus at ${SQUIRRELBUS_URL}/bus/stream`);
 
   while (true) {
     try {
@@ -275,7 +275,7 @@ async function subscribe() {
         throw new Error(`SSE connect failed: ${resp.status}`);
       }
 
-      console.log('[exec-listener] Connected to SquirrelBus SSE stream');
+      console.log('[exec-listener] Connected to ClawBus SSE stream');
 
       // Read SSE stream line by line
       const reader = resp.body.getReader();

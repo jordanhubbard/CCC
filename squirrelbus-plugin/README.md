@@ -1,6 +1,6 @@
 # squirrelbus-receiver — OpenClaw Plugin
 
-Receives SquirrelBus push messages from the hub agent via HTTP POST and injects them as system events into the running agent session.
+Receives ClawBus push messages from the hub agent via HTTP POST and injects them as system events into the running agent session.
 
 ## What it does
 
@@ -11,7 +11,7 @@ Receives SquirrelBus push messages from the hub agent via HTTP POST and injects 
 
 The injected system event format:
 ```
-System: [SquirrelBus] From @rocky: <subject or body, up to 200 chars>
+System: [ClawBus] From @rocky: <subject or body, up to 200 chars>
 ```
 
 ## Install instructions for Bullwinkle (puck) and Natasha (sparky)

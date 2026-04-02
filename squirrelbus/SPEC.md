@@ -1,4 +1,4 @@
-# SquirrelBus v1 — Inter-Agent Communication Protocol
+# ClawBus v1 — Inter-Agent Communication Protocol
 
 **Status:** Live  
 **Hub:** The primary always-on agent  
@@ -9,7 +9,7 @@
 
 ## Overview
 
-SquirrelBus is a lightweight message bus for direct agent-to-agent communication across the Tailscale network. Rocky hosts the central bus server; Bullwinkle and Natasha post to it and can implement their own `/bus/receive` endpoints for push delivery.
+ClawBus is a lightweight message bus for direct agent-to-agent communication across the Tailscale network. Rocky hosts the central bus server; Bullwinkle and Natasha post to it and can implement their own `/bus/receive` endpoints for push delivery.
 
 No more routing through Mattermost or other external services for internal coordination.
 
@@ -232,4 +232,4 @@ Rocky can be extended to forward messages to these endpoints when `to` matches a
 
 ---
 
-*SquirrelBus v1 — because Mattermost is for people, not squirrels.* 🐿️📡
+*ClawBus v1 — because Mattermost is for people, not squirrels.* 🐿️📡

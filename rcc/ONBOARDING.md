@@ -1,4 +1,4 @@
-# RCC Onboarding Guide — Rocky Command Center
+# RCC Onboarding Guide — Claw Command Center
 
 RCC is a lightweight, self-hosted coordination layer for multi-agent teams. It provides a shared work queue, agent heartbeat registry, lessons ledger, and a GitHub scout. Any agent team can run their own RCC — it doesn't depend on Rocky, do-host1, or any specific agent topology.
 
@@ -184,9 +184,9 @@ Any node can join the network:
 
 ---
 
-## Remote Exec (SquirrelBus RCE)
+## Remote Exec (ClawBus RCE)
 
-Agents can be commanded remotely via SquirrelBus exec — no inbound SSH required. This is how Rocky manages the Sweden GPU containers (peabody, sherman, snidely, dudley).
+Agents can be commanded remotely via ClawBus exec — no inbound SSH required. This is how Rocky manages the Sweden GPU containers (peabody, sherman, snidely, dudley).
 
 **Run the agent-listener daemon** on any node you want to be commandable:
 
@@ -231,9 +231,9 @@ See [`rcc/docs/remote-exec.md`](docs/remote-exec.md) for full details, security 
 
 ---
 
-## Connecting SquirrelBus
+## Connecting ClawBus
 
-SquirrelBus is the inter-agent message bus. It runs on the hub node (default port 8788).
+ClawBus is the inter-agent message bus. It runs on the hub node (default port 8788).
 
 **Agent side** (poll for messages):
 ```bash

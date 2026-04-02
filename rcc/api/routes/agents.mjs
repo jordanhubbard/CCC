@@ -532,9 +532,9 @@ export default function registerRoutes(app, state) {
   // ── GET /api/geek/topology ─────────────────────────────────────────────
   app.on('GET', '/api/geek/topology', async (req, res) => {
     const nodes = [
-      { id: 'rocky',          label: 'Rocky',          type: 'agent',          host: 'do-host1',    chips: ['RCC API :8789','WQ Dashboard :8788','RCC Brain','SquirrelBus hub','Tailscale proxy'] },
-      { id: 'bullwinkle',     label: 'Bullwinkle',     type: 'agent',          host: 'puck',        chips: ['OpenClaw :18789','SquirrelBus :8788','launchd crons','disk free','uptime'] },
-      { id: 'natasha',        label: 'Natasha',        type: 'agent',          host: 'sparky',      chips: ['OpenClaw :18789','SquirrelBus /bus→:18799','Milvus :19530','CUDA/RTX','Ollama :11434'] },
+      { id: 'rocky',          label: 'Rocky',          type: 'agent',          host: 'do-host1',    chips: ['RCC API :8789','WQ Dashboard :8788','RCC Brain','ClawBus hub','Tailscale proxy'] },
+      { id: 'bullwinkle',     label: 'Bullwinkle',     type: 'agent',          host: 'puck',        chips: ['OpenClaw :18789','ClawBus :8788','launchd crons','disk free','uptime'] },
+      { id: 'natasha',        label: 'Natasha',        type: 'agent',          host: 'sparky',      chips: ['OpenClaw :18789','ClawBus /bus→:18799','Milvus :19530','CUDA/RTX','Ollama :11434'] },
       { id: 'boris',          label: 'Boris',          type: 'agent',          host: 'l40-sweden',  chips: ['OpenClaw gateway','L40 GPU','Omniverse headless'] },
       { id: 'milvus',         label: 'Milvus',         type: 'shared-service', host: 'do-host1',   port: 19530 },
       { id: 'minio',          label: 'MinIO',          type: 'shared-service', host: 'do-host1',   port: 9000 },
@@ -545,7 +545,7 @@ export default function registerRoutes(app, state) {
       { id: 'slack-omgjkh',   label: 'Slack (omgjkh)', type: 'external',       url: 'omgjkh.slack.com' },
       { id: 'slack-offtera',  label: 'Slack (offtera)', type: 'external',      url: 'offtera.slack.com' },
       { id: 'telegram',       label: 'Telegram',       type: 'external',       url: 'api.telegram.org' },
-      { id: 'squirrelbus',    label: 'SquirrelBus',    type: 'bus',            host: 'do-host1' },
+      { id: 'squirrelbus',    label: 'ClawBus',    type: 'bus',            host: 'do-host1' },
     ];
     const edges = [
       { from: 'rocky',      to: 'rcc-api',        type: 'persistent',  protocol: 'internal' },

@@ -224,7 +224,7 @@ node --test dashboard/test/api.test.mjs  # 22 tests
 
 | Type | Description |
 |------|-------------|
-| `full` | Full VM — inbound + outbound. Can receive SquirrelBus messages directly. |
+| `full` | Full VM — inbound + outbound. Can receive ClawBus messages directly. |
 | `container` | GPU container — outbound only. Polls RCC for messages. |
 | `local` | Home PC/desktop — NAT'd. Polls RCC. |
 | `spark` | DGX Spark — treated as `local` unless network allows more. |

@@ -1,5 +1,5 @@
 /**
- * Tests for SquirrelBus remote code execution
+ * Tests for ClawBus remote code execution
  * Covers: signing/verification library + API endpoints
  *
  * Run: node --test rcc/tests/api/exec.test.mjs

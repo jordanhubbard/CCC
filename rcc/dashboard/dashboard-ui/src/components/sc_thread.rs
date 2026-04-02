@@ -1,4 +1,4 @@
-// sc_thread.rs — Thread panel component for SquirrelChat
+// sc_thread.rs — Thread panel component for ClawChat
 // Bullwinkle (Track A UI) — shows thread replies in a side panel
 
 use leptos::*;

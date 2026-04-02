@@ -503,7 +503,7 @@ fn trigger_send(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 #[component]
-pub fn SquirrelChat() -> impl IntoView {
+pub fn ClawChat() -> impl IntoView {
     let (selected_channel, set_selected_channel) = create_signal("general".to_string());
     let (messages, set_messages) = create_signal(Vec::<ScMessage>::new());
     let (agents, set_agents) = create_signal(Vec::<ScUser>::new());

@@ -269,7 +269,7 @@ async fn sc_stream(State(state): State<Arc<AppState>>) -> Response<Body> {
     }
 }
 
-// --- /sc/* handlers (SquirrelChat proxy) ---
+// --- /sc/* handlers (ClawChat proxy) ---
 async fn sc_get(
     State(state): State<Arc<AppState>>,
     uri: axum::http::Uri,

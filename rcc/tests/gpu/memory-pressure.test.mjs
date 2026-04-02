@@ -56,7 +56,7 @@ function generateTestStrings(n) {
     'Rocky manages the API server on do-host1 in DigitalOcean.',
     'Bullwinkle handles calendar and iMessage on the Mac mini.',
     'Boris runs multi-GPU Omniverse workloads in Sweden.',
-    'SquirrelBus routes typed messages between agents in real time.',
+    'ClawBus routes typed messages between agents in real time.',
     'Memory files persist agent context across session restarts.',
     'CUDA 13.0 enables unified memory access on the DGX Spark.',
   ];

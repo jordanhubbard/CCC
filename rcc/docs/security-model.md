@@ -1,6 +1,6 @@
 # RCC Security Model
 
-Rocky Command Center uses a layered token hierarchy to keep secrets
+Claw Command Center uses a layered token hierarchy to keep secrets
 centralized, distribute only what each agent needs, and enable rotation
 without re-provisioning.
 

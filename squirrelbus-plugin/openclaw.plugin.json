@@ -1,7 +1,7 @@
 {
   "id": "squirrelbus-receiver",
-  "name": "SquirrelBus Receiver",
-  "description": "Receives SquirrelBus push messages from the hub agent via HTTP and injects them as system events into the agent session.",
+  "name": "ClawBus Receiver",
+  "description": "Receives ClawBus push messages from the hub agent via HTTP and injects them as system events into the agent session.",
   "version": "1.0.0",
   "configSchema": {
     "jsonSchema": {

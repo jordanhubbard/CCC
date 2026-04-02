@@ -1,4 +1,4 @@
-// sc_reactions.rs — Emoji picker and reactions bar components for SquirrelChat
+// sc_reactions.rs — Emoji picker and reactions bar components for ClawChat
 // Bullwinkle (Track A UI) — imports from sc_types.rs
 
 use leptos::*;

@@ -1,5 +1,5 @@
 /**
- * SquirrelBus receive sidecar for Natasha (sparky)
+ * ClawBus receive sidecar for Natasha (sparky)
  * Listens for POST /bus/receive from other agents, injects into OpenClaw main session
  * via the local gateway chatCompletions endpoint.
  *
@@ -24,7 +24,7 @@ async function forwardToGateway(msg) {
   const type = msg.type || 'text';
 
   // Format as a system notification into the main session
-  const content = `[SquirrelBus message from ${from}]\nType: ${type}\nSubject: ${subject}\n\n${body}`;
+  const content = `[ClawBus message from ${from}]\nType: ${type}\nSubject: ${subject}\n\n${body}`;
 
   const payload = {
     model: 'openclaw:main',
@@ -93,5 +93,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  log(`SquirrelBus receive sidecar listening on 127.0.0.1:${PORT}`);
+  log(`ClawBus receive sidecar listening on 127.0.0.1:${PORT}`);
 });

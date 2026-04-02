@@ -1,4 +1,4 @@
-// sc_types.rs — SquirrelChat shared type definitions
+// sc_types.rs — ClawChat shared type definitions
 // Single source of truth. Both squirrelchat.rs and future component modules import from here.
 // Wire format matches squirrelchat-server (Rust/Axum) models.rs exactly.
 

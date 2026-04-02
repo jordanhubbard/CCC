@@ -1,6 +1,6 @@
 {
   "id": "wq-SC-auth-001",
-  "title": "SquirrelChat: proper account system with email verification and token management",
+  "title": "ClawChat: proper account system with email verification and token management",
   "status": "proposed",
   "priority": "high",
   "assigned_to": "all",
@@ -9,7 +9,7 @@
   "updated_at": "2026-03-31T21:38:00Z",
   "updated_by": "natasha",
   "update_notes": "R2: fold in Rocky's infrastructure check + redirect flow fix. ADMIN_TOKEN hashed on first boot. Verification redirect uses /?verified=1&token=<tok> query param so SPA can pick up token. Port 587 confirmed open to SendGrid. Blocker: SendGrid API key needed from jkh.",
-  "description": "Build a real account/auth system for SquirrelChat replacing the current name-claim flow. Triggered by jkh feedback that auth gate is in the wrong place (mid-send prompt vs. pre-UI gate). The immediate UX fix (hide #app until login) shipped in a4c5665. This task covers the full account system.",
+  "description": "Build a real account/auth system for ClawChat replacing the current name-claim flow. Triggered by jkh feedback that auth gate is in the wrong place (mid-send prompt vs. pre-UI gate). The immediate UX fix (hide #app until login) shipped in a4c5665. This task covers the full account system.",
   "blockers": [
     "SendGrid API key needed (SENDGRID_SMTP_PASS env var). jkh: do you have a SendGrid account, or should we create one? Outbound port 587 is confirmed open on do-host1."
   ],
@@ -60,7 +60,7 @@
     "email": [
       "lettre crate (Rust) with SendGrid SMTP relay (smtp.sendgrid.net:587)",
       "Env vars: SENDGRID_SMTP_USER='apikey', SENDGRID_SMTP_PASS=<SendGrid API key>, SMTP_FROM=noreply@squirrelchat.jordanhubbard.net",
-      "HTML email template: SquirrelChat branding, big CTA verify button, plain text fallback link, 1-hour expiry note"
+      "HTML email template: ClawChat branding, big CTA verify button, plain text fallback link, 1-hour expiry note"
     ],
     "security": [
       "OTP stored as SHA-256 hash, not plaintext",

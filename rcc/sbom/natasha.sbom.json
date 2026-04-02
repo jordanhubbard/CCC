@@ -2,7 +2,7 @@
   "agent": "natasha",
   "version": "1.0.0",
   "updated": "2026-03-31T05:00:00Z",
-  "description": "Natasha — agent on puck (Mac mini). Idea generation, coding tasks, SquirrelChat.",
+  "description": "Natasha — agent on puck (Mac mini). Idea generation, coding tasks, ClawChat.",
   "platform": "macos",
   "packages": {
     "apt": [],
@@ -54,5 +54,5 @@
     "SQUIRRELBUS_TOKEN",
     "TOKENHUB_API_KEY"
   ],
-  "notes": "Natasha agent on Mac mini puck. Handles idea generation, SquirrelChat hosting, and coding tasks."
+  "notes": "Natasha agent on Mac mini puck. Handles idea generation, ClawChat hosting, and coding tasks."
 }

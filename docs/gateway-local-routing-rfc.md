@@ -233,7 +233,7 @@ audio input → try whisper-cli (local, sparky GB10, large-v3)
 ### Capabilities Enabled
 
 - **Voice notes** (mobile → nodes → sparky STT → text → agent)
-- **SquirrelChat voice messages** — transcribe before indexing to Milvus
+- **ClawChat voice messages** — transcribe before indexing to Milvus
 - **Meeting transcription** — POST audio to `sparky.local:8792/inference` directly
 - **Whisper HTTP API** — `POST http://sparky.local:8792/inference` (multipart, `file=@audio.wav`)
   Returns `{"text": "..."}`. Supports `response_format=json|text|srt|vtt`.

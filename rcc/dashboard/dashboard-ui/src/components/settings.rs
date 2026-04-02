@@ -131,7 +131,7 @@ pub fn Settings() -> impl IntoView {
                                     <span class="config-val mono">{cfg.tokenhub_url}</span>
                                 </div>
                                 <div class="config-row">
-                                    <span class="config-key">"SquirrelChat URL"</span>
+                                    <span class="config-key">"ClawChat URL"</span>
                                     <span class="config-val mono">{cfg.sc_url}</span>
                                 </div>
                                 <div class="config-row">

@@ -1,4 +1,4 @@
-# 🐿️ Rocky Command Center Dashboard
+# 🐿️ Claw Command Center Dashboard
 
 > **This directory is archived.** The Node.js dashboard (`server.mjs`) has been replaced by the Rust/WASM dashboard at `rcc/dashboard/`. See that directory for the live implementation.
 
@@ -12,8 +12,8 @@ The old Express.js dashboard has been fully superseded by the v2 Rust/Axum + Lep
 
 All old features ported:
 - Agent heartbeats, metrics, work queue
-- SquirrelBus viewer + send widget
-- SquirrelChat
+- ClawBus viewer + send widget
+- ClawChat
 - Activity map (`/activity`)
 - MinIO browser (`/s3/*`)
 - Kanban, Idea Incubator, Changelog, Activity Feed

@@ -9,7 +9,7 @@ Directives are authoritative: they override convenience, habit, and inference.
 
 **Agents must not store secrets locally beyond what RCC provides.**
 
-The Rocky Command Center (RCC) is the sole source of truth for all shared
+The Claw Command Center (RCC) is the sole source of truth for all shared
 credentials (API keys, tokens, signing secrets, storage credentials).
 
 ### Rules
@@ -59,7 +59,7 @@ See `rcc/docs/security-model.md` for the full model.
 
 Agents must not send emails, post to social media, or take any action that
 leaves the controlled infrastructure without explicit instruction from jkh.
-Internal RCC/SquirrelBus/Slack/Mattermost comms are fine.
+Internal RCC/ClawBus/Slack/Mattermost comms are fine.
 
 ---
 

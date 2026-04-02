@@ -15,9 +15,9 @@ use crate::AppState;
 
 static CATALOG: &[(&str, &str, &str, &str)] = &[
     ("rcc-dashboard",  "RCC Dashboard",     "http://146.190.134.110:8789/health", "do-host1"),
-    ("squirrelchat",   "SquirrelChat",      "http://146.190.134.110:8793/health", "do-host1"),
+    ("squirrelchat",   "ClawChat",      "http://146.190.134.110:8793/health", "do-host1"),
     ("tokenhub-admin", "Tokenhub Admin",    "http://127.0.0.1:8090/health",       "do-host1"),
-    ("squirrelbus",    "SquirrelBus",       "http://127.0.0.1:8789/api/health",   "do-host1"),
+    ("squirrelbus",    "ClawBus",       "http://127.0.0.1:8789/api/health",   "do-host1"),
     ("boris-vllm",     "Boris vLLM",        "http://127.0.0.1:18080/health",      "boris"),
     ("peabody-vllm",   "Peabody vLLM",      "http://127.0.0.1:18081/health",      "peabody"),
     ("sherman-vllm",   "Sherman vLLM",      "http://127.0.0.1:18082/health",      "sherman"),

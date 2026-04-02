@@ -16,7 +16,7 @@ We're virtual employees working on multiple projects together. jkh is the benign
 
 | Area | Current | v2 |
 |---|---|---|
-| SquirrelBus | Front page | Own tab, filtered |
+| ClawBus | Front page | Own tab, filtered |
 | Kanban | None | Per-agent columns, color-coded cards |
 | Calendar | None | Shared, bidirectional, agent-writable |
 | Projects | List page (/projects) | Health cards with GitHub data |
@@ -35,7 +35,7 @@ New top-level nav tabs:
 2. **Kanban** (task board)
 3. **Calendar** (shared calendar)
 4. **Projects** (was at /projects, enhanced)
-5. **SquirrelBus** (moved from front page, now filtered)
+5. **ClawBus** (moved from front page, now filtered)
 6. ⚙️ **Settings** (comms channels, agent config — was nowhere)
 
 ---
@@ -184,13 +184,13 @@ All channels that are wired to this project:
 │ Slack #itsallgeektome (offtera)   🟡 linked  last: 8h   │
 │ GitHub Issues                     🔴 3 open             │
 │ GitHub PRs                        🟣 1 open             │
-│ SquirrelBus (tag: usdagent)       🟢 12 msgs today      │
+│ ClawBus (tag: usdagent)       🟢 12 msgs today      │
 └──────────────────────────────────────────────────────────┘
 ```
 - Channels sourced from `project.slack_channels[]` + inferred from GitHub repo
-- SquirrelBus row auto-populates if any messages in the log carry this project's tag
+- ClawBus row auto-populates if any messages in the log carry this project's tag
 - Status dots: active (recent message), linked (configured but quiet), unconfigured (grey)
-- Click a channel row → jump to SquirrelBus tab filtered to that channel + project
+- Click a channel row → jump to ClawBus tab filtered to that channel + project
 
 **3. Existing panels (retained)**
 - GitHub issues + PRs panel (already built)
@@ -200,7 +200,7 @@ All channels that are wired to this project:
 
 ---
 
-## 5. SquirrelBus (Moved to Tab)
+## 5. ClawBus (Moved to Tab)
 
 ### Changes
 - No longer on front page
@@ -222,7 +222,7 @@ Table: channel name, type, configured endpoints, status, last activity
 - Mattermost: rocky↔bullwinkle DM, rocky↔natasha DM, #agent-shared
 - Slack: #itsallgeektome (offtera), #rockyandfriends (omgjkh)
 - Telegram: jkh direct
-- SquirrelBus: local + peer URLs
+- ClawBus: local + peer URLs
 - Milvus: vector search endpoint status
 
 **Agent Registry**
@@ -259,12 +259,12 @@ jkh's framing: "a distributed brain." This is a visualization of the entire syst
 | Slack (omgjkh) | External | `omgjkh.slack.com` |
 | Slack (offtera) | External | `offtera.slack.com` |
 | Telegram | External | jkh's phone |
-| SquirrelBus | Internal bus | JSONL log + fan-out |
+| ClawBus | Internal bus | JSONL log + fan-out |
 
 **Edges (connections):**
 - Solid line = persistent connection (agent ↔ RCC API heartbeat)
 - Dashed line = on-demand call (agent → inference gateway when processing)
-- Animated dots flowing along edges = live traffic (when SquirrelBus or heartbeat activity detected)
+- Animated dots flowing along edges = live traffic (when ClawBus or heartbeat activity detected)
 - Edge label: protocol (HTTP/REST, Mattermost DM, Slack Socket Mode, etc.)
 
 **Live indicators:**
@@ -275,14 +275,14 @@ jkh's framing: "a distributed brain." This is a visualization of the entire syst
 - MinIO: bucket count (if mc is available)
 
 **Traffic flow visualization:**
-- When a SquirrelBus message fires, animate a particle along the path: sender → SquirrelBus → recipient
+- When a ClawBus message fires, animate a particle along the path: sender → ClawBus → recipient
 - When a heartbeat arrives, flash the agent→RCC API edge
 - When a brain request fires, animate: RCC Brain → NVIDIA Gateway → RCC Brain
 - Traffic log panel at bottom: last 20 events with timestamp, type, from→to
 
 ### Implementation Notes
 - Static topology with live data overlaid (not truly force-directed — layout is hand-tuned for clarity)
-- Data sources: `/api/heartbeats`, `/api/health`, `/api/brain/status`, SquirrelBus JSONL tail
+- Data sources: `/api/heartbeats`, `/api/health`, `/api/brain/status`, ClawBus JSONL tail
 - SSE endpoint `GET /api/geek/stream` — server-sent events for live traffic updates
 - New endpoint `GET /api/geek/topology` — returns the full node/edge map with current live status
 - Rendering: SVG or Canvas (SVG preferred for accessibility + CSS animations)
@@ -301,9 +301,9 @@ Services get **their own nodes** only when they are shared infrastructure called
 - SearXNG (do-host1, port 8888) — called by all agents
 
 Everything else renders as **service chips** on their host machine node:
-- Rocky chips: RCC API (:8789), WQ Dashboard (:8788), RCC Brain, SquirrelBus hub, Tailscale proxy
-- Bullwinkle chips: OpenClaw gateway (:18789, reachability-checked), SquirrelBus push endpoint (:8788), launchd crons (heartbeat-rcc.plist + openclaw), disk free, uptime, tmux session count
-- Natasha/Sparky chips: OpenClaw gateway (:18789), SquirrelBus (/bus → :18799 via gateway, not a separate external port), Milvus (:19530), CUDA/RTX ⚡, Ollama (:11434, verified ✅ — models: qwen2.5-coder:32b, qwen3-coder:latest)
+- Rocky chips: RCC API (:8789), WQ Dashboard (:8788), RCC Brain, ClawBus hub, Tailscale proxy
+- Bullwinkle chips: OpenClaw gateway (:18789, reachability-checked), ClawBus push endpoint (:8788), launchd crons (heartbeat-rcc.plist + openclaw), disk free, uptime, tmux session count
+- Natasha/Sparky chips: OpenClaw gateway (:18789), ClawBus (/bus → :18799 via gateway, not a separate external port), Milvus (:19530), CUDA/RTX ⚡, Ollama (:11434, verified ✅ — models: qwen2.5-coder:32b, qwen3-coder:latest)
 - Boris chips: OpenClaw gateway, L40 GPU ⚡, Omniverse headless
 
 Rationale: machine-first topology tells you *where to SSH* for debugging. Shared-service nodes tell you *where traffic actually goes*. Hybrid gives both without the noise of a full service mesh diagram.
@@ -317,7 +317,7 @@ Rationale: machine-first topology tells you *where to SSH* for debugging. Shared
 │                                                                  │
 │   [Telegram]←──────────────────────────[Rocky]──────[RCC API]   │
 │                                          │  │         │    │     │
-│   [Slack omgjkh]←───[SquirrelBus]───────┤  └──[Brain]┘  [MinIO]│
+│   [Slack omgjkh]←───[ClawBus]───────┤  └──[Brain]┘  [MinIO]│
 │   [Slack offtera]                        │              [SearXNG]│
 │                                   [Bullwinkle]   [Milvus]       │
 │   [NVIDIA Gateway]←──────────────────┤  │                       │
@@ -391,7 +391,7 @@ Six operational pain points, all incorporated into the design:
 2. **Heartbeat sparkline** — per-agent 24h timeline (green/red dots). The 7h haimaker outage would have been immediately visible as a gap. Not just current status — *history*.
 3. **Cron job status panel** — each agent's cron jobs: last success, last failure, consecutive error streak. Silent cron failures (47 in a row) must surface on the dashboard, not in logs nobody reads.
 4. **Provider health panel** — which model provider each agent is using, last response status, last error with timestamp. "haimaker: 400 since 14:16 PT" is worth more than 3 hours of log-digging.
-5. **Unanswered cross-agent message queue** — filtered view showing SquirrelBus messages sent to an agent without a response. "Rocky → Bullwinkle: 12 unanswered pings" is a health signal, not chat noise.
+5. **Unanswered cross-agent message queue** — filtered view showing ClawBus messages sent to an agent without a response. "Rocky → Bullwinkle: 12 unanswered pings" is a health signal, not chat noise.
 6. **Soul commit timeline** — last commit per agent in the `souls/` repo. jkh would like seeing this. It's semantically meaningful and earns its dashboard real estate.
 
 Bullwinkle's column scope: crons, providers, session health, Google Workspace connectivity. Not GPU metrics, container status, or Boris-specific.
@@ -404,7 +404,7 @@ Bullwinkle's column scope: crons, providers, session health, Google Workspace co
 
 **Bullwinkle Geek View service chips:**
 - OpenClaw gateway (:18789) — with live reachability check
-- SquirrelBus push endpoint (:8788, if running)
+- ClawBus push endpoint (:8788, if running)
 - Active tmux sessions (e.g. claude-puck worker) — show count
 
 **Calendar scope clarification (Bullwinkle):**
@@ -439,7 +439,7 @@ The two calendars are separate concerns.
 ### Phase 3 — Geek View (Rocky + Natasha input on topology)
 - [ ] SVG topology layout
 - [ ] SSE stream for live traffic
-- [ ] Animate particles on SquirrelBus events + heartbeats
+- [ ] Animate particles on ClawBus events + heartbeats
 - [ ] Traffic log panel + unanswered message queue
 - [ ] Soul commit timeline per agent
 

@@ -1,4 +1,4 @@
-# Rocky Command Center — Architecture
+# Claw Command Center — Architecture
 
 ## What We're Building
 
@@ -14,7 +14,7 @@ A distributed AI agent coordination platform designed around the realities of ho
 
 ## Components
 
-### 1. Rocky Command Center (RCC) — The Hub
+### 1. Claw Command Center (RCC) — The Hub
 
 A cheap Azure CPU VM. The hub of all coordination.
 
@@ -30,9 +30,9 @@ A cheap Azure CPU VM. The hub of all coordination.
 
 **Services running on RCC:**
 - `rcc-api` — REST API (HTTPS only), auth via user tokens
-- `rcc-dashboard` — Web UI (Rocky Command Center dashboard)
+- `rcc-dashboard` — Web UI (Claw Command Center dashboard)
 - `rcc-brain` — The LLM request queue + retry engine
-- `rcc-bus` — SquirrelBus message routing (agent ↔ agent via hub)
+- `rcc-bus` — ClawBus message routing (agent ↔ agent via hub)
 - `rcc-storage` — Storage tier abstraction (public Azure Blob / private Azure / local MinIO proxy)
 - `rcc-watchdog` — Monitors agent heartbeats, escalates stale agents to jkh
 
@@ -50,7 +50,7 @@ Anything with a Claude/Codex CLI session in tmux, or any machine running OpenCla
 - Work lease: when claiming a work item, lease expires after TTL — another agent can reclaim
 
 **Agent types:**
-- `full` — Full VM, inbound+outbound, can run SquirrelBus receive endpoint
+- `full` — Full VM, inbound+outbound, can run ClawBus receive endpoint
 - `container` — GPU container, outbound-only, polls RCC for messages
 - `local` — Home PC/desktop, NAT'd, polls RCC
 - `spark` — DGX Spark, treated like `local` unless network allows more
@@ -120,7 +120,7 @@ while true:
        - if retries >= 3: try next model in fallback chain
        - if all models exhausted: mark item as "llm-unavailable", alert watchdog
   6. Check agent heartbeats — escalate stale agents
-  7. Route any pending SquirrelBus messages
+  7. Route any pending ClawBus messages
   8. Sleep(tick_interval)
 ```
 
@@ -144,10 +144,10 @@ State is persisted to disk after every tick. If rcc-brain crashes and restarts, 
 
 ```
 rocky/
-├── rcc/                    # Rocky Command Center services
+├── rcc/                    # Claw Command Center services
 │   ├── api/                # REST API server
 │   ├── brain/              # LLM queue + retry engine
-│   ├── bus/                # SquirrelBus routing
+│   ├── bus/                # ClawBus routing
 │   ├── dashboard/          # Web UI (evolving from current dashboard/)
 │   ├── storage/            # Storage tier abstraction
 │   └── watchdog/           # Agent health monitor
@@ -169,7 +169,7 @@ rocky/
 Core infrastructure is operational. The "immediate next steps" from March have shipped:
 
 - ✅ **`rcc/brain/`** — LLM queue + retry engine live; fallback chain: Claude Sonnet → Llama 70B → Nemotron
-- ✅ **`rcc/wasm-dashboard/`** — Full Leptos WASM dashboard with 10 tabs (Kanban, SquirrelBus, Audit, Profiler, etc.)
+- ✅ **`rcc/wasm-dashboard/`** — Full Leptos WASM dashboard with 10 tabs (Kanban, ClawBus, Audit, Profiler, etc.)
 - ✅ **`squirrelchat/`** — Fleet group chat with email auth, channels, voice, reactions
 - ✅ **`rcc/api/routes/`** — Monolithic `index.mjs` split into domain route modules
 - ✅ **nanolang** — Full compiled language with 5 backends, LSP, formatter, playground
@@ -181,7 +181,7 @@ Core infrastructure is operational. The "immediate next steps" from March have s
 1. **`rcc/brain/` edge cases** — All-models-degraded recovery, partial state replay under failure
 2. **agentOS WASM runtime** — Live migration of WASM slots between sparky and Boris
 3. **nanolang stdlib** — Complete stdlib coverage; bench suite vs reference programs
-4. **SquirrelChat** — Improve email verification UX; add thread support
+4. **ClawChat** — Improve email verification UX; add thread support
 5. **Fleet expansion** — New nodes join via `rocky register`; auto-provision from topology
 
 ---

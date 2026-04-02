@@ -1,7 +1,7 @@
 /**
  * AgentFS distributed replication subscriber
  *
- * Polls SquirrelBus for agentos.fs.* events and replicates blobs to/from
+ * Polls ClawBus for agentos.fs.* events and replicates blobs to/from
  * local MinIO, enabling any mesh node to serve all WASM modules fleet-wide.
  *
  * Enable:  AGENTFS_REPLICATE=1
@@ -79,7 +79,7 @@ async function replicateDelete(s3Client, bucket, payload) {
 }
 
 /**
- * Start the SquirrelBus replication subscriber.
+ * Start the ClawBus replication subscriber.
  * Polls for agentos.fs.* events and replicates blobs to local MinIO.
  *
  * @param {object} s3Client   - AWS S3Client instance

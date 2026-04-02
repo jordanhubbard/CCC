@@ -64,7 +64,7 @@ Stores two types of records:
   id: "synthesis-1743100000000",
   agentName: "rocky",
   sessionDate: "2026-03-27T00:00:00Z",
-  keyOutcomes: ["Bootstrap hardened", "SquirrelBus RCE shipped"],
+  keyOutcomes: ["Bootstrap hardened", "ClawBus RCE shipped"],
   allLearnings: ["Token validation is critical at .env write time"],
   significance: 8,
   themes: ["bootstrap", "bus", "infra"],

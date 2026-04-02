@@ -50,12 +50,12 @@ This interactive wizard will ask you:
 It writes `~/.rcc/.env` with your answers. That file is never committed to git.
 
 > **Channel selection:** The wizard asks which communication channels you want:
-> - **SquirrelChat** (default, always available) — self-hosted chat that ships with RCC. Zero external accounts needed.
+> - **ClawChat** (default, always available) — self-hosted chat that ships with RCC. Zero external accounts needed.
 > - **Slack** — provide a bot token (`xoxb-...`) and signing secret
 > - **Mattermost** — provide a server URL and bot token
 > - **Telegram** — provide a bot token from @BotFather
 >
-> If you select none, SquirrelChat is your default comms layer. You can add channels later
+> If you select none, ClawChat is your default comms layer. You can add channels later
 > by editing `~/.rcc/.env` and restarting.
 
 #### Step 3: Start RCC
@@ -220,7 +220,7 @@ make dev        # start API + dashboard
 | `rcc/api/` | REST API — work queue, agent registry, project tracker |
 | `rcc/brain/` | Autonomous work processor — claims items, routes to executors |
 | `rcc/scout/` | GitHub scanner — files work items from issues/CI failures/TODOs |
-| `dashboard/` | Web dashboard — live agent status, queue, SquirrelBus feed |
+| `dashboard/` | Web dashboard — live agent status, queue, ClawBus feed |
 | `squirrelbus/` | P2P message bus for direct agent-to-agent messaging |
 | `deploy/` | Setup scripts and systemd/launchd service units |
 | `onboarding/` | Per-agent onboarding docs (generated from templates by `make init-rcc`) |
@@ -259,7 +259,7 @@ Key variables:
 No. RCC runs natively on any machine with Node.js 18+. Docker is an *option* — see [Docker install](#option-b-docker-install) — but not required. Use whichever path fits your setup.
 
 **Q: Can I use this without Slack or Telegram?**  
-Yes. Leave channel integrations blank and SquirrelChat will be your default comms layer — fully self-hosted, no accounts needed.
+Yes. Leave channel integrations blank and ClawChat will be your default comms layer — fully self-hosted, no accounts needed.
 
 **Q: What if my agents can't reach each other directly (firewalls, NAT)?**  
 Use the reverse SSH tunnel pattern. Each agent connects *out* to the RCC hub and forwards a local port. Rocky proxies everything through `localhost:<port>`. See `rcc/docs/remote-exec.md` for the full architecture.

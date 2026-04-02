@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
 
     let port = std::env::var("SQUIRRELCHAT_PORT").unwrap_or_else(|_| "8793".into());
     let addr = format!("0.0.0.0:{}", port);
-    info!("SquirrelChat v2 listening on {}", addr);
+    info!("ClawChat v2 listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

@@ -2,7 +2,7 @@
 /**
  * vllm-watchdog.mjs — Health-check each Sweden vLLM tunnel port.
  * If /health is unresponsive while the tunnel port is LISTEN, trigger
- * a restart via RCC exec API (SquirrelBus shell exec to the container).
+ * a restart via RCC exec API (ClawBus shell exec to the container).
  *
  * Usage: node vllm-watchdog.mjs [--dry-run]
  * Runs as a one-shot check; intended to be called from RCC heartbeat or cron.

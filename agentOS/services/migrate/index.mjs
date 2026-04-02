@@ -13,7 +13,7 @@
  *   POST  /migrate/:id/restore     { snapshot }  → restores on this node
  *   GET   /migrate/health          → { ok, activeMigrations }
  *
- * SquirrelBus event (published on complete):
+ * ClawBus event (published on complete):
  *   type: "agentos.migrate"
  *   payload: { migrationId, slotName, fromPeer, toPeer, wasmHash, durationMs }
  *
@@ -29,7 +29,7 @@
  *   4. Forward snapshot + migrationId to targetPeer via HTTP
  *   5. Target receives POST /migrate/:id/restore → loads WASM + restores state
  *   6. Source receives 200 from target → tears down source slot
- *   7. Publish agentos.migrate event to SquirrelBus
+ *   7. Publish agentos.migrate event to ClawBus
  */
 
 import { createServer } from 'http';
@@ -166,7 +166,7 @@ async function restoreSnapshot(snapshot) {
   return loadR.data;
 }
 
-// ── Publish to SquirrelBus ────────────────────────────────────────────────────
+// ── Publish to ClawBus ────────────────────────────────────────────────────
 async function publishMigrateEvent(rec) {
   if (!SQUIRRELBUS) return;
   const payload = {
@@ -187,7 +187,7 @@ async function publishMigrateEvent(rec) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(5000),
-  }).catch(e => console.warn('[migrate] SquirrelBus publish failed:', e.message));
+  }).catch(e => console.warn('[migrate] ClawBus publish failed:', e.message));
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -367,5 +367,5 @@ const server = createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`[agentOS] MigrateAgent running on http://localhost:${PORT} (node=${NODE_NAME})`);
   console.log(`[agentOS] VibeSwap: ${VIBESWAP_URL} | AgentFS: ${AGENTFS_URL}`);
-  console.log(`[agentOS] SquirrelBus: ${SQUIRRELBUS || 'disabled'}`);
+  console.log(`[agentOS] ClawBus: ${SQUIRRELBUS || 'disabled'}`);
 });

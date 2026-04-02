@@ -2,7 +2,7 @@
  * squirrelbus-receiver — OpenClaw plugin
  *
  * Registers a Gateway HTTP route POST /squirrelbus/receive.
- * When called with a SquirrelBus message JSON body, validates the bearer token,
+ * When called with a ClawBus message JSON body, validates the bearer token,
  * appends the message to the local bus log, and injects it as a system event
  * into the next agent session via the before_prompt_build hook.
  */
@@ -22,7 +22,7 @@ function formatSystemEvent(msg) {
   const content = msg.subject
     ? `${msg.subject}: ${body}`
     : body;
-  return `System: [SquirrelBus] From @${msg.from}: ${content.slice(0, 200)}`;
+  return `System: [ClawBus] From @${msg.from}: ${content.slice(0, 200)}`;
 }
 
 function getLocalBusLogPath(workspaceDir) {
@@ -36,8 +36,8 @@ function getLocalBusLogPath(workspaceDir) {
 /** @type {import('@openclaw/sdk').OpenClawPluginDefinition} */
 const definition = {
   id: PLUGIN_ID,
-  name: 'SquirrelBus Receiver',
-  description: 'Receives SquirrelBus push messages from Rocky and injects them as system events.',
+  name: 'ClawBus Receiver',
+  description: 'Receives ClawBus push messages from Rocky and injects them as system events.',
   version: '1.0.0',
 
   register(api) {
@@ -106,7 +106,7 @@ const definition = {
         pendingInjections.push({ msg: normalized, systemText, receivedAt: Date.now() });
 
         logger.info(`[${PLUGIN_ID}] Received bus message from @${normalized.from}: ${systemText.slice(0, 100)}`);
-        console.log(`\n📨 [SquirrelBus] PUSH from @${normalized.from} → ${normalized.to}: ${systemText}\n`);
+        console.log(`\n📨 [ClawBus] PUSH from @${normalized.from} → ${normalized.to}: ${systemText}\n`);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, id: normalized.id }));
@@ -138,7 +138,7 @@ const definition = {
         }
       }
 
-      logger.info(`[${PLUGIN_ID}] Injected ${toInject.length} pending SquirrelBus message(s) into prompt.`);
+      logger.info(`[${PLUGIN_ID}] Injected ${toInject.length} pending ClawBus message(s) into prompt.`);
     });
 
     logger.info(`[${PLUGIN_ID}] Registered: POST /squirrelbus/receive (token auth)`);

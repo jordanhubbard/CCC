@@ -5,11 +5,11 @@
  * Runs on sparky. Every 5 seconds:
  *   1. Fetches GET /api/agentos/metrics (Prometheus text format) from local RCC
  *   2. Parses into a JSON metrics object
- *   3. POSTs to SquirrelBus as type "agentos.metrics"
+ *   3. POSTs to ClawBus as type "agentos.metrics"
  *
  * Environment:
- *   RCC_AUTH_TOKEN    — Bearer token for local RCC + SquirrelBus (default hardcoded)
- *   SQUIRRELBUS_URL   — SquirrelBus base URL (default http://100.89.199.14:8788)
+ *   RCC_AUTH_TOKEN    — Bearer token for local RCC + ClawBus (default hardcoded)
+ *   SQUIRRELBUS_URL   — ClawBus base URL (default http://100.89.199.14:8788)
  *   RCC_LOCAL_URL     — Local RCC metrics endpoint (default http://127.0.0.1:8789)
  */
 

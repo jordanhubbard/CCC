@@ -109,7 +109,7 @@ pub struct QueueResponse {
     pub completed: Option<Vec<QueueItem>>,
 }
 
-// ── SquirrelBus ──────────────────────────────────────────────────────────────
+// ── ClawBus ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BusMessage {

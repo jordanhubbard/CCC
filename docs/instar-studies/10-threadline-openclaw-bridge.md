@@ -32,14 +32,14 @@ Threadline's thread model:
 
 **Honest assessment: Architecturally interesting; largely superseded by what we already have.**
 
-### What we already have (SquirrelBus)
-Our fleet already has SquirrelBus — a working A2A message bus. Rocky built it, all
+### What we already have (ClawBus)
+Our fleet already has ClawBus — a working A2A message bus. Rocky built it, all
 three agents are connected, it handles POST/GET/SSE. It's not as sophisticated as
 Threadline (no crypto identity, no trust tiers, no circuit breaker) but it's live
 and working today.
 
 ### What Threadline does better
-| Feature | SquirrelBus | Threadline |
+| Feature | ClawBus | Threadline |
 |---------|------------|------------|
 | Delivery confirmation | ❌ | ✅ (ACK) |
 | Agent identity | name string | Ed25519 keypair |
@@ -52,13 +52,13 @@ and working today.
 ### Key insight from OpenClawBridge
 The bridge pattern itself is valuable — the idea of mapping our existing session
 model to a more structured protocol without requiring a full rewrite. If we ever
-upgrade SquirrelBus or adopt a proper A2A protocol, this bridge approach is the
+upgrade ClawBus or adopt a proper A2A protocol, this bridge approach is the
 right way to do it (thin adapter, inject callbacks, no hard dependencies on the
 underlying protocol).
 
 ### What's directly stealable now
 1. **Trust tier pattern** — even without the full Threadline stack, we could add
-   `untrusted/basic/trusted/verified` tiers to SquirrelBus receiver logic. Useful
+   `untrusted/basic/trusted/verified` tiers to ClawBus receiver logic. Useful
    if external agents (beyond Rocky/Bullwinkle/Boris) start connecting.
 
 2. **Compute budget check pattern** — `computeMeter.check(agent, trustLevel, tokenEstimate)`
@@ -69,7 +69,7 @@ underlying protocol).
    when actual token count isn't known yet.
 
 4. **ContextThreadMap concept** — persistent room→thread mapping survives restarts.
-   We could adapt this for SquirrelBus to maintain conversation continuity across
+   We could adapt this for ClawBus to maintain conversation continuity across
    agent restarts.
 
 ### What's not worth porting now
@@ -86,15 +86,15 @@ underlying protocol).
 **Study only — note the patterns; no immediate adoption.**
 
 Two specific pieces worth a future workqueue item:
-1. **SquirrelBus trust tiers** — add `level` field to SquirrelBus sender identity,
+1. **ClawBus trust tiers** — add `level` field to ClawBus sender identity,
    gate certain message types on trust level. Mostly relevant when external/untrusted
    agents connect.
-2. **SquirrelBus delivery ACK** — the lack of delivery confirmation is a known gap
+2. **ClawBus delivery ACK** — the lack of delivery confirmation is a known gap
    (we even have an idea item for it: wq-API-1774346683592). Threadline's ACK pattern
    is the reference implementation to follow.
 
-**Estimated effort for trust tiers on SquirrelBus:** ~3 hours.  
-**Estimated effort for full Threadline adoption:** weeks; not worth it vs. SquirrelBus.
+**Estimated effort for trust tiers on ClawBus:** ~3 hours.  
+**Estimated effort for full Threadline adoption:** weeks; not worth it vs. ClawBus.
 
 ---
 

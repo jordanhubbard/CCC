@@ -1,8 +1,8 @@
 /**
- * context-handoff.mjs — Smart Context Handoff via SquirrelBus
+ * context-handoff.mjs — Smart Context Handoff via ClawBus
  *
  * When jkh says "tell Rocky about X" or "brief Bullwinkle on the storage topology",
- * any agent can call this to package up context and relay it via SquirrelBus.
+ * any agent can call this to package up context and relay it via ClawBus.
  *
  * Usage:
  *   node context-handoff.mjs --to rocky --topic "storage topology"
@@ -159,7 +159,7 @@ async function gatherContext(topic, wqId) {
   return sections.join('\n\n');
 }
 
-// ---- Send via SquirrelBus ----
+// ---- Send via ClawBus ----
 async function sendViaBus(targetAgent, subject, body) {
   const payload = {
     from: fromAgent,

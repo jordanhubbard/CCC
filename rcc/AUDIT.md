@@ -5,7 +5,7 @@
 
 ## Executive Summary
 
-The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that has grown by accretion over multiple generations and now contains the REST API, auth, SquirrelBus, brain orchestration, Slack integration, tunnel management, inline HTML/JS for six different UIs (~1,220 lines), and two duplicated function definitions. The module directory structure (`brain/`, `scout/`, `vector/`, etc.) exists and has working code, but most of it is imported into the monolith rather than running as independent services. The design philosophy says "delegate to openclaw, tokenhub, linux" — in practice, RCC has re-implemented Slack messaging, LLM routing, and HTML-serving that already exists in those systems. **Recommendation: targeted refactor, not greenfield.** The core data model (queue, agents, heartbeats, secrets) is sound. The problem is surface area — too much code doing things it shouldn't own.
+The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that has grown by accretion over multiple generations and now contains the REST API, auth, ClawBus, brain orchestration, Slack integration, tunnel management, inline HTML/JS for six different UIs (~1,220 lines), and two duplicated function definitions. The module directory structure (`brain/`, `scout/`, `vector/`, etc.) exists and has working code, but most of it is imported into the monolith rather than running as independent services. The design philosophy says "delegate to openclaw, tokenhub, linux" — in practice, RCC has re-implemented Slack messaging, LLM routing, and HTML-serving that already exists in those systems. **Recommendation: targeted refactor, not greenfield.** The core data model (queue, agents, heartbeats, secrets) is sound. The problem is surface area — too much code doing things it shouldn't own.
 
 ---
 
@@ -16,7 +16,7 @@ The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that h
 | Config / env vars | 27–51 | 50+ process.env reads, path constants | **Extract** | Should be rcc.json + config module. wq-RCC-setup-001 covers this. |
 | Services map | 52–128 | Probes URLs, returns health | **Keep / Extract** | Move to `rcc/services/index.mjs` |
 | Semantic dedup | 129–172 | Background Milvus indexer for queue dedup | **Keep / Extract** | Move to `rcc/vector/` (module already exists there) |
-| SquirrelBus | 173–238 | File-based message bus (JSONL) | **Extract** | `squirrelbus/` dir exists at repo root with a separate implementation. Duplication — needs reconciliation. |
+| ClawBus | 173–238 | File-based message bus (JSONL) | **Extract** | `squirrelbus/` dir exists at repo root with a separate implementation. Duplication — needs reconciliation. |
 | Slack config + helpers | 239–285, 1802–1900 | Bot token, signing secret, post/verify/format | **Delegate** | openclaw handles Slack natively. RCC should send via openclaw or tokenhub, not own a bot. |
 | Heartbeats | 286–352 | In-memory agent heartbeat tracking, offline detection | **Keep / Extract** | Core RCC feature. Move to `rcc/agents/heartbeat.mjs` |
 | Disappearance detection | 353–403 | Polls agents, fires Slack alert on offline | **Keep, simplify** | The Slack alert should go through openclaw, not a direct bot call |
@@ -45,7 +45,7 @@ The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that h
 - **rcc/crush-server/:** 630 files (mostly node_modules). This is the "crush" coding agent integration that was disabled in `app.rs` comments (`// coding_agent::CodingAgent, // disabled — crush-server not deployed`). May be entirely superseded by the ACP/Codex delegation pattern. **Candidate for deletion, verify with Rocky.**
 - **rcc/heartbeat-local/:** 3 files, separate `server.mjs`. Appears to be an early standalone heartbeat server before it was folded into the main API. Likely dead.
 - **rcc/ideation/:** 1 file. Unclear if active.
-- **SquirrelBus duplication:** `squirrelbus/` at repo root has `receive-server.mjs`, `context-handoff.mjs`, `SPEC.md`. `rcc/api/index.mjs` has its own in-process bus at lines 173–238. These are two different implementations. The standalone `squirrelbus/` appears to be the original design; the in-process version is what's actually running. **Needs reconciliation.**
+- **ClawBus duplication:** `squirrelbus/` at repo root has `receive-server.mjs`, `context-handoff.mjs`, `SPEC.md`. `rcc/api/index.mjs` has its own in-process bus at lines 173–238. These are two different implementations. The standalone `squirrelbus/` appears to be the original design; the in-process version is what's actually running. **Needs reconciliation.**
 
 ---
 
@@ -96,7 +96,7 @@ rcc/
 
 | File | Status | Notes |
 |------|--------|-------|
-| wq-SC-auth-001.json | **Active** (in-progress) | SquirrelChat auth system. Backend shipped in f7075c3. Email provider still pending. |
+| wq-SC-auth-001.json | **Active** (in-progress) | ClawChat auth system. Backend shipped in f7075c3. Email provider still pending. |
 | wq-RCC-setup-001.json | **Active** (proposed) | First-run TUI + config management. Prerequisite for wq-RCC-audit-001 action items. |
 | wq-RCC-audit-001.json | **Active** (this audit) | Produces this document. |
 | queue.json.bak-20260329 | **Safe to delete** | Backup from March 29. Production queue has moved on. |
@@ -199,7 +199,7 @@ NANOC_BIN               nanolang compiler path — only used in playground
 **Phase 4 — Delegation (shrinks RCC's surface area):**
 13. Evaluate delegating Slack notifications to openclaw (removes ~200 lines + credentials)
 14. Audit all LLM calls in api/index.mjs — ensure all go through tokenhub
-15. Reconcile SquirrelBus: pick one implementation (in-process vs standalone), delete the other
+15. Reconcile ClawBus: pick one implementation (in-process vs standalone), delete the other
 
 **Phase 5 — HTML cleanup (cosmetic but meaningful):**
 16. Confirm with Rocky which inline HTML functions are still served in production

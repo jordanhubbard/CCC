@@ -29,7 +29,7 @@ while routing bulk inference to fixed-cost providers?"**
 - Examples: Natasha, Bullwinkle, Rocky, Boris (as agent)
 - Has: An OpenClaw instance, a system prompt, tools, a personality
 - Needs: An OpenAI-compatible token endpoint to function
-- Produces: Agent actions, SquirrelBus messages, work queue completions
+- Produces: Agent actions, ClawBus messages, work queue completions
 
 ### 2. Token Provider  
 - Examples: Boris's vLLM server (Nemotron-3 120B)
@@ -39,7 +39,7 @@ while routing bulk inference to fixed-cost providers?"**
 
 ### 3. RCC Central Command
 - Running on: do-host1 (146.190.134.110)
-- Has: Public IP, port management, SquirrelBus, work queue, UI
+- Has: Public IP, port management, ClawBus, work queue, UI
 - Does: Coordinates consumers ↔ providers, human ↔ agent interface
 - Acts as: Registry, router hint, heartbeat monitor
 
@@ -64,7 +64,7 @@ When a token provider comes online:
    }
    ```
 3. RCC binds a stable local port (e.g. `127.0.0.1:19000`) and proxies to tunnel port
-4. RCC publishes to SquirrelBus: `provider.online` event
+4. RCC publishes to ClawBus: `provider.online` event
 5. Consumers see new provider, can update their routing config
 
 ### B. Consumer Bootstrap (Solving the Chicken/Egg)
@@ -78,7 +78,7 @@ Proposed two-tier model:
   - Provider health-check interpretation
 - **Tier 1 (bulk)**: Fixed-cost provider (Boris's Nemotron). Used for:
   - All normal agent Q&A
-  - SquirrelBus message processing
+  - ClawBus message processing
   - Work queue tasks
 
 The consumer agent config gains a `providers` section:

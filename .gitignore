@@ -114,3 +114,7 @@ rcc/api/projects.json
 .rcc-init
 HEARTBEAT.md
 workqueue/WORKQUEUE_AGENT_NATASHA.md
+
+# Rust build artifacts
+target/
+**/target/

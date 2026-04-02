@@ -207,14 +207,14 @@ Think of it like a human reviewing their journal and updating their mental model
 
 The goal: Be helpful without being annoying. Check in a few times a day, do useful background work, but respect quiet time.
 
-## Remote Exec via SquirrelBus
+## Remote Exec via ClawBus
 
 Agents can be commanded remotely using the RCC exec API — no inbound SSH required. This is especially important for the Sweden GPU containers (peabody, sherman, snidely, dudley) which have no inbound network access.
 
 ### How it works
 
 1. Rocky (or any agent) posts to `POST /api/exec` on RCC
-2. RCC broadcasts a signed `rcc.exec` SquirrelBus message to the target agent(s)
+2. RCC broadcasts a signed `rcc.exec` ClawBus message to the target agent(s)
 3. Each target agent running `agent-listener.mjs` verifies the HMAC-SHA256 signature
 4. Executes in sandboxed `vm.runInNewContext()` (JS mode) or `/bin/sh -c` with allowlist (shell mode)
 5. Posts result back to `POST /api/exec/:id/result`

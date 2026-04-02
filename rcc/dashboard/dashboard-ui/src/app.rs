@@ -19,8 +19,8 @@ use crate::components::{
     providers::Providers,
     services::Services,
     settings::Settings,
-    squirrelbus::SquirrelBus,
-    squirrelchat::SquirrelChat,
+    squirrelbus::ClawBus,
+    squirrelchat::ClawChat,
     timeline::Timeline,
     work_queue::WorkQueue,
 };
@@ -95,7 +95,7 @@ fn AppInner() -> impl IntoView {
             <header class="dash-header">
                 <div class="dash-logo">
                     <span class="logo-icon">"🐿️"</span>
-                    <span class="logo-text">"Rocky Command Center"</span>
+                    <span class="logo-text">"Claw Command Center"</span>
                 </div>
                 <div class="dash-subtitle">"v3 — Rust/WASM + GH Issues"</div>
                 <div class="dash-tabs">
@@ -118,7 +118,7 @@ fn AppInner() -> impl IntoView {
                         class="tab-btn"
                         class:tab-active=move || tab.get() == 3
                         on:click=move |_| select_tab.with_value(|f| f(3))
-                    >"💬 SquirrelChat"</button>
+                    >"💬 ClawChat"</button>
                     <button
                         class="tab-btn"
                         class:tab-active=move || tab.get() == 4
@@ -166,7 +166,7 @@ fn AppInner() -> impl IntoView {
                 {move || match tab.get() {
                     1 => view! { <GeekView /> }.into_view(),
                     2 => view! { <Kanban /> }.into_view(),
-                    3 => view! { <SquirrelChat /> }.into_view(),
+                    3 => view! { <ClawChat /> }.into_view(),
                     4 => view! { <AgentDetail /> }.into_view(),
                     5 => view! { <Issues /> }.into_view(),
                     6 => view! { <Providers /> }.into_view(),
@@ -186,7 +186,7 @@ fn AppInner() -> impl IntoView {
                                 <ActivityFeed />
                             </div>
                             <div class="dash-row">
-                                <SquirrelBus />
+                                <ClawBus />
                                 <BusSend />
                                 <IdeaIncubator />
                             </div>

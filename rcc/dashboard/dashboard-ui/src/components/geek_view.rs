@@ -1,7 +1,7 @@
 //! Geek View — SVG topology map of the distributed agent brain.
 //!
 //! Nodes are driven by live /api/agents/status data — no hardcoded list.
-//! Traffic particles flow along edges when SquirrelBus messages arrive.
+//! Traffic particles flow along edges when ClawBus messages arrive.
 
 use leptos::*;
 use wasm_bindgen::prelude::*;
@@ -341,7 +341,7 @@ pub fn GeekView() -> impl IntoView {
                                 <text
                                     x={HUB_X.to_string()} y={(HUB_Y - 5.0).to_string()}
                                     text-anchor="middle" font-size="8" fill="#b2bec3"
-                                >"SquirrelBus"</text>
+                                >"ClawBus"</text>
                                 <text
                                     x={HUB_X.to_string()} y={(HUB_Y + 7.0).to_string()}
                                     text-anchor="middle" font-size="7" fill="#636e72"

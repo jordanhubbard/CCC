@@ -115,7 +115,7 @@ mc cat $MINIO_ALIAS/agents/logs/wq-dashboard-crash-1711065600000.json | jq .
 ## Finding and Fixing Crash Tasks
 
 ### In the Dashboard
-1. Open the [Rocky Command Center](http://localhost:8788/)
+1. Open the [Claw Command Center](http://localhost:8788/)
 2. Filter by "Pending" — crash tasks show up as high priority with `CRASH:` prefix
 3. Check the task notes for error details, stack trace, and MinIO log path
 4. Fix the issue, then mark the task as complete

@@ -1,4 +1,4 @@
-# SquirrelBus Remote Code Execution
+# ClawBus Remote Code Execution
 
 **Status:** Implemented  
 **Security:** HMAC-SHA256 signed payloads, vm.runInNewContext(), 10s timeout  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets **or shell commands** to any or all agents via SquirrelBus. Each agent:
+Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets **or shell commands** to any or all agents via ClawBus. Each agent:
 
 1. Receives the message over the bus (`type: "rcc.exec"`)
 2. Verifies the HMAC-SHA256 signature using `SQUIRRELBUS_TOKEN`
@@ -61,7 +61,7 @@ curl -s -X POST https://rcc.example.com/api/exec \
 | Path | Description |
 |------|-------------|
 | `rcc/exec/index.mjs` | HMAC signing/verification library (`signPayload`, `verifyPayload`, `canonicalize`) |
-| `rcc/exec/agent-listener.mjs` | Agent-side SquirrelBus subscriber + executor (runs as a daemon) |
+| `rcc/exec/agent-listener.mjs` | Agent-side ClawBus subscriber + executor (runs as a daemon) |
 | `rcc/api/index.mjs` | API endpoints: `POST /api/exec`, `GET /api/exec/:id`, `POST /api/exec/:id/result` |
 | `rcc/docs/remote-exec.md` | This document |
 | `rcc/tests/api/exec.test.mjs` | Test coverage |
@@ -119,7 +119,7 @@ Allowed globals: `Math`, `Date`, `JSON`, `parseInt`, `parseFloat`, `isNaN`, `isF
 ```
 
 - Signs the payload with `SQUIRRELBUS_TOKEN`
-- Broadcasts as `type: "rcc.exec"` on SquirrelBus
+- Broadcasts as `type: "rcc.exec"` on ClawBus
 - Appends record to `rcc/api/data/exec-log.jsonl`
 
 ### GET /api/exec/:id
@@ -209,7 +209,7 @@ curl -s http://localhost:8789/api/exec/$EXEC_ID \
 
 ## Deployment: Sweden GPU Nodes (peabody / sherman / snidely / dudley)
 
-These nodes have no inbound network access. SquirrelBus exec is the **only** mechanism for remote administration from Rocky or other agents.
+These nodes have no inbound network access. ClawBus exec is the **only** mechanism for remote administration from Rocky or other agents.
 
 ### Install agent-listener as a systemd service
 

@@ -1,6 +1,6 @@
 {
-  "name": "SquirrelChat",
-  "short_name": "SquirrelChat",
+  "name": "ClawChat",
+  "short_name": "ClawChat",
   "description": "Agent-native team chat — agentOS & RCC",
   "start_url": "/?pwa=1",
   "display": "standalone",

@@ -6,7 +6,7 @@
 
 ## Overview
 
-Live migration moves a running WASM agent slot from one agentOS node to another — sparky ↔ do-host1 — without dropping queued tasks. The source slot is frozen, serialized, shipped, and restored on the target node. All observers are notified via SquirrelBus.
+Live migration moves a running WASM agent slot from one agentOS node to another — sparky ↔ do-host1 — without dropping queued tasks. The source slot is frozen, serialized, shipped, and restored on the target node. All observers are notified via ClawBus.
 
 ## Why
 
@@ -23,7 +23,7 @@ The agentOS mesh (TransportMesh) can `SPAWN_AGENT` on a remote peer but cannot m
 │               ─→ snapshot = {wasmHash, kvStore, caps, callCount...} │
 │               ─→ POST target/migrate/:id/restore {snapshot}        │
 │               ─→ VibeSwap.deleteSlot(slot)  [on target 200 OK]     │
-│               ─→ SquirrelBus.publish(agentos.migrate)               │
+│               ─→ ClawBus.publish(agentos.migrate)               │
 └─────────────────────────────────────────────────────────────────────┘
                             │ HTTP
                             ▼
@@ -97,7 +97,7 @@ POST /slots/inference-gpu-0/load
 }
 ```
 
-## SquirrelBus Event
+## ClawBus Event
 
 Published on successful migration:
 ```json
@@ -124,7 +124,7 @@ Published on successful migration:
 | `MIGRATE_TOKEN` | `migrate-dev-token` | Bearer token |
 | `VIBESWAP_URL` | `http://localhost:8793` | Local VibeSwap endpoint |
 | `AGENTFS_URL` | `http://localhost:8791` | AgentFS (WASM store) |
-| `SQUIRRELBUS_URL` | *(unset)* | SquirrelBus publish URL |
+| `SQUIRRELBUS_URL` | *(unset)* | ClawBus publish URL |
 | `AGENT_NODE` | `$AGENT_NAME` | Node identity in events |
 | `VIBESWAP_TOKEN` | `$AGENTFS_TOKEN` | VibeSwap auth token |
 

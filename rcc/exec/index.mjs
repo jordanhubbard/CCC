@@ -1,5 +1,5 @@
 /**
- * rcc/exec/index.mjs — HMAC-SHA256 signing/verification for SquirrelBus exec payloads
+ * rcc/exec/index.mjs — HMAC-SHA256 signing/verification for ClawBus exec payloads
  *
  * Security model:
  * - All exec payloads MUST be signed with a shared secret (SQUIRRELBUS_TOKEN)

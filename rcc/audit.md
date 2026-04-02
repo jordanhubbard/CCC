@@ -25,7 +25,7 @@ RCC is **mostly healthy** — no external heavy deps, no reimplemented openclaw 
 | `scout/pump.mjs` | 336 | ✅ Clean | GitHub watcher |
 | `llm/client.mjs` | 226 | ✅ Clean | PeerLLMClient, good fallback logic |
 | `llm/registry.mjs` | 303 | ✅ Clean | LLM endpoint registry |
-| `exec/agent-listener.mjs` | 332 | ✅ Clean | SquirrelBus exec listener |
+| `exec/agent-listener.mjs` | 332 | ✅ Clean | ClawBus exec listener |
 | `crush-server/failover.mjs` | 321 | ✅ Clean | Failover logic |
 | `guardrails/adaptive-trust.mjs` | 296 | ✅ Clean | Trust scoring |
 | `decision-journal/intent-drift-detector.mjs` | 241 | ✅ Clean | Drift detection |

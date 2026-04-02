@@ -12,8 +12,8 @@
  *   GET    /fs/peers                  alias: list known AgentFS peer URLs
  *
  * Replication:
- *   On upload: publishes agentos.fs.put {hash, size, origin_url} to SquirrelBus
- *   On delete: publishes agentos.fs.delete {hash} to SquirrelBus
+ *   On upload: publishes agentos.fs.put {hash, size, origin_url} to ClawBus
+ *   On delete: publishes agentos.fs.delete {hash} to ClawBus
  *   AGENTFS_REPLICATE=1: starts replication subscriber (replication.mjs)
  *     — polls bus for agentos.fs.put events, fetches missing blobs from origin
  *
@@ -157,7 +157,7 @@ export function checkCapabilities(caps, required = []) {
   return { ok: missing.length === 0, missing };
 }
 
-// ── SquirrelBus publisher ─────────────────────────────────────────────────────
+// ── ClawBus publisher ─────────────────────────────────────────────────────
 // Best-effort: never throws, never blocks the caller.
 async function publishBusEvent(type, payload) {
   try {

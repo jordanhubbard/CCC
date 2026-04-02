@@ -92,7 +92,7 @@ const COLLECTION_CONFIGS = {
   // Channel-scoped memory with platform+workspace+channel filtering
   // NOT for cross-agent queries — use rcc_memory for those.
   // Sparky-local: uses 768-dim nomic-embed-text via ollama for zero-latency GPU ingest.
-  // High-volume writes: daily memory files, SquirrelBus messages, queue items.
+  // High-volume writes: daily memory files, ClawBus messages, queue items.
   // NOT for cross-agent queries — use rcc_memory for those.
   rcc_memory_sparky: {
     description: 'Sparky-local memory (768-dim, nomic-embed-text, GPU-accelerated)',

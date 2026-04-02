@@ -40,7 +40,7 @@
         "GET/POST /api/projects/*",
         "GET/POST /api/secrets/*",
         "GET/POST /api/exec/*",
-        "GET/POST /bus/*  (SquirrelBus, SQLite-backed)",
+        "GET/POST /bus/*  (ClawBus, SQLite-backed)",
         "GET/POST /api/auth/*  (user auth, wq-SC-auth-001)",
         "GET /health",
         "WS /ws  (live updates to dashboard-ui)"
@@ -90,7 +90,7 @@
     },
     {
       "phase": 3,
-      "name": "SquirrelBus + Scout",
+      "name": "ClawBus + Scout",
       "work": [
         "Implement /bus/* with SQLite backing + SSE broadcast",
         "Implement GitHub scout as background task (replaces rcc/scout/github.mjs)",

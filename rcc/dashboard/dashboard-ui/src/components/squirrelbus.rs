@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 use crate::types::BusMessage;
 
 #[component]
-pub fn SquirrelBus() -> impl IntoView {
+pub fn ClawBus() -> impl IntoView {
     let (messages, set_messages) = create_signal(Vec::<BusMessage>::new());
     let (connected, set_connected) = create_signal(false);
 
@@ -59,7 +59,7 @@ pub fn SquirrelBus() -> impl IntoView {
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-icon">"⇄"</span>
-                    "SquirrelBus"
+                    "ClawBus"
                 </h2>
                 <div class="bus-status">
                     {move || {

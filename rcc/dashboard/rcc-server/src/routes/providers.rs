@@ -49,7 +49,7 @@ async fn list_providers(State(state): State<Arc<AppState>>) -> Json<Value> {
         json!({
             "id":     "squirrelchat",
             "kind":   "messaging",
-            "label":  "SquirrelChat",
+            "label":  "ClawChat",
             "url":    sc_url,
             "status": "configured",
             "enabled": true,

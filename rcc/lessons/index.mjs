@@ -4,7 +4,7 @@
  * Agents write lessons when they fail/recover. All agents share the ledger.
  * Storage: MinIO agents/shared/lessons/<domain>.jsonl (append-only)
  * Local cache: ~/.rcc/lessons/<domain>.jsonl (fast lookup, no MinIO roundtrip)
- * Bus propagation: SquirrelBus type:"lesson" broadcasts to all agents
+ * Bus propagation: ClawBus type:"lesson" broadcasts to all agents
  *
  * Format (one JSON object per line):
  * {"id":"l-<ts>","ts":"ISO","agent":"rocky","domain":"express","tags":["express5","wildcard"],
@@ -160,7 +160,7 @@ export async function learnLesson({ domain, tags, symptom, fix, context, agent }
     // MinIO failure is non-fatal — local cache is sufficient
   }
 
-  // Broadcast on SquirrelBus (best-effort)
+  // Broadcast on ClawBus (best-effort)
   try {
     await fetch(`${BUS_API}/bus/send`, {
       method: 'POST',
@@ -248,7 +248,7 @@ export function formatLessonsForContext(lessons) {
 }
 
 /**
- * Receive a lesson broadcast from SquirrelBus and save to local cache.
+ * Receive a lesson broadcast from ClawBus and save to local cache.
  * Call this when handling bus messages of type "lesson".
  */
 export async function receiveLessonFromBus(busMessage) {

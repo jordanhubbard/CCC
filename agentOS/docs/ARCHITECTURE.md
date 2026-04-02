@@ -125,7 +125,7 @@ Inter-node communication:
 - QUIC-based agent-to-agent transport (handles NAT, packet loss gracefully)
 - Capability delegation across nodes (with cryptographic attestation)
 - Automatic routing via NameServer federation
-- SquirrelBus protocol compatibility layer (so our existing fleet can interop immediately)
+- ClawBus protocol compatibility layer (so our existing fleet can interop immediately)
 
 ### 3.6 PluginHost
 - Loads plugin manifests, validates signatures
@@ -216,7 +216,7 @@ All writes are appended to an agent-specific WAL (write-ahead log). Periodic com
 - Async notification: fire-and-forget, receiver wakes on next schedule
 - Fast path: <1μs for small messages (seL4 proven)
 
-### 6.2 SquirrelBus (inter-node)
+### 6.2 ClawBus (inter-node)
 - Typed messages with schema validation
 - Topics (pub/sub) + direct addressing
 - Already implemented and battle-tested by Rocky
@@ -295,9 +295,9 @@ Any Tier 1/2 agent can revoke capabilities it previously granted. Revocation is 
 - [ ] SDK v1 + inference module
 - [ ] First "thinking" agent: receives task, uses ModelBus to reason, emits structured result
 
-### Phase 4: Multi-Node & SquirrelBus Bridge (weeks 13-16)
+### Phase 4: Multi-Node & ClawBus Bridge (weeks 13-16)
 - [ ] TransportMesh v0: QUIC between Sparky ↔ Rocky ↔ Bullwinkle
-- [ ] SquirrelBus compatibility shim
+- [ ] ClawBus compatibility shim
 - [ ] Cross-node TaskForest (delegate tasks to remote agents)
 - [ ] First distributed task: Natasha on Sparky delegates GPU work, Rocky handles infra side
 
@@ -324,7 +324,7 @@ agentOS/
 │   ├── objectvault/  # Object storage service
 │   ├── taskforest/   # Work DAG scheduler  
 │   ├── modelbus/     # Inference routing
-│   ├── transport/    # TransportMesh / SquirrelBus bridge
+│   ├── transport/    # TransportMesh / ClawBus bridge
 │   └── pluginhost/   # Plugin loader + sandbox
 ├── sdk/
 │   ├── c/            # C ABI layer

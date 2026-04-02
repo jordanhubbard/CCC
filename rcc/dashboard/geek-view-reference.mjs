@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * WQ Dashboard — Rocky's unified workqueue + SquirrelBus dashboard
+ * WQ Dashboard — Rocky's unified workqueue + ClawBus dashboard
  * Port 8788, dark theme, live data, client-side rendering
  */
 
@@ -47,7 +47,7 @@ const BUS_LOG_PATH  = '/home/jkh/.openclaw/workspace/squirrelbus/bus.jsonl';
 const ACK_LOG_PATH  = '/home/jkh/.openclaw/workspace/squirrelbus/acks.jsonl';
 const DEAD_LOG_PATH = '/home/jkh/.openclaw/workspace/squirrelbus/dead-letter.jsonl';
 
-// ── SquirrelBus peer fan-out registry ─────────────────────────────────────────
+// ── ClawBus peer fan-out registry ─────────────────────────────────────────
 const BUS_PEERS = {
   bullwinkle: process.env.BULLWINKLE_BUS_URL || '',
   natasha:    process.env.NATASHA_BUS_URL    || '',
@@ -479,7 +479,7 @@ function renderUnifiedPage() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🐿️ Rocky Command Center</title>
+  <title>🐿️ Claw Command Center</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
@@ -553,7 +553,7 @@ function renderUnifiedPage() {
 <body>
   <div class="container">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-      <h1 style="font-size:24px;margin:0;color:#f0f6fc">🐿️ Rocky Command Center</h1>
+      <h1 style="font-size:24px;margin:0;color:#f0f6fc">🐿️ Claw Command Center</h1>
       <div style="display:flex;gap:8px;align-items:center">
         <a href="/activity" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;text-decoration:none;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🗺️ Activity Map</a>
         <a href="/geek" style="background:transparent;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;text-decoration:none;transition:border-color .15s,color .15s" onmouseover="this.style.borderColor='#58a6ff';this.style.color='#58a6ff'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">🖥️ Geek View</a>
@@ -589,9 +589,9 @@ function renderUnifiedPage() {
       </div>
     </div>
 
-    <!-- Section 3: SquirrelBus -->
+    <!-- Section 3: ClawBus -->
     <div class="section">
-      <div class="section-header">📡 SquirrelBus</div>
+      <div class="section-header">📡 ClawBus</div>
       <details class="send-form">
         <summary>✉️ Send a message</summary>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
@@ -1042,7 +1042,7 @@ function renderUnifiedPage() {
       queueAction(null, '/api/comment/' + id, 'POST', { text });
     }
 
-    // === Section 3: SquirrelBus ===
+    // === Section 3: ClawBus ===
     let busMessages = [];
     let busFilter = 'all';
     let lastBusTs = null;
@@ -1297,7 +1297,7 @@ function renderUnifiedPage() {
     // Auto-refresh bus every 10s (incremental)
     setInterval(() => loadBus(false), 10000);
 
-    document.getElementById('footer').textContent = '🐿️ Rocky Command Center · Auto-refreshing · Rendered: ' + new Date().toLocaleString();
+    document.getElementById('footer').textContent = '🐿️ Claw Command Center · Auto-refreshing · Rendered: ' + new Date().toLocaleString();
   </script>
 </body>
 </html>`;
@@ -1654,7 +1654,7 @@ app.get('/bus', (req, res) => {
 });
 
 // ========================================
-// SquirrelBus v1 — Inter-agent comms
+// ClawBus v1 — Inter-agent comms
 // ========================================
 
 let busSeq = 0;
@@ -1753,7 +1753,7 @@ async function initBusSeq() {
         if (msg.seq && msg.seq > busSeq) busSeq = msg.seq;
       } catch {}
     }
-    console.log(`📡 SquirrelBus: initialized seq=${busSeq}`);
+    console.log(`📡 ClawBus: initialized seq=${busSeq}`);
   } catch (e) {
     console.error('Bus seq init error:', e.message);
   }
@@ -2505,7 +2505,7 @@ function renderGeekPage() {
         <text x="10" y="76" font-size="9" fill="#8b949e" font-family="monospace">[SearXNG :8888]</text>
         <text x="10" y="88" font-size="9" fill="#8b949e" font-family="monospace">[MinIO :9000/:9001]</text>
         <text x="10" y="100" font-size="9" fill="#8b949e" font-family="monospace">[Milvus :19530]</text>
-        <text x="10" y="112" font-size="9" fill="#8b949e" font-family="monospace">[SquirrelBus :8788/bus]</text>
+        <text x="10" y="112" font-size="9" fill="#8b949e" font-family="monospace">[ClawBus :8788/bus]</text>
         <circle id="dot-rocky" cx="168" cy="12" r="5" fill="#3fb950"/>
       </g>
       <!-- Natasha (sparky) -->
@@ -2514,7 +2514,7 @@ function renderGeekPage() {
         <text x="10" y="20" font-size="12" font-weight="700" fill="#3fb950">🕵️ Natasha</text>
         <text x="10" y="34" font-size="9" fill="#6e7681">sparky · GB10 · 128GB unified</text>
         <text x="10" y="52" font-size="9" fill="#8b949e" font-family="monospace">[OpenClaw :18789]</text>
-        <text x="10" y="64" font-size="9" fill="#8b949e" font-family="monospace">[SquirrelBus /bus→:18799]</text>
+        <text x="10" y="64" font-size="9" fill="#8b949e" font-family="monospace">[ClawBus /bus→:18799]</text>
         <text x="10" y="76" font-size="9" fill="#8b949e" font-family="monospace">[Ollama :11434 ✓]</text>
         <text x="10" y="88" font-size="9" fill="#484f58" font-family="monospace"> qwen2.5-coder:32b</text>
         <text x="10" y="100" font-size="9" fill="#484f58" font-family="monospace"> qwen3-coder:latest</text>
@@ -2696,5 +2696,5 @@ app.get('/geek', (req, res) => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🐿️ Rocky Command Center running on http://0.0.0.0:${PORT}`);
+  console.log(`🐿️ Claw Command Center running on http://0.0.0.0:${PORT}`);
 });

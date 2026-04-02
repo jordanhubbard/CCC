@@ -1,5 +1,5 @@
 /**
- * rcc/api — Rocky Command Center REST API
+ * rcc/api — Claw Command Center REST API
  *
  * Single source of truth for the work queue, agent registry, and heartbeats.
  * Agents talk to this instead of maintaining local queue copies.
@@ -53,9 +53,9 @@ const SBOM_DIR           = process.env.SBOM_DIR || './sbom';
 const SERVICES_CATALOG = [
   { id: 'rcc-dashboard',    name: 'RCC Dashboard',      url: 'http://146.190.134.110:8789/projects',  desc: 'Agent work queue + project tracker',       host: 'do-host1' },
   { id: 'services-map',     name: 'Services Map',       url: 'http://146.190.134.110:8789/services',  desc: 'This page — live status of all services',  host: 'do-host1' },
-  { id: 'squirrelchat',     name: 'SquirrelChat',       url: 'http://146.190.134.110:8790/',           desc: 'Self-hosted team chat (Slack replacement)', host: 'do-host1' },
+  { id: 'squirrelchat',     name: 'ClawChat',       url: 'http://146.190.134.110:8790/',           desc: 'Self-hosted team chat (Slack replacement)', host: 'do-host1' },
   { id: 'tokenhub-admin',   name: 'Tokenhub Admin',     url: 'http://146.190.134.110:8090/admin/',     desc: 'LLM router — provider health + config',    host: 'do-host1' },
-  { id: 'squirrelbus',      name: 'SquirrelBus',        url: 'http://146.190.134.110:8789/api/bus/stream', desc: 'Inter-agent message bus (SSE stream)',   host: 'do-host1' },
+  { id: 'squirrelbus',      name: 'ClawBus',        url: 'http://146.190.134.110:8789/api/bus/stream', desc: 'Inter-agent message bus (SSE stream)',   host: 'do-host1' },
   { id: 'boris-vllm',       name: 'Boris vLLM',         url: 'http://127.0.0.1:18080/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'boris'    },
   { id: 'peabody-vllm',     name: 'Peabody vLLM',       url: 'http://127.0.0.1:18081/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'peabody'  },
   { id: 'sherman-vllm',     name: 'Sherman vLLM',       url: 'http://127.0.0.1:18082/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'sherman'  },
@@ -170,12 +170,12 @@ async function indexPendingQueueItems() {
   }
 }
 
-// ── SquirrelBus paths ──────────────────────────────────────────────────────
+// ── ClawBus paths ──────────────────────────────────────────────────────
 const BUS_LOG_PATH   = process.env.BUS_LOG_PATH   || new URL('../../squirrelbus/bus.jsonl', import.meta.url).pathname;
 const ACK_LOG_PATH   = process.env.ACK_LOG_PATH   || new URL('../../squirrelbus/acks.jsonl', import.meta.url).pathname;
 const DEAD_LOG_PATH  = process.env.DEAD_LOG_PATH  || new URL('../../squirrelbus/dead-letter.jsonl', import.meta.url).pathname;
 
-// ── SquirrelBus in-memory state ────────────────────────────────────────────
+// ── ClawBus in-memory state ────────────────────────────────────────────
 let _busSeq = 0;
 const _busSSEClients  = new Set();
 const _busPresence    = {};
@@ -813,16 +813,16 @@ function dashboardHtml() {
     .tl-time-axis{display:flex;justify-content:space-between;font-size:.68rem;color:#484f58;margin-top:.25rem;padding:0 0 .15rem}
     .tl-tooltip{position:fixed;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:.45rem .7rem;font-size:.78rem;color:#e6edf3;pointer-events:none;z-index:200;max-width:230px;display:none;line-height:1.5}
   </style>
-  <title>Rocky Command Center</title>
+  <title>Claw Command Center</title>
 </head><body>
   <div class="topbar">
-    <div class="topbar-logo">🐿️ <span>RCC</span> Rocky Command Center</div>
+    <div class="topbar-logo">🐿️ <span>RCC</span> Claw Command Center</div>
     <div class="tab-bar" id="tabs">
       <button class="tab active" data-pane="services">Services</button>
       <button class="tab" data-pane="queue">Queue</button>
       <button class="tab" data-pane="agents">Agents</button>
       <button class="tab" data-pane="projects">Projects</button>
-      <button class="tab" data-pane="bus">SquirrelBus</button>
+      <button class="tab" data-pane="bus">ClawBus</button>
       <button class="tab" data-pane="logs">Logs</button>
       <button class="tab" data-pane="timeline">⏱ Timeline</button>
     </div>
@@ -871,7 +871,7 @@ function dashboardHtml() {
     </div>
     <!-- BUS -->
     <div class="pane" id="pane-bus">
-      <h1>SquirrelBus</h1>
+      <h1>ClawBus</h1>
       <div class="bus-toolbar">
         <span class="bus-status" id="bus-status">connecting…</span>
         <button class="refresh-btn" onclick="reconnectBus()">↻ Reconnect</button>
@@ -1159,7 +1159,7 @@ function projectsListHtml() {
   return `<!DOCTYPE html><html lang="en"><head>${HTML_STYLE}<title>Projects — RCC</title></head><body>
   <div class="nav"><a href="/">← RCC</a> &nbsp;·&nbsp; <a href="/services">Services</a></div>
   <h1>Projects</h1>
-  <p class="subtitle">All registered projects tracked by Rocky Command Center</p>
+  <p class="subtitle">All registered projects tracked by Claw Command Center</p>
   <div id="root"><p class="spinner">Loading…</p></div>
   <script>
     fetch('/api/projects').then(r=>r.json()).then(projects=>{

@@ -1,5 +1,5 @@
 /**
- * rcc/api/routes/bus.mjs — SquirrelBus route handlers
+ * rcc/api/routes/bus.mjs — ClawBus route handlers
  * Extracted from api/index.mjs (structural refactor only — no logic changes)
  */
 
@@ -221,10 +221,10 @@ export default function registerRoutes(app, state) {
     });
   });
 
-  // POST /api/bus/receive — handle incoming SquirrelBus messages
+  // POST /api/bus/receive — handle incoming ClawBus messages
   app.on('POST', '/api/bus/receive', async (req, res) => {
     const body = await readBody(req);
-    state.broadcastGeekEvent('bus_msg', body.from || 'unknown', body.to || 'all', 'SquirrelBus message');
+    state.broadcastGeekEvent('bus_msg', body.from || 'unknown', body.to || 'all', 'ClawBus message');
     if (body.type === 'lesson') {
       await state.receiveLessonFromBus(body);
       return json(res, 200, { ok: true });

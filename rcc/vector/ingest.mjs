@@ -5,7 +5,7 @@
  *   - Memory files (.md)
  *   - Queue items
  *   - Lessons
- *   - SquirrelChat messages
+ *   - ClawChat messages
  *
  * All failures are logged but never thrown — ingest is best-effort.
  *
@@ -115,7 +115,7 @@ export async function ingestLesson(lesson) {
 }
 
 /**
- * Ingest a SquirrelChat message into the active memory collection.
+ * Ingest a ClawChat message into the active memory collection.
  * Routes to rcc_memory_sparky (768-dim, GPU) when EMBED_BACKEND=local,
  * or rcc_memory (3072-dim, Azure) otherwise.
  * On sparky, set EMBED_BACKEND=local for zero-cost GPU-accelerated ingest.
@@ -138,7 +138,7 @@ export async function ingestMessage(msg) {
 }
 
 /**
- * Batch ingest multiple SquirrelChat messages in a single embedding call.
+ * Batch ingest multiple ClawChat messages in a single embedding call.
  * Uses vectorUpsertBatch → embedBatchLocal (adaptive batching on GB10 GPU).
  * ~100x faster than calling ingestMessage in a loop for large backlogs.
  *
@@ -173,14 +173,14 @@ export async function ingestMessages(msgs) {
 }
 
 /**
- * Semantic search over ingested SquirrelChat messages.
+ * Semantic search over ingested ClawChat messages.
  * Uses the same collection as ingestMessage (local or remote depending on EMBED_BACKEND).
  * @param {string} query   - Natural language search query
  * @param {number} limit   - Max results (default 5)
  * @param {string} agent   - Filter by agent name (optional)
  * @returns {Promise<object[]>} - Array of matching message snippets with scores
  */
-export async function recallSquirrelChat(query, limit = 5, agent = '') {
+export async function recallClawChat(query, limit = 5, agent = '') {
   try {
     await ensureReady();
     const { vectorSearch } = await import('./index.mjs');
@@ -194,7 +194,7 @@ export async function recallSquirrelChat(query, limit = 5, agent = '') {
       score: h.score,
     }));
   } catch (err) {
-    console.warn(`[ingest] recallSquirrelChat failed:`, err.message);
+    console.warn(`[ingest] recallClawChat failed:`, err.message);
     return [];
   }
 }

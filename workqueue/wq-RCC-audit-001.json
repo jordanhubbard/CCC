@@ -23,7 +23,7 @@
   "known_problems": {
     "rcc_api_index_mjs": {
       "lines": 8176,
-      "note": "Single file with 8000+ lines. God object. Contains: REST API, auth, secrets, Slack integration, SquirrelBus, brain orchestration, agent registry, queue management, tunnel management, tokenhub wiring, dashboard HTML/JS inline, email (missing), and more. Should be multiple focused modules.",
+      "note": "Single file with 8000+ lines. God object. Contains: REST API, auth, secrets, Slack integration, ClawBus, brain orchestration, agent registry, queue management, tunnel management, tokenhub wiring, dashboard HTML/JS inline, email (missing), and more. Should be multiple focused modules.",
       "delegation_candidates": [
         "Auth/user management → dedicated auth module (wq-SC-auth-001 started this)",
         "Dashboard HTML/JS → already in dashboard-server, should not be inlined here",
@@ -72,7 +72,7 @@
       "area": "squirrelchat/",
       "questions": [
         "Does server.mjs have duplicate auth logic vs the new auth system in f7075c3?",
-        "Is SquirrelChat a dependency of RCC or a standalone service? Should it be decoupled?"
+        "Is ClawChat a dependency of RCC or a standalone service? Should it be decoupled?"
       ]
     },
     {

@@ -364,12 +364,12 @@ describe('AgentFS', () => {
     assert.equal(list.body.count, 2);
   });
 
-  // ── SquirrelBus replication tests ────────────────────────────────────────────
+  // ── ClawBus replication tests ────────────────────────────────────────────
 
   test('replication event published on upload', async () => {
     let capturedMsg = null;
 
-    // Mock SquirrelBus: captures POST /send
+    // Mock ClawBus: captures POST /send
     const busSrv = createServer((req, res) => {
       const chunks = [];
       req.on('data', c => chunks.push(c));
@@ -399,7 +399,7 @@ describe('AgentFS', () => {
       // Bus publish is fire-and-forget — give it a moment
       await new Promise(resolve => setTimeout(resolve, 150));
 
-      assert.ok(capturedMsg, 'SquirrelBus should have received a publish event');
+      assert.ok(capturedMsg, 'ClawBus should have received a publish event');
       assert.equal(capturedMsg.type, 'agentos.fs.put', 'event type should be agentos.fs.put');
       const payload = JSON.parse(capturedMsg.body);
       assert.equal(payload.hash, WASM_HASH, 'event payload should contain uploaded hash');
@@ -419,7 +419,7 @@ describe('AgentFS', () => {
     const originPort  = PORT + 300;
     const busReplPort = PORT + 301;
 
-    // Mock SquirrelBus: returns one agentos.fs.put event on first poll, empty thereafter
+    // Mock ClawBus: returns one agentos.fs.put event on first poll, empty thereafter
     let busCallCount = 0;
     const busReplSrv = createServer((req, res) => {
       busCallCount++;

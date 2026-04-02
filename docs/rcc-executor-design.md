@@ -54,7 +54,7 @@ The SDK uses the **same auth as the CLI** — it reads `~/.claude/credentials` (
 |---|---|
 | Structured JSON result needed by RCC brain | SDK |
 | Cost/token accounting per task | SDK |
-| Streaming progress to SquirrelChat | SDK |
+| Streaming progress to ClawChat | SDK |
 | Session resume for long tasks | SDK |
 | Enterprise SSO / org billing node | SDK (uses same credentials) |
 | CI/ephemeral container (no login) | CLI with `ANTHROPIC_API_KEY` |

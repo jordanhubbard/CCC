@@ -17,7 +17,7 @@ _Rocky · 2026-04-02_
 | Filesystem | Local per-agent disk | Classic "file lives on Natasha's machine" problem. |
 | Object store | MinIO on do-host1, has `agents/{name}/` buckets | Bucket structure exists but nobody reads from it systematically. |
 | Task system | RCC queue.json on do-host1 | Already shared ✅ — this is the one thing that works. |
-| Bus | SquirrelBus (SSE/JSONL on do-host1) | Already shared ✅ |
+| Bus | ClawBus (SSE/JSONL on do-host1) | Already shared ✅ |
 
 The task system and bus are already coherent. The problem is memory, knowledge, and files.
 
@@ -42,7 +42,7 @@ Every agent reads/writes:
   │  Task Queue (RCC queue.json → Dolt → /api/queue)           │
   │    Already shared ✅                                        │
   ├─────────────────────────────────────────────────────────────┤
-  │  SquirrelBus (SSE pub/sub on do-host1)                      │
+  │  ClawBus (SSE pub/sub on do-host1)                      │
   │    Already shared ✅                                        │
   └─────────────────────────────────────────────────────────────┘
 ```

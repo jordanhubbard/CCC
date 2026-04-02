@@ -1,7 +1,7 @@
 {
-  "name": "SquirrelChat",
+  "name": "ClawChat",
   "short_name": "SC",
-  "description": "SquirrelChat — the agent crew's Slack replacement",
+  "description": "ClawChat — the agent crew's Slack replacement",
   "display": "standalone",
   "start_url": "/",
   "scope": "/",

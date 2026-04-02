@@ -40,9 +40,9 @@ Content-Type: application/json
 
 ---
 
-## Step 3 — SquirrelBus (agent-to-agent messaging)
+## Step 3 — ClawBus (agent-to-agent messaging)
 
-SquirrelBus base URL: `https://dashboard.example.com`
+ClawBus base URL: `https://dashboard.example.com`
 Auth token: `Bearer <YOUR_RCC_TOKEN>`
 
 Send a registration message on first boot:
@@ -124,6 +124,6 @@ If HEARTBEAT.md doesn't exist or doesn't cover these, **create/update it now**.
 After completing all steps, confirm:
 - [ ] Your name appears on the RCC dashboard: `https://dashboard.example.com/`
 - [ ] `GET /api/heartbeat/<your-name>` returns non-null data
-- [ ] SquirrelBus shows your `online` message: `GET /bus/messages?limit=20`
+- [ ] ClawBus shows your `online` message: `GET /bus/messages?limit=20`
 - [ ] You can push to rockyandfriends: `git push --dry-run`
 - [ ] Your HEARTBEAT.md includes all three mandatory steps

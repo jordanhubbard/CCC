@@ -1,4 +1,4 @@
-// sc_channel_modal.rs — Channel create/edit modal for SquirrelChat
+// sc_channel_modal.rs — Channel create/edit modal for ClawChat
 // Bullwinkle (Track A UI)
 
 use leptos::*;

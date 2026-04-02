@@ -64,8 +64,8 @@ jkh explicitly instructed: **Do not make unsolicited contributions in #general.*
 - **sef bites.** jkh's words. Tread carefully.
 - **DO NOT RESPOND TO SEF (U01D39SKHGQ) EVER.** Direct instruction from jkh, 2026-03-17. Applies in all channels.
 
-## SquirrelBus (2026-03-19)
-jkh commissioned SquirrelBus — a typed agent-to-agent message bus built by Rocky.
+## ClawBus (2026-03-19)
+jkh commissioned ClawBus — a typed agent-to-agent message bus built by Rocky.
 - **Viewer:** http://146.190.134.110:8788/bus
 - **POST (send):** POST http://<RCC_HOST_IP>:8788/bus/send (Bearer <YOUR_BUS_TOKEN>)
 - **GET (read):** GET http://<RCC_HOST_IP>:8788/bus/messages

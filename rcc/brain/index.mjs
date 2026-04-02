@@ -1,7 +1,7 @@
 /**
  * rcc/brain — RCC LLM Request Queue + Retry Engine
  *
- * The autonomous nervous system of Rocky Command Center.
+ * The autonomous nervous system of Claw Command Center.
  * Never gives up. Always making progress, even if slowly.
  *
  * Routes all LLM calls through tokenhub (localhost:8090).

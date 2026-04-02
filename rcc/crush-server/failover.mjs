@@ -90,7 +90,7 @@ export function shouldFailover({ exitCode, stdout = '', stderr = '' }) {
 // ── RCC notification ───────────────────────────────────────────────────────
 
 /**
- * Notify RCC that a failover happened (writes to SquirrelBus + logs a lesson).
+ * Notify RCC that a failover happened (writes to ClawBus + logs a lesson).
  */
 async function notifyRCC({ reason, prompt, provider }) {
   if (!RCC_TOKEN) return;

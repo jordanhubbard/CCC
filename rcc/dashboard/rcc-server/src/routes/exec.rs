@@ -1,6 +1,6 @@
-/// /api/exec — Remote exec dispatch via SquirrelBus (Rust port of services.mjs exec routes)
+/// /api/exec — Remote exec dispatch via ClawBus (Rust port of services.mjs exec routes)
 ///
-/// POST /api/exec      — sign + broadcast exec via SquirrelBus, log to exec.jsonl
+/// POST /api/exec      — sign + broadcast exec via ClawBus, log to exec.jsonl
 /// GET  /api/exec/:id  — retrieve exec record + results
 /// POST /api/exec/:id/result — agent posts result back
 
@@ -88,7 +88,7 @@ async fn post_exec(
         e
     };
 
-    // Broadcast via SquirrelBus
+    // Broadcast via ClawBus
     let bus_url = std::env::var("SQUIRRELBUS_URL")
         .unwrap_or_else(|_| format!("http://localhost:{}", std::env::var("RCC_PORT").unwrap_or_else(|_| "8789".to_string())));
     let bus_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or(squirrelbus_token.clone());

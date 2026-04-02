@@ -12,7 +12,7 @@
 |-----------|----------|--------|
 | Dashboard UI | `dashboard/dashboard-ui/` | Leptos/WASM, ships as SPA |
 | Dashboard Server | `dashboard/dashboard-server/` | Axum proxy, serves WASM + proxies API/SC/Bus |
-| SquirrelChat Server | `dashboard/squirrelchat-server/` | Axum + SQLite/WAL, FTS5, WebSocket |
+| ClawChat Server | `dashboard/squirrelchat-server/` | Axum + SQLite/WAL, FTS5, WebSocket |
 | WASM Dashboard (v2) | `wasm-dashboard/` | Leptos, standalone views |
 
 ### Still in Node.js 🔴
@@ -26,7 +26,7 @@
 | Issues | `issues/index.mjs` | 372 | GitHub issues cache |
 | Scout | `scout/pump.mjs` + `github.mjs` | 644 | GitHub repo watcher, work item generator |
 | LLM | `llm/client.mjs` + `registry.mjs` | 529 | PeerLLMClient, endpoint registry |
-| Exec | `exec/agent-listener.mjs` | 332 | SquirrelBus exec listener |
+| Exec | `exec/agent-listener.mjs` | 332 | ClawBus exec listener |
 | Crush Server | `crush-server/failover.mjs` | 321 | Failover/HA coordinator |
 | Guardrails | `guardrails/adaptive-trust.mjs` | 296 | Trust scoring |
 | Decision Journal | `decision-journal/` | ~241 | Intent drift detection |
@@ -46,7 +46,7 @@ Rocky has started porting routes natively into Rust (rcc-server binary). SOA cle
 │            (single Rust binary)                   │
 │                                                   │
 │  ┌───────────┐ ┌───────────┐ ┌──────────────┐   │
-│  │ API routes │ │ Bus/SSE   │ │ SquirrelChat │   │
+│  │ API routes │ │ Bus/SSE   │ │ ClawChat │   │
 │  │ (axum)    │ │ (axum)    │ │ (axum+sqlite)│   │
 │  └───────────┘ └───────────┘ └──────────────┘   │
 │  ┌───────────┐ ┌───────────┐ ┌──────────────┐   │
@@ -63,7 +63,7 @@ Rocky has started porting routes natively into Rust (rcc-server binary). SOA cle
 └─────────────────────────────────────────────────┘
 ```
 
-**One binary.** `rcc-server` replaces both the Node.js API and dashboard-server. SquirrelChat stays as a sub-router within the same binary (already Axum, just move the crate).
+**One binary.** `rcc-server` replaces both the Node.js API and dashboard-server. ClawChat stays as a sub-router within the same binary (already Axum, just move the crate).
 
 ---
 
@@ -90,8 +90,8 @@ Rocky has started porting routes natively into Rust (rcc-server binary). SOA cle
 
 ### In-Memory Only
 - Heartbeat map (agents → last heartbeat, with 24h TTL)
-- SSE subscriber list (SquirrelBus stream)
-- WebSocket connections (SquirrelChat)
+- SSE subscriber list (ClawBus stream)
+- WebSocket connections (ClawChat)
 
 ---
 
@@ -210,7 +210,7 @@ SSE streaming is straightforward in Axum with `axum::response::Sse`.
 **Estimated effort:** 1 day
 
 ### Phase 6: Auth System
-**Already partially in Rust** (SquirrelChat has auth). Consolidate.
+**Already partially in Rust** (ClawChat has auth). Consolidate.
 
 | Component | Rust module | Notes |
 |-----------|-------------|-------|

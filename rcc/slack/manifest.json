@@ -1,10 +1,10 @@
 {
-  "_comment": "Slack App manifest for RCC (Rocky Command Center). Import at https://api.slack.com/apps",
+  "_comment": "Slack App manifest for RCC (Claw Command Center). Import at https://api.slack.com/apps",
   "display_information": {
-    "name": "Rocky Command Center",
+    "name": "Claw Command Center",
     "description": "RCC agent coordination hub — ask Rocky questions, check queue status, and route work.",
     "background_color": "#1a1a2e",
-    "long_description": "Rocky Command Center (RCC) is the coordination hub for the Rocky & Friends agent team. Use @Rocky to ask questions, get queue status, and route work items. Supports slash commands and direct messages."
+    "long_description": "Claw Command Center (RCC) is the coordination hub for the Rocky & Friends agent team. Use @Rocky to ask questions, get queue status, and route work items. Supports slash commands and direct messages."
   },
   "features": {
     "bot_user": {
@@ -15,7 +15,7 @@
       {
         "command": "/rcc",
         "url": "https://YOUR-RCC-HOST/api/slack/commands",
-        "description": "Rocky Command Center — queue, status, and AI queries",
+        "description": "Claw Command Center — queue, status, and AI queries",
         "usage_hint": "[status|queue|ask <question>|help]",
         "should_escape": false
       }
