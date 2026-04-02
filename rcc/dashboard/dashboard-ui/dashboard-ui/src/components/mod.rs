@@ -1,3 +1,4 @@
+pub mod auth_gate;
 pub mod activity_feed;
 pub mod health_banner;
 pub mod agent_cards;

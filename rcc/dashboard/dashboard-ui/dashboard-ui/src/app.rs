@@ -3,6 +3,7 @@ use wasm_bindgen::JsValue;
 
 use crate::context::DashboardContext;
 use crate::components::{
+    auth_gate::{AuthGate, LogoutButton},
     activity_feed::ActivityFeed,
     agent_cards::AgentCards,
     agent_detail::AgentDetail,
@@ -92,6 +93,7 @@ pub fn App() -> impl IntoView {
     };
 
     view! {
+        <AuthGate>
         <div class="dashboard">
             <header class="dash-header">
                 <div class="dash-logo">
@@ -99,6 +101,7 @@ pub fn App() -> impl IntoView {
                     <span class="logo-text">"Rocky Command Center"</span>
                 </div>
                 <div class="dash-subtitle">"v3 — Rust/WASM + GH Issues"</div>
+                <LogoutButton />
                 <div class="dash-tabs">
                     <button
                         class="tab-btn"
@@ -187,5 +190,6 @@ pub fn App() -> impl IntoView {
                 }}
             </main>
         </div>
+        </AuthGate>
     }
 }
