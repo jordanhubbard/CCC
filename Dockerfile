@@ -59,9 +59,9 @@ RUN groupadd -r rcc && useradd -r -g rcc -s /bin/false rcc \
  && chown -R rcc:rcc /app /data
 USER rcc
 
-# Ports
-EXPOSE 8789   # RCC API
-EXPOSE 8790   # SquirrelChat
+# Ports: 8789=RCC API, 8790=SquirrelChat
+EXPOSE 8789
+EXPOSE 8790
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
