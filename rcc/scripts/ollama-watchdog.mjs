@@ -43,13 +43,34 @@ function log(msg) {
 function saveStatus() {
   try {
     const gpuTelemetry = getGpuTelemetry();
+    const ram = getSystemRam();
     writeFileSync(STATUS_FILE, JSON.stringify({
       ollama: ollamaStatus,
       gpu: gpuTelemetry,
+      // GB10 has unified memory — system RAM IS the GPU memory pool
+      ram,
       updatedAt: new Date().toISOString(),
     }, null, 2));
   } catch (e) {
     log(`WARN: could not write status file: ${e.message}`);
+  }
+}
+
+/** Collect system RAM stats (important for GB10 unified memory architecture) */
+function getSystemRam() {
+  try {
+    const raw = execSync('free -b', { timeout: 3000, stdio: 'pipe' }).toString();
+    const memLine = raw.split('\n').find(l => l.startsWith('Mem:'));
+    if (!memLine) return null;
+    const parts = memLine.trim().split(/\s+/);
+    return {
+      total_mb:     Math.round(parseInt(parts[1]) / 1024 / 1024),
+      used_mb:      Math.round(parseInt(parts[2]) / 1024 / 1024),
+      free_mb:      Math.round(parseInt(parts[3]) / 1024 / 1024),
+      available_mb: Math.round(parseInt(parts[6]) / 1024 / 1024),
+    };
+  } catch (e) {
+    return null;
   }
 }
 
@@ -76,12 +97,13 @@ function getGpuTelemetry() {
       return {
         index:       parseNum(parts[0]) ?? 0,
         name:        parts[1] || 'unknown',
-        vram_used_mb: parseNum(parts[2]),    // null if unified memory ([N/A])
+        vram_used_mb: parseNum(parts[2]),    // null if unified memory (GB10)
         vram_free_mb: parseNum(parts[3]),
         vram_total_mb: parseNum(parts[4]),
         temp_c:       parseNum(parts[5]),
         power_w:      parseNum(parts[6]),
         utilization_pct: parseNum(parts[7]),
+        unified_memory: parseNum(parts[2]) === null,  // GB10 uses system RAM as VRAM
       };
     });
 
@@ -95,6 +117,7 @@ function getGpuTelemetry() {
 /** POST ollama_status (and GPU telemetry) to RCC heartbeat */
 async function reportToRCC(model, status) {
   const gpuTelemetry = getGpuTelemetry();
+  const ram = getSystemRam();
 
   const payload = {
     status: 'online',
@@ -115,6 +138,16 @@ async function reportToRCC(model, status) {
       if (g0.vram_total_mb !== null)    payload.vram_total_mb = g0.vram_total_mb;
     }
     log(`GPU telemetry: ${gpuTelemetry.length} GPU(s). g0: temp=${gpuTelemetry[0]?.temp_c}°C power=${gpuTelemetry[0]?.power_w}W util=${gpuTelemetry[0]?.utilization_pct}%`);
+  }
+
+  // GB10 unified memory — system RAM IS the GPU memory pool
+  if (ram) {
+    payload.ram = ram;
+    // Expose as unified_vram fields for dashboard display
+    payload.unified_vram_used_mb  = ram.used_mb;
+    payload.unified_vram_free_mb  = ram.available_mb;
+    payload.unified_vram_total_mb = ram.total_mb;
+    log(`RAM (unified VRAM): ${ram.used_mb}MB used / ${ram.total_mb}MB total (${ram.available_mb}MB avail)`);
   }
 
   try {
