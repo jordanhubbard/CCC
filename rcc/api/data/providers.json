@@ -15,5 +15,113 @@
     ],
     "createdAt": "2026-03-29T02:08:00.871Z",
     "updatedAt": "2026-03-29T02:08:01.130Z"
+  },
+  "peabody": {
+    "id": "peabody",
+    "model": "nemotron",
+    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "baseUrl": "http://localhost:18081/v1",
+    "local_port": 18081,
+    "status": "online",
+    "owner": "peabody",
+    "host": "horde-dgxc.nvidia.com",
+    "context_len": 262144,
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "gpu_vram_gb": 191,
+    "vllm_port": 8080,
+    "tunnel": "ssh -R 18081:localhost:8080 tunnel@146.190.134.110",
+    "api_key": null,
+    "tags": [
+      "large",
+      "gpu",
+      "l40",
+      "vllm",
+      "nemotron",
+      "fp8"
+    ],
+    "capabilities": {
+      "tool_calls": true,
+      "tool_call_parser": "qwen3_coder",
+      "reasoning": true,
+      "reasoning_parser": "nemotron_v3",
+      "kv_cache": "fp8",
+      "tensor_parallel": 4,
+      "attention_backend": "TRITON_ATTN"
+    },
+    "createdAt": "2026-04-02T02:04:00.000Z",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
+  },
+  "sherman": {
+    "id": "sherman",
+    "model": "nemotron",
+    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "baseUrl": "http://localhost:18082/v1",
+    "local_port": 18082,
+    "status": "unknown",
+    "owner": "sherman",
+    "context_len": 262144,
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "gpu_vram_gb": 191,
+    "api_key": null,
+    "tags": [
+      "large",
+      "gpu",
+      "l40",
+      "vllm",
+      "nemotron",
+      "fp8"
+    ],
+    "createdAt": "2026-04-02T02:04:00.000Z",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
+  },
+  "snidely": {
+    "id": "snidely",
+    "model": "nemotron",
+    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "baseUrl": "http://localhost:18083/v1",
+    "local_port": 18083,
+    "status": "unknown",
+    "owner": "snidely",
+    "context_len": 262144,
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "gpu_vram_gb": 191,
+    "api_key": null,
+    "tags": [
+      "large",
+      "gpu",
+      "l40",
+      "vllm",
+      "nemotron",
+      "fp8"
+    ],
+    "createdAt": "2026-04-02T02:04:00.000Z",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
+  },
+  "dudley": {
+    "id": "dudley",
+    "model": "nemotron",
+    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "baseUrl": "http://localhost:18084/v1",
+    "local_port": 18084,
+    "status": "unknown",
+    "owner": "dudley",
+    "context_len": 262144,
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "gpu_vram_gb": 191,
+    "api_key": null,
+    "tags": [
+      "large",
+      "gpu",
+      "l40",
+      "vllm",
+      "nemotron",
+      "fp8"
+    ],
+    "createdAt": "2026-04-02T02:04:00.000Z",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
   }
 }

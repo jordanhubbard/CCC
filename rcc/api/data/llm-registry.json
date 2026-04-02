@@ -61,5 +61,138 @@
     "backend": "vllm",
     "status": "loading",
     "updatedAt": "2026-03-28T18:00:52.938Z"
+  },
+  "peabody": {
+    "agent": "peabody",
+    "host": "horde-dgxc.nvidia.com",
+    "baseUrl": "http://localhost:18081/v1",
+    "tunnel_port": 18081,
+    "models": [
+      {
+        "name": "nemotron",
+        "aliases": [
+          "nemotron-120b",
+          "nemotron-3-super-120b-fp8"
+        ],
+        "type": "chat",
+        "contextLen": 262144,
+        "dims": null,
+        "quantization": "fp8",
+        "tags": [
+          "large",
+          "reasoning",
+          "tool-use",
+          "gpu",
+          "l40"
+        ],
+        "vram_gb": 191
+      }
+    ],
+    "backend": "vllm",
+    "status": "online",
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "capabilities": {
+      "tool_calls": true,
+      "tool_call_parser": "qwen3_coder",
+      "reasoning": true,
+      "reasoning_parser": "nemotron_v3",
+      "tensor_parallel": 4
+    },
+    "updatedAt": "2026-04-02T02:04:00.000Z"
+  },
+  "sherman": {
+    "agent": "sherman",
+    "host": "horde-dgxc.nvidia.com",
+    "baseUrl": "http://localhost:18082/v1",
+    "tunnel_port": 18082,
+    "models": [
+      {
+        "name": "nemotron",
+        "aliases": [
+          "nemotron-120b",
+          "nemotron-3-super-120b-fp8"
+        ],
+        "type": "chat",
+        "contextLen": 262144,
+        "dims": null,
+        "quantization": "fp8",
+        "tags": [
+          "large",
+          "reasoning",
+          "tool-use",
+          "gpu",
+          "l40"
+        ],
+        "vram_gb": 191
+      }
+    ],
+    "backend": "vllm",
+    "status": "unknown",
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
+  },
+  "snidely": {
+    "agent": "snidely",
+    "host": "horde-dgxc.nvidia.com",
+    "baseUrl": "http://localhost:18083/v1",
+    "tunnel_port": 18083,
+    "models": [
+      {
+        "name": "nemotron",
+        "aliases": [
+          "nemotron-120b"
+        ],
+        "type": "chat",
+        "contextLen": 262144,
+        "dims": null,
+        "quantization": "fp8",
+        "tags": [
+          "large",
+          "reasoning",
+          "tool-use",
+          "gpu",
+          "l40"
+        ],
+        "vram_gb": 191
+      }
+    ],
+    "backend": "vllm",
+    "status": "unknown",
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
+  },
+  "dudley": {
+    "agent": "dudley",
+    "host": "horde-dgxc.nvidia.com",
+    "baseUrl": "http://localhost:18084/v1",
+    "tunnel_port": 18084,
+    "models": [
+      {
+        "name": "nemotron",
+        "aliases": [
+          "nemotron-120b"
+        ],
+        "type": "chat",
+        "contextLen": 262144,
+        "dims": null,
+        "quantization": "fp8",
+        "tags": [
+          "large",
+          "reasoning",
+          "tool-use",
+          "gpu",
+          "l40"
+        ],
+        "vram_gb": 191
+      }
+    ],
+    "backend": "vllm",
+    "status": "unknown",
+    "gpu_count": 4,
+    "gpu_model": "NVIDIA L40",
+    "updatedAt": "2026-04-02T02:04:00.000Z"
   }
 }
