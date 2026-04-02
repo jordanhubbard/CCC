@@ -42,24 +42,86 @@ function log(msg) {
 /** Save status to disk (picked up by heartbeat) */
 function saveStatus() {
   try {
-    writeFileSync(STATUS_FILE, JSON.stringify({ ...ollamaStatus, updatedAt: new Date().toISOString() }, null, 2));
+    const gpuTelemetry = getGpuTelemetry();
+    writeFileSync(STATUS_FILE, JSON.stringify({
+      ollama: ollamaStatus,
+      gpu: gpuTelemetry,
+      updatedAt: new Date().toISOString(),
+    }, null, 2));
   } catch (e) {
     log(`WARN: could not write status file: ${e.message}`);
   }
 }
 
-/** POST ollama_status to RCC heartbeat */
+/** Collect GPU telemetry via nvidia-smi */
+function getGpuTelemetry() {
+  try {
+    const fields = [
+      'index', 'name', 'memory.used', 'memory.free', 'memory.total',
+      'temperature.gpu', 'power.draw', 'utilization.gpu',
+    ];
+    const raw = execSync(
+      `nvidia-smi --query-gpu=${fields.join(',')} --format=csv,noheader`,
+      { timeout: 5000, stdio: 'pipe' }
+    ).toString().trim();
+
+    if (!raw) return null;
+
+    const gpus = raw.split('\n').map(line => {
+      const parts = line.split(',').map(s => s.trim());
+      const parseNum = (v) => {
+        const n = parseFloat(v);
+        return isNaN(n) ? null : n;
+      };
+      return {
+        index:       parseNum(parts[0]) ?? 0,
+        name:        parts[1] || 'unknown',
+        vram_used_mb: parseNum(parts[2]),    // null if unified memory ([N/A])
+        vram_free_mb: parseNum(parts[3]),
+        vram_total_mb: parseNum(parts[4]),
+        temp_c:       parseNum(parts[5]),
+        power_w:      parseNum(parts[6]),
+        utilization_pct: parseNum(parts[7]),
+      };
+    });
+
+    return gpus;
+  } catch (e) {
+    log(`WARN: nvidia-smi failed: ${e.message}`);
+    return null;
+  }
+}
+
+/** POST ollama_status (and GPU telemetry) to RCC heartbeat */
 async function reportToRCC(model, status) {
+  const gpuTelemetry = getGpuTelemetry();
+
+  const payload = {
+    status: 'online',
+    host: 'sparky',
+    ts: new Date().toISOString(),
+    ollama_status: ollamaStatus,
+  };
+
+  if (gpuTelemetry) {
+    payload.gpu = gpuTelemetry;
+    // Convenience top-level fields from first GPU
+    const g0 = gpuTelemetry[0];
+    if (g0) {
+      if (g0.temp_c !== null)           payload.gpu_temp_c = g0.temp_c;
+      if (g0.power_w !== null)          payload.gpu_power_w = g0.power_w;
+      if (g0.utilization_pct !== null)  payload.gpu_util_pct = g0.utilization_pct;
+      if (g0.vram_used_mb !== null)     payload.vram_used_mb = g0.vram_used_mb;
+      if (g0.vram_total_mb !== null)    payload.vram_total_mb = g0.vram_total_mb;
+    }
+    log(`GPU telemetry: ${gpuTelemetry.length} GPU(s). g0: temp=${gpuTelemetry[0]?.temp_c}°C power=${gpuTelemetry[0]?.power_w}W util=${gpuTelemetry[0]?.utilization_pct}%`);
+  }
+
   try {
     const res = await fetch(`${RCC_API}/api/heartbeat/${AGENT_NAME}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RCC_AUTH_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        status: 'online',
-        host: 'sparky',
-        ts: new Date().toISOString(),
-        ollama_status: ollamaStatus,
-      }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) log(`WARN: RCC heartbeat responded ${res.status}`);
   } catch (e) {
