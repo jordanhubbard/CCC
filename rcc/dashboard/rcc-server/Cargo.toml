@@ -1,0 +1,26 @@
+[package]
+name = "rcc-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rcc-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tower-http = { version = "0.5", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
