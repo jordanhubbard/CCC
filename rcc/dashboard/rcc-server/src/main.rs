@@ -140,6 +140,7 @@ async fn main() {
     state::load_all(&app_state).await;
     routes::lessons::load_lessons().await;
     routes::issues::load_issues().await;
+    routes::conversations::load_conversations().await;
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -164,6 +165,7 @@ async fn main() {
         .merge(routes::issues::router())
         .merge(routes::fs::router())
         .merge(routes::supervisor::router())
+        .merge(routes::conversations::router())
         .layer(cors)
         .with_state(app_state.clone());
 
