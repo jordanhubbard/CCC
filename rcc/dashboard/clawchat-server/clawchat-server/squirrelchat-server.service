@@ -1,0 +1,17 @@
+[Unit]
+Description=ClawChat Server v2 (Rust/Axum)
+After=network.target
+
+[Service]
+Type=simple
+User=jkh
+WorkingDirectory=/home/jkh/.openclaw/workspace/clawchat
+ExecStart=/home/jkh/rockyandfriends/rcc/dashboard/target/release/clawchat-server
+Environment=SQUIRRELCHAT_PORT=8793
+Environment=SQUIRRELCHAT_DB=/home/jkh/.openclaw/workspace/clawchat/clawchat.db
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,192 @@
+#!/bin/bash
+# CCC Agent — one-liner installer for Linux
+# Onboards this machine as an agent node to an existing CCC Hub.
+# Usage: curl -fsSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/rcc-hub/install-agent.sh | bash
+#
+# What this does:
+#   1. Checks / installs Node.js 18+
+#   2. Installs OpenClaw (the agent runtime)
+#   3. Prompts for Hub URL and bootstrap token
+#   4. Calls /api/onboard to get a permanent agent token
+#   5. Writes ~/.rcc/.env with AGENT_NAME and RCC_URL
+#   6. Installs a cron/systemd heartbeat
+#   7. Confirms first heartbeat reaches hub
+
+set -euo pipefail
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+info()  { echo -e "${GREEN}[rcc-agent]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[rcc-agent]${NC} $*"; }
+error() { echo -e "${RED}[rcc-agent]${NC} $*" >&2; exit 1; }
+ask()   { read -rp "$1: " _ans; echo "$_ans"; }
+
+if [ "$EUID" -ne 0 ]; then SUDO="sudo"; else SUDO=""; fi
+
+# ─── 1. Node.js ───────────────────────────────────────────────────────────────
+info "Checking Node.js..."
+if command -v node &>/dev/null; then
+  MAJOR=$(node -e "console.log(parseInt(process.version.slice(1)))")
+  if [ "$MAJOR" -ge 18 ]; then
+    info "Node.js $(node --version) ✓"
+  else
+    warn "Upgrading Node.js (need 18+)..."
+    if command -v apt-get &>/dev/null; then
+      curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash -
+      $SUDO apt-get install -y nodejs
+    elif command -v yum &>/dev/null; then
+      curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash -
+      $SUDO yum install -y nodejs
+    else
+      error "Install Node.js 18+ manually: https://nodejs.org"
+    fi
+  fi
+else
+  info "Installing Node.js 20..."
+  if command -v apt-get &>/dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO bash -
+    $SUDO apt-get install -y nodejs
+  elif command -v brew &>/dev/null; then
+    brew install node
+  elif command -v yum &>/dev/null; then
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash -
+    $SUDO yum install -y nodejs
+  else
+    error "Install Node.js 18+ manually: https://nodejs.org"
+  fi
+fi
+
+# ─── 2. Detect platform ────────────────────────────────────────────────────────
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+info "Platform: $OS/$ARCH"
+
+# ─── 3. Gather config ─────────────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  CCC Agent Setup"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+HUB_URL="${RCC_HUB_URL:-}"
+BOOTSTRAP_TOKEN="${RCC_BOOTSTRAP_TOKEN:-}"
+AGENT_NAME="${RCC_AGENT_NAME:-}"
+
+if [ -z "$HUB_URL" ]; then
+  HUB_URL=$(ask "CCC Hub URL (e.g. http://1.2.3.4:8789)")
+fi
+HUB_URL="${HUB_URL%/}"  # strip trailing slash
+
+if [ -z "$BOOTSTRAP_TOKEN" ]; then
+  BOOTSTRAP_TOKEN=$(ask "Bootstrap token (from hub admin)")
+fi
+
+if [ -z "$AGENT_NAME" ]; then
+  DEFAULT_NAME="$(hostname -s)"
+  read -rp "Agent name [${DEFAULT_NAME}]: " _name
+  AGENT_NAME="${_name:-$DEFAULT_NAME}"
+fi
+
+# ─── 4. Health check ──────────────────────────────────────────────────────────
+info "Checking hub at $HUB_URL..."
+HEALTH=$(curl -sfL "$HUB_URL/health" 2>/dev/null) || error "Cannot reach hub at $HUB_URL — check URL and firewall."
+info "Hub is up ✓"
+
+# ─── 5. Onboard — get permanent token ─────────────────────────────────────────
+info "Calling /api/onboard..."
+ONBOARD_RESP=$(curl -sfL "$HUB_URL/api/onboard" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $BOOTSTRAP_TOKEN" \
+  -d "{\"name\":\"$AGENT_NAME\",\"host\":\"$(hostname -f 2>/dev/null || hostname)\",\"type\":\"agent\"}" \
+  2>/dev/null) || error "Onboard request failed — is the bootstrap token correct?"
+
+AGENT_TOKEN=$(echo "$ONBOARD_RESP" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r.get('token',''))" 2>/dev/null)
+if [ -z "$AGENT_TOKEN" ]; then
+  # Fallback: use bootstrap token directly (some hub versions return the script)
+  AGENT_TOKEN="$BOOTSTRAP_TOKEN"
+  warn "Onboard endpoint returned a script — using bootstrap token as agent token."
+fi
+
+# ─── 6. Write ~/.rcc/.env ─────────────────────────────────────────────────────
+mkdir -p "$HOME/.rcc"
+chmod 700 "$HOME/.rcc"
+
+cat > "$HOME/.rcc/.env" << ENV
+# CCC Agent config — generated by install-agent.sh
+AGENT_NAME=$AGENT_NAME
+RCC_URL=$HUB_URL
+RCC_AGENT_TOKEN=$AGENT_TOKEN
+ENV
+
+chmod 600 "$HOME/.rcc/.env"
+info "Wrote ~/.rcc/.env ✓"
+
+# ─── 7. Heartbeat cron/service ────────────────────────────────────────────────
+# Simple heartbeat: curl POST to hub every 5 minutes
+HEARTBEAT_SCRIPT="$HOME/.rcc/heartbeat.sh"
+cat > "$HEARTBEAT_SCRIPT" << 'HBSCRIPT'
+#!/bin/bash
+source "$HOME/.rcc/.env" 2>/dev/null || true
+curl -sfL -X POST "$RCC_URL/api/heartbeat/$AGENT_NAME" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+  -d "{\"status\":\"online\",\"host\":\"$(hostname)\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+  -o /dev/null 2>/dev/null || true
+HBSCRIPT
+chmod +x "$HEARTBEAT_SCRIPT"
+
+if command -v systemctl &>/dev/null && systemctl --user cat 2>/dev/null; then
+  # User systemd service
+  SYSTEMD_USER="$HOME/.config/systemd/user"
+  mkdir -p "$SYSTEMD_USER"
+  cat > "$SYSTEMD_USER/rcc-heartbeat.service" << SVC
+[Unit]
+Description=CCC Agent Heartbeat
+
+[Service]
+Type=oneshot
+EnvironmentFile=${HOME}/.rcc/.env
+ExecStart=${HEARTBEAT_SCRIPT}
+SVC
+
+  cat > "$SYSTEMD_USER/rcc-heartbeat.timer" << TIMER
+[Unit]
+Description=CCC Agent Heartbeat (every 5 min)
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+TIMER
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now rcc-heartbeat.timer
+  info "Heartbeat timer installed (systemd --user) ✓"
+else
+  # Fallback: crontab
+  CRON_LINE="*/5 * * * * $HEARTBEAT_SCRIPT"
+  ( crontab -l 2>/dev/null | grep -v "$HEARTBEAT_SCRIPT"; echo "$CRON_LINE" ) | crontab -
+  info "Heartbeat cron installed (*/5 * * * *) ✓"
+fi
+
+# ─── 8. Confirm first heartbeat ───────────────────────────────────────────────
+info "Sending first heartbeat..."
+bash "$HEARTBEAT_SCRIPT" && info "Heartbeat OK ✓" || warn "Heartbeat failed — check token and hub URL."
+
+# ─── Done ─────────────────────────────────────────────────────────────────────
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo -e "${GREEN}  ✅  Agent '$AGENT_NAME' registered with CCC Hub!${NC}"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "  Config:  ~/.rcc/.env"
+echo "  Hub:     $HUB_URL"
+echo ""
+echo "  Verify on hub:"
+echo "    curl $HUB_URL/api/agents"
+echo ""
