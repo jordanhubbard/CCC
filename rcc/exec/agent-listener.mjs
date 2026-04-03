@@ -49,6 +49,7 @@ const DEFAULT_ALLOWLIST = [
   'nvidia-smi', 'node --version', 'node -v', 'npm ls', 'git status',
   'ls ', 'ls\t', 'cat ', 'echo ', 'ps aux', 'curl -s',
   'supervisorctl status', 'supervisorctl restart', 'supervisorctl stop', 'supervisorctl start',
+  'pkill -f openclaw-gateway', 'pkill -f agent-listener',
   'git pull', 'git log ', 'git fetch',
 ];
 const SHELL_ALLOWLIST   = process.env.SHELL_ALLOWLIST
