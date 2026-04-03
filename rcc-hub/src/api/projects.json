@@ -4,13 +4,13 @@
     "display_name": "Rocky and Friends",
     "description": "Rocky's monorepo — CCC platform, work pump, lessons ledger, agent coordination. Home of Rocky, Bullwinkle, Natasha, and Boris.",
     "github_url": "https://github.com/jordanhubbard/CCC",
-    "rcc_url": "http://146.190.134.110:8789/api/projects/jordanhubbard%2Frockyandfriends",
+    "rcc_url": "http://146.190.134.110:8789/api/projects/jordanhubbard%2FCCC",
     "issue_tracker": "https://github.com/jordanhubbard/CCC/issues",
     "slack_channels": [
       {
         "workspace": "omgjkh",
         "channel_id": "C0ANY3AGW4Q",
-        "channel_name": "project-rockyandfriends",
+        "channel_name": "project-CCC",
         "updatedAt": "2026-03-29T03:37:50.794Z"
       }
     ],

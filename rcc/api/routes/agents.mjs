@@ -748,7 +748,7 @@ export default function registerRoutes(app, state) {
 
     let spawnLog = [];
     try {
-      const busPath = process.env.BUS_LOG_PATH || '/home/jkh/rockyandfriends/rcc/data/bus.jsonl';
+      const busPath = process.env.BUS_LOG_PATH || '/home/jkh/Src/CCC/rcc/data/bus.jsonl';
       const { readFileSync } = await import('fs');
       const lines = readFileSync(busPath, 'utf8').trim().split('\n').filter(Boolean);
       spawnLog = lines
