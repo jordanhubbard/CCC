@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, broadcast};
 use crate::brain::BrainQueue;
+use crate::routes::metrics::MetricPoint;
 use crate::supervisor::SupervisorHandle;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -21,10 +22,12 @@ pub struct AppState {
     pub secrets_path: String,
     pub bus_log_path: String,
     pub projects_path: String,
+    pub metrics_path: String,
     pub queue: RwLock<QueueData>,
     pub agents: RwLock<serde_json::Value>,
     pub secrets: RwLock<serde_json::Map<String, serde_json::Value>>,
     pub projects: RwLock<Vec<serde_json::Value>>,
+    pub metrics: RwLock<HashMap<String, Vec<MetricPoint>>>,
     pub brain: Arc<BrainQueue>,
     pub bus_tx: broadcast::Sender<String>,
     pub bus_seq: AtomicU64,
@@ -62,6 +65,37 @@ pub async fn load_all(state: &Arc<AppState>) {
     load_agents(state).await;
     load_secrets(state).await;
     load_projects(state).await;
+    load_metrics(state).await;
+}
+
+pub async fn load_metrics(state: &Arc<AppState>) {
+    match tokio::fs::read_to_string(&state.metrics_path).await {
+        Ok(content) => {
+            if let Ok(data) = serde_json::from_str::<HashMap<String, Vec<MetricPoint>>>(&content) {
+                *state.metrics.write().await = data;
+                tracing::info!("Loaded metrics from {}", state.metrics_path);
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!("Metrics file not found, starting empty");
+        }
+        Err(e) => tracing::warn!("Failed to load metrics: {}", e),
+    }
+}
+
+pub async fn flush_metrics(state: &Arc<AppState>) {
+    let data = state.metrics.read().await;
+    let content = match serde_json::to_string_pretty(&*data) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Failed to serialize metrics: {}", e);
+            return;
+        }
+    };
+    drop(data);
+    if let Err(e) = write_atomic(&state.metrics_path, &content).await {
+        tracing::warn!("Failed to flush metrics: {}", e);
+    }
 }
 
 pub async fn load_projects(state: &Arc<AppState>) {
