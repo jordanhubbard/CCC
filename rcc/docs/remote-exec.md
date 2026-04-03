@@ -1,4 +1,4 @@
-# SquirrelBus Remote Code Execution
+# ClawBus Remote Code Execution
 
 **Status:** Implemented  
 **Security:** HMAC-SHA256 signed payloads, vm.runInNewContext(), 10s timeout  
@@ -8,10 +8,10 @@
 
 ## Overview
 
-Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets **or shell commands** to any or all agents via SquirrelBus. Each agent:
+Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets **or shell commands** to any or all agents via ClawBus. Each agent:
 
 1. Receives the message over the bus (`type: "rcc.exec"`)
-2. Verifies the HMAC-SHA256 signature using `SQUIRRELBUS_TOKEN`
+2. Verifies the HMAC-SHA256 signature using `CLAWBUS_TOKEN`
 3. Executes the code/command in a sandboxed environment (see Execution Modes)
 4. POSTs the result back to the RCC API (`POST /api/exec/:id/result`)
 5. Appends an audit log entry to `~/.rcc/logs/remote-exec.jsonl`
@@ -22,8 +22,8 @@ Set `mode` in the exec payload to control how code runs:
 
 | Mode | Description | Timeout | Auth required |
 |------|-------------|---------|---------------|
-| `js` (default) | `vm.runInNewContext()` sandbox | 10s | SQUIRRELBUS_TOKEN |
-| `shell` | `/bin/sh -c` via allowlist | 30s | SQUIRRELBUS_TOKEN + `ALLOW_SHELL_EXEC=true` |
+| `js` (default) | `vm.runInNewContext()` sandbox | 10s | CLAWBUS_TOKEN |
+| `shell` | `/bin/sh -c` via allowlist | 30s | CLAWBUS_TOKEN + `ALLOW_SHELL_EXEC=true` |
 
 ### Shell Mode
 
@@ -61,7 +61,7 @@ curl -s -X POST https://rcc.yourmom.photos/api/exec \
 | Path | Description |
 |------|-------------|
 | `rcc/exec/index.mjs` | HMAC signing/verification library (`signPayload`, `verifyPayload`, `canonicalize`) |
-| `rcc/exec/agent-listener.mjs` | Agent-side SquirrelBus subscriber + executor (runs as a daemon) |
+| `rcc/exec/agent-listener.mjs` | Agent-side ClawBus subscriber + executor (runs as a daemon) |
 | `rcc/api/index.mjs` | API endpoints: `POST /api/exec`, `GET /api/exec/:id`, `POST /api/exec/:id/result` |
 | `rcc/docs/remote-exec.md` | This document |
 | `rcc/tests/api/exec.test.mjs` | Test coverage |
@@ -80,7 +80,7 @@ curl -s -X POST https://rcc.yourmom.photos/api/exec \
 
 1. Build the payload object (without `sig`)
 2. `canonicalize()`: deterministic JSON stringify (keys sorted recursively, no whitespace)
-3. HMAC-SHA256 over canonical string using `SQUIRRELBUS_TOKEN`
+3. HMAC-SHA256 over canonical string using `CLAWBUS_TOKEN`
 4. Attach as `sig` hex string in the envelope
 
 Verification uses `timingSafeEqual` to prevent timing oracle attacks.
@@ -118,8 +118,8 @@ Allowed globals: `Math`, `Date`, `JSON`, `parseInt`, `parseFloat`, `isNaN`, `isF
 }
 ```
 
-- Signs the payload with `SQUIRRELBUS_TOKEN`
-- Broadcasts as `type: "rcc.exec"` on SquirrelBus
+- Signs the payload with `CLAWBUS_TOKEN`
+- Broadcasts as `type: "rcc.exec"` on ClawBus
 - Appends record to `rcc/api/data/exec-log.jsonl`
 
 ### GET /api/exec/:id
@@ -149,10 +149,10 @@ Appends the agent result to the exec record.
 ## Running the Agent Listener
 
 ```bash
-SQUIRRELBUS_TOKEN=your-token \
+CLAWBUS_TOKEN=your-token \
 RCC_AUTH_TOKEN=your-rcc-token \
 AGENT_NAME=natasha \
-SQUIRRELBUS_URL=https://dashboard.yourmom.photos \
+CLAWBUS_URL=https://dashboard.yourmom.photos \
 RCC_URL=https://rcc.yourmom.photos \
 node rcc/exec/agent-listener.mjs
 ```
@@ -209,7 +209,7 @@ curl -s http://localhost:8789/api/exec/$EXEC_ID \
 
 ## Deployment: Sweden GPU Nodes (peabody / sherman / snidely / dudley)
 
-These nodes have no inbound network access. SquirrelBus exec is the **only** mechanism for remote administration from Rocky or other agents.
+These nodes have no inbound network access. ClawBus exec is the **only** mechanism for remote administration from Rocky or other agents.
 
 ### Install agent-listener as a systemd service
 
@@ -221,8 +221,8 @@ sudo mkdir -p /etc/rcc
 
 # Write credentials (get these from Rocky or jkh):
 sudo tee /etc/rcc/env << 'ENVEOF'
-SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
-SQUIRRELBUS_URL=https://dashboard.yourmom.photos
+CLAWBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+CLAWBUS_URL=https://dashboard.yourmom.photos
 RCC_URL=https://rcc.yourmom.photos
 RCC_AUTH_TOKEN=<agent-specific-token>
 AGENT_NAME=peabody
