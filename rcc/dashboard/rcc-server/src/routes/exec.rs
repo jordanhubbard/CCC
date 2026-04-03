@@ -100,7 +100,7 @@ async fn post_exec(
 
     let broadcast_to = targets.first().map(|s| s.as_str()).unwrap_or("all");
     let bus_sent = client
-        .post(format!("{}/bus/send", bus_url))
+        .post(format!("{}/api/bus/send", bus_url))
         .bearer_auth(&bus_token)
         .json(&json!({
             "from":    "rocky",

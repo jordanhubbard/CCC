@@ -263,11 +263,13 @@ async function handleExecMessage(message) {
 
 // ── Subscribe to ClawBus via SSE stream ────────────────────────────────
 async function subscribe() {
-  console.log(`[exec-listener] Connecting to ClawBus at ${SQUIRRELBUS_URL}/bus/stream`);
+  // Support both legacy /bus/stream (old Node.js API) and /api/bus/stream (Rust rcc-server)
+  const BUS_STREAM_PATH = process.env.BUS_STREAM_PATH || '/api/bus/stream';
+  console.log(`[exec-listener] Connecting to ClawBus at ${SQUIRRELBUS_URL}${BUS_STREAM_PATH}`);
 
   while (true) {
     try {
-      const resp = await fetch(`${SQUIRRELBUS_URL}/bus/stream`, {
+      const resp = await fetch(`${SQUIRRELBUS_URL}${BUS_STREAM_PATH}`, {
         headers: { 'Accept': 'text/event-stream' },
       });
 
