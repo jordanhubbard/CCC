@@ -3,16 +3,28 @@
  * ollama-watchdog.mjs — periodic health check for ollama models on sparky
  * Checks qwen2.5-coder:32b and qwen3-coder every 15 min.
  * Restarts degraded models, surfaces status in RCC heartbeat.
+ * Also logs GPU utilization time-series to ~/.openclaw/workspace/telemetry/gpu-metrics.jsonl
  *
  * Run: node ollama-watchdog.mjs [--once]
  * Cron: add to openclaw cron or run as systemd service.
  */
 
-import { execFile } from 'child_process';
+import { execFile, exec } from 'child_process';
 import { promisify } from 'util';
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'fs';
+import { createGzip } from 'zlib';
+import { createReadStream, createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+import os from 'os';
 
 const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+
+// GPU time-series JSONL log
+const TELEMETRY_DIR = `${os.homedir()}/.openclaw/workspace/telemetry`;
+const GPU_METRICS_PATH = `${TELEMETRY_DIR}/gpu-metrics.jsonl`;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const RCC_URL    = process.env.RCC_URL    || 'http://146.190.134.110:8789';
 const RCC_TOKEN  = process.env.RCC_AUTH_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const AGENT_NAME = process.env.AGENT_NAME || 'natasha';
@@ -94,6 +106,60 @@ async function pushStatus() {
   } catch (_) {}
 }
 
+async function collectGpuMetrics() {
+  try {
+    // GB10 unified memory — nvidia-smi may return N/A for some fields
+    const { stdout } = await execAsync(
+      'nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits',
+      { timeout: 5000 }
+    );
+    const parts = stdout.trim().split(',').map(s => s.trim());
+    const parseNum = v => v === '[N/A]' || v === 'N/A' || v === '' ? null : parseFloat(v);
+    return {
+      temp_c:      parseNum(parts[0]),
+      power_w:     parseNum(parts[1]),
+      util_pct:    parseNum(parts[2]),
+      mem_used_mb: parseNum(parts[3]),
+      mem_total_mb:parseNum(parts[4]),
+    };
+  } catch (_) {
+    return { temp_c: null, power_w: null, util_pct: null, mem_used_mb: null, mem_total_mb: null };
+  }
+}
+
+async function maybeRotateGpuLog() {
+  if (!existsSync(GPU_METRICS_PATH)) return;
+  const st = statSync(GPU_METRICS_PATH);
+  if (Date.now() - st.mtimeMs < WEEK_MS) return;
+  const rotated = `${GPU_METRICS_PATH}.${new Date().toISOString().slice(0, 10)}.gz`;
+  try {
+    await pipeline(createReadStream(GPU_METRICS_PATH), createGzip(), createWriteStream(rotated));
+    renameSync(`${GPU_METRICS_PATH}`, `${GPU_METRICS_PATH}.rotated`);
+    const { unlinkSync } = await import('fs');
+    unlinkSync(`${GPU_METRICS_PATH}.rotated`);
+    console.log(`[watchdog] rotated gpu-metrics.jsonl → ${rotated}`);
+  } catch (err) {
+    console.log(`[watchdog] gpu-metrics rotation failed: ${err.message}`);
+  }
+}
+
+async function appendGpuMetrics() {
+  if (!existsSync(TELEMETRY_DIR)) mkdirSync(TELEMETRY_DIR, { recursive: true });
+  await maybeRotateGpuLog();
+  const gpu = await collectGpuMetrics();
+  const ollama_model_count = MODELS_TO_CHECK.filter(m => state[m]?.status === 'ok').length;
+  const entry = {
+    ts: new Date().toISOString(),
+    ...gpu,
+    ollama_model_count,
+  };
+  try {
+    appendFileSync(GPU_METRICS_PATH, JSON.stringify(entry) + '\n');
+  } catch (err) {
+    console.log(`[watchdog] gpu-metrics append failed: ${err.message}`);
+  }
+}
+
 async function runChecks() {
   console.log(`[watchdog] ${new Date().toISOString()} — checking ${MODELS_TO_CHECK.length} models`);
   for (const model of MODELS_TO_CHECK) {
@@ -111,6 +177,7 @@ async function runChecks() {
     }
   }
   await pushStatus();
+  await appendGpuMetrics();
 }
 
 const once = process.argv.includes('--once');
