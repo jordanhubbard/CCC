@@ -20,8 +20,8 @@
  */
 
 import { execSync, spawn } from 'child_process';
-import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { writeFileSync, readFileSync, existsSync, appendFileSync, mkdirSync, renameSync, statSync } from 'fs';
+import { resolve, dirname } from 'path';
 
 const OLLAMA_BASE_URL     = process.env.OLLAMA_BASE_URL     || 'http://localhost:11434';
 const OLLAMA_MODELS       = (process.env.OLLAMA_MODELS      || 'qwen2.5-coder:32b').split(',').map(s => s.trim());
@@ -31,6 +31,8 @@ const RCC_API             = process.env.RCC_API             || 'https://api.your
 const RCC_AUTH_TOKEN      = process.env.RCC_AUTH_TOKEN      || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
 const AGENT_NAME          = process.env.AGENT_NAME          || 'natasha';
 const STATUS_FILE         = resolve(process.env.STATUS_FILE || '/home/jkh/.rcc/ollama-status.json');
+const GPU_METRICS_FILE    = resolve(process.env.GPU_METRICS_FILE || '/home/jkh/.openclaw/workspace/telemetry/gpu-metrics.jsonl');
+const GPU_METRICS_MAX_MB  = parseInt(process.env.GPU_METRICS_MAX_MB || '50', 10);  // rotate when > 50MB
 const TEST_PROMPT         = 'Say "ok" in one word.';
 
 // GPU spike alerting — notify jkh via Mattermost DM when GPU util is sustained high
@@ -194,6 +196,44 @@ function getGpuTelemetry() {
   }
 }
 
+/** Append GPU metrics to local JSONL time-series file */
+function appendGpuMetrics(gpuTelemetry, ram, ollamaModelCount) {
+  try {
+    const dir = dirname(GPU_METRICS_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    // Rotate if file exceeds max size
+    if (existsSync(GPU_METRICS_FILE)) {
+      const sz = statSync(GPU_METRICS_FILE).size;
+      if (sz > GPU_METRICS_MAX_MB * 1024 * 1024) {
+        const rotated = GPU_METRICS_FILE + '.1.gz';
+        try {
+          execSync(`gzip -c "${GPU_METRICS_FILE}" > "${rotated}" && > "${GPU_METRICS_FILE}"`, { timeout: 10000, stdio: 'pipe' });
+          log(`GPU metrics rotated to ${rotated} (was ${Math.round(sz/1024/1024)}MB)`);
+        } catch (e) {
+          log(`WARN: GPU metrics rotation failed: ${e.message}`);
+        }
+      }
+    }
+
+    const g0 = gpuTelemetry?.[0];
+    const entry = {
+      ts:               new Date().toISOString(),
+      temp_c:           g0?.temp_c ?? null,
+      power_w:          g0?.power_w ?? null,
+      util_pct:         g0?.utilization_pct ?? null,
+      vram_used_mb:     g0?.vram_used_mb ?? null,    // null on GB10 unified memory
+      ram_used_mb:      ram?.used_mb ?? null,
+      ram_avail_mb:     ram?.available_mb ?? null,
+      ollama_models:    ollamaModelCount ?? 0,
+    };
+
+    appendFileSync(GPU_METRICS_FILE, JSON.stringify(entry) + '\n', 'utf8');
+  } catch (e) {
+    log(`WARN: failed to append GPU metrics: ${e.message}`);
+  }
+}
+
 /** POST ollama_status (and GPU telemetry) to RCC heartbeat */
 async function reportToRCC(model, status) {
   const gpuTelemetry = getGpuTelemetry();
@@ -220,6 +260,9 @@ async function reportToRCC(model, status) {
     log(`GPU telemetry: ${gpuTelemetry.length} GPU(s). g0: temp=${gpuTelemetry[0]?.temp_c}°C power=${gpuTelemetry[0]?.power_w}W util=${gpuTelemetry[0]?.utilization_pct}%`);
     checkGpuSpike(gpuTelemetry);
   }
+
+  // Append to local time-series JSONL for historical analysis
+  appendGpuMetrics(gpuTelemetry, ram, Object.keys(ollamaStatus).length);
 
   // GB10 unified memory — system RAM IS the GPU memory pool
   if (ram) {
