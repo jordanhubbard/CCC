@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use tokio::sync::{RwLock, broadcast};
 use crate::brain::BrainQueue;
-use crate::routes::metrics::MetricPoint;
 use crate::supervisor::SupervisorHandle;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -27,7 +26,7 @@ pub struct AppState {
     pub agents: RwLock<serde_json::Value>,
     pub secrets: RwLock<serde_json::Map<String, serde_json::Value>>,
     pub projects: RwLock<Vec<serde_json::Value>>,
-    pub metrics: RwLock<HashMap<String, Vec<MetricPoint>>>,
+    pub metrics: RwLock<serde_json::Value>,
     pub brain: Arc<BrainQueue>,
     pub bus_tx: broadcast::Sender<String>,
     pub bus_seq: AtomicU64,
@@ -71,7 +70,7 @@ pub async fn load_all(state: &Arc<AppState>) {
 pub async fn load_metrics(state: &Arc<AppState>) {
     match tokio::fs::read_to_string(&state.metrics_path).await {
         Ok(content) => {
-            if let Ok(data) = serde_json::from_str::<HashMap<String, Vec<MetricPoint>>>(&content) {
+            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
                 *state.metrics.write().await = data;
                 tracing::info!("Loaded metrics from {}", state.metrics_path);
             }

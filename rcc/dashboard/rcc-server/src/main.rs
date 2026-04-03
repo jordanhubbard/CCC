@@ -112,7 +112,7 @@ async fn main() {
         agents: RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
         secrets: RwLock::new(serde_json::Map::new()),
         projects: tokio::sync::RwLock::new(Vec::new()),
-        metrics: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+        metrics: tokio::sync::RwLock::new(serde_json::Value::Null),
         brain: Arc::new(brain::BrainQueue::new()),
         bus_tx: tokio::sync::broadcast::channel(256).0,
         bus_seq: std::sync::atomic::AtomicU64::new(0),
@@ -153,11 +153,10 @@ async fn main() {
         .merge(routes::fs::router())
         .merge(routes::supervisor::router())
         .merge(routes::conversations::router())
-        .merge(routes::metrics::router())
         .merge(routes::setup::router())
         .merge(routes::providers::router())
         .merge(routes::acp::router())
-        .merge(routes::metrics::router())
+        .merge(routes::models::router())
         .layer(cors)
         .with_state(app_state.clone());
 

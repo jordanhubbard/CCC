@@ -1,3 +1,4 @@
+use crate::routes::metrics;
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
@@ -32,6 +33,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/projects/:owner/:repo/github", get(project_github))
         .route("/api/projects/:owner/:repo", get(get_project))
         .route("/api/projects/:id", patch(update_project).delete(delete_project))
+        .merge(metrics::router())
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
