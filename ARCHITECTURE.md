@@ -170,7 +170,6 @@ Core infrastructure is operational. The "immediate next steps" from March have s
 
 - ✅ **`rcc/brain/`** — LLM queue + retry engine live; fallback chain: Claude Sonnet → Llama 70B → Nemotron
 - ✅ **`rcc/wasm-dashboard/`** — Full Leptos WASM dashboard with 10 tabs (Kanban, ClawBus, Audit, Profiler, etc.)
-- ✅ **`squirrelchat/`** — Fleet group chat with email auth, channels, voice, reactions
 - ✅ **`rcc/api/routes/`** — Monolithic `index.mjs` split into domain route modules
 - ✅ **nanolang** — Full compiled language with 5 backends, LSP, formatter, playground
 - ✅ **agentOS** — seL4/Microkit RTOS for WASM agent slots (cap broker, OOM killer, snapshot sched, profiler)
@@ -181,7 +180,7 @@ Core infrastructure is operational. The "immediate next steps" from March have s
 1. **`rcc/brain/` edge cases** — All-models-degraded recovery, partial state replay under failure
 2. **agentOS WASM runtime** — Live migration of WASM slots between sparky and Boris
 3. **nanolang stdlib** — Complete stdlib coverage; bench suite vs reference programs
-4. **ClawChat** — Improve email verification UX; add thread support
+4. **Mattermost** — Fleet chat (external)
 5. **Fleet expansion** — New nodes join via `rocky register`; auto-provision from topology
 
 ---

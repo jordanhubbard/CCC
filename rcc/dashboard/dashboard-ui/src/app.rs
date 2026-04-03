@@ -20,7 +20,6 @@ use crate::components::{
     services::Services,
     settings::Settings,
     squirrelbus::ClawBus,
-    squirrelchat::ClawChat,
     timeline::Timeline,
     work_queue::WorkQueue,
 };
@@ -30,7 +29,6 @@ fn path_to_tab(path: &str) -> u8 {
     match path {
         "/geek-view"  | "/geek_view"  => 1,
         "/kanban"                      => 2,
-        "/squirrelchat" | "/chat"      => 3,
         "/agents"                      => 4,
         "/issues"                      => 5,
         "/providers"                   => 6,
@@ -48,7 +46,6 @@ fn tab_to_path(tab: u8) -> &'static str {
     match tab {
         1 => "/geek-view",
         2 => "/kanban",
-        3 => "/squirrelchat",
         4 => "/agents",
         5 => "/issues",
         6 => "/providers",
@@ -116,11 +113,6 @@ fn AppInner() -> impl IntoView {
                     >"📋 Kanban"</button>
                     <button
                         class="tab-btn"
-                        class:tab-active=move || tab.get() == 3
-                        on:click=move |_| select_tab.with_value(|f| f(3))
-                    >"💬 ClawChat"</button>
-                    <button
-                        class="tab-btn"
                         class:tab-active=move || tab.get() == 4
                         on:click=move |_| select_tab.with_value(|f| f(4))
                     >"🤖 Agents"</button>
@@ -166,7 +158,6 @@ fn AppInner() -> impl IntoView {
                 {move || match tab.get() {
                     1 => view! { <GeekView /> }.into_view(),
                     2 => view! { <Kanban /> }.into_view(),
-                    3 => view! { <ClawChat /> }.into_view(),
                     4 => view! { <AgentDetail /> }.into_view(),
                     5 => view! { <Issues /> }.into_view(),
                     6 => view! { <Providers /> }.into_view(),

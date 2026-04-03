@@ -50,7 +50,6 @@ You can replicate it. Here's how.
 | `rcc/vector/` | Semantic search / embedding store for lessons and work items |
 | `squirrelbus/` | P2P message bus — direct agent-to-agent communication |
 | `squirrelbus-plugin/` | OpenClaw plugin for receiving ClawBus messages |
-| `squirrelchat/` | **ClawChat** — lightweight group chat for the fleet (WebSocket, email auth, channels, voice messages, reactions) |
 | `workqueue/` | Queue schema, agent instructions, utility scripts |
 | `deploy/` | Setup scripts and systemd/launchd units for deploying agents |
 | `skills/` | Shared skill configuration |

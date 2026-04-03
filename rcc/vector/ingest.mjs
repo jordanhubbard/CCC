@@ -5,7 +5,7 @@
  *   - Memory files (.md)
  *   - Queue items
  *   - Lessons
- *   - ClawChat messages
+ *   - Mattermost messages
  *
  * All failures are logged but never thrown — ingest is best-effort.
  *
@@ -115,7 +115,7 @@ export async function ingestLesson(lesson) {
 }
 
 /**
- * Ingest a ClawChat message into the active memory collection.
+ * Ingest a Mattermost message into the active memory collection.
  * Routes to rcc_memory_sparky (768-dim, GPU) when EMBED_BACKEND=local,
  * or rcc_memory (3072-dim, Azure) otherwise.
  * On sparky, set EMBED_BACKEND=local for zero-cost GPU-accelerated ingest.
@@ -125,11 +125,11 @@ export async function ingestMessage(msg) {
     await ensureReady();
     const text = msg.text || '';
     if (!text || text.length < 5) return;
-    const id = createHash('md5').update(`squirrelchat:${msg.id}:${msg.ts}`).digest('hex');
+    const id = createHash('md5').update(`mattermost:${msg.id}:${msg.ts}`).digest('hex');
     await vectorUpsert(MEMORY_COLLECTION, id, text.slice(0, 1000), {
       agent:      (msg.from_agent || 'unknown').slice(0, 32),
       content:    text.slice(0, 4096),
-      source:     `squirrelchat:${msg.id || 'unknown'}`,
+      source:     `mattermost:${msg.id || 'unknown'}`,
       ts:         new Date(msg.ts || Date.now()).toISOString().slice(0, 32),
     });
   } catch (err) {
@@ -138,7 +138,7 @@ export async function ingestMessage(msg) {
 }
 
 /**
- * Batch ingest multiple ClawChat messages in a single embedding call.
+ * Batch ingest multiple Mattermost messages in a single embedding call.
  * Uses vectorUpsertBatch → embedBatchLocal (adaptive batching on GB10 GPU).
  * ~100x faster than calling ingestMessage in a loop for large backlogs.
  *
@@ -151,12 +151,12 @@ export async function ingestMessages(msgs) {
     const items = msgs
       .filter(msg => msg.text && msg.text.length >= 5)
       .map(msg => ({
-        id:   createHash('md5').update(`squirrelchat:${msg.id}:${msg.ts}`).digest('hex'),
+        id:   createHash('md5').update(`mattermost:${msg.id}:${msg.ts}`).digest('hex'),
         text: (msg.text || '').slice(0, 1000),
         meta: {
           agent:   (msg.from_agent || 'unknown').slice(0, 32),
           content: (msg.text || '').slice(0, 4096),
-          source:  `squirrelchat:${msg.id || 'unknown'}`,
+          source:  `mattermost:${msg.id || 'unknown'}`,
           ts:      new Date(msg.ts || Date.now()).toISOString().slice(0, 32),
         },
       }));
@@ -173,14 +173,14 @@ export async function ingestMessages(msgs) {
 }
 
 /**
- * Semantic search over ingested ClawChat messages.
+ * Semantic search over ingested Mattermost messages.
  * Uses the same collection as ingestMessage (local or remote depending on EMBED_BACKEND).
  * @param {string} query   - Natural language search query
  * @param {number} limit   - Max results (default 5)
  * @param {string} agent   - Filter by agent name (optional)
  * @returns {Promise<object[]>} - Array of matching message snippets with scores
  */
-export async function recallClawChat(query, limit = 5, agent = '') {
+export async function recallMessages(query, limit = 5, agent = '') {
   try {
     await ensureReady();
     const { vectorSearch } = await import('./index.mjs');
@@ -194,7 +194,7 @@ export async function recallClawChat(query, limit = 5, agent = '') {
       score: h.score,
     }));
   } catch (err) {
-    console.warn(`[ingest] recallClawChat failed:`, err.message);
+    console.warn(`[ingest] recallMessages failed:`, err.message);
     return [];
   }
 }

@@ -13,7 +13,6 @@ The old Express.js dashboard has been fully superseded by the v2 Rust/Axum + Lep
 All old features ported:
 - Agent heartbeats, metrics, work queue
 - ClawBus viewer + send widget
-- ClawChat
 - Activity map (`/activity`)
 - MinIO browser (`/s3/*`)
 - Kanban, Idea Incubator, Changelog, Activity Feed

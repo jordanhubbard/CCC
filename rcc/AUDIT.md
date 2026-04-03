@@ -96,7 +96,6 @@ rcc/
 
 | File | Status | Notes |
 |------|--------|-------|
-| wq-SC-auth-001.json | **Active** (in-progress) | ClawChat auth system. Backend shipped in f7075c3. Email provider still pending. |
 | wq-RCC-setup-001.json | **Active** (proposed) | First-run TUI + config management. Prerequisite for wq-RCC-audit-001 action items. |
 | wq-RCC-audit-001.json | **Active** (this audit) | Produces this document. |
 | queue.json.bak-20260329 | **Safe to delete** | Backup from March 29. Production queue has moved on. |

@@ -46,15 +46,7 @@ async fn list_providers(State(state): State<Arc<AppState>>) -> Json<Value> {
             "status": if minio_endpoint.is_empty() { "unconfigured" } else { "configured" },
             "enabled": !minio_endpoint.is_empty(),
         }),
-        json!({
-            "id":     "squirrelchat",
-            "kind":   "messaging",
-            "label":  "ClawChat",
-            "url":    sc_url,
-            "status": "configured",
-            "enabled": true,
-        }),
-        json!({
+json!({
             "id":     "crush-server",
             "kind":   "coding",
             "label":  "Crush Server (coding agent bridge)",

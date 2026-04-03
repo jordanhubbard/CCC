@@ -18,7 +18,6 @@ use crate::components::{
     providers::Providers,
     services::Services,
     clawbus::ClawBus,
-    clawchat::ClawChat,
     timeline::Timeline,
     work_queue::WorkQueue,
 };
@@ -119,7 +118,6 @@ pub fn App() -> impl IntoView {
                         class="tab-btn"
                         class:tab-active=move || tab.get() == 3
                         on:click=move |_| navigate(3)
-                    >"💬 ClawChat"</button>
                     <button
                         class="tab-btn"
                         class:tab-active=move || tab.get() == 4
@@ -157,7 +155,6 @@ pub fn App() -> impl IntoView {
                 {move || match tab.get() {
                     1 => view! { <GeekView /> }.into_view(),
                     2 => view! { <Kanban /> }.into_view(),
-                    3 => view! { <ClawChat /> }.into_view(),
                     4 => view! { <AgentDetail /> }.into_view(),
                     5 => view! { <Issues /> }.into_view(),
                     6 => view! { <Providers /> }.into_view(),

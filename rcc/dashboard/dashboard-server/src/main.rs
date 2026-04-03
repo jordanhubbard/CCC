@@ -269,53 +269,7 @@ async fn sc_stream(State(state): State<Arc<AppState>>) -> Response<Body> {
     }
 }
 
-// --- /sc/* handlers (ClawChat proxy) ---
-async fn sc_get(
-    State(state): State<Arc<AppState>>,
-    uri: axum::http::Uri,
-    headers: HeaderMap,
-) -> Response<Body> {
-    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
-    // Strip /sc prefix, forward rest to squirrelchat
-    let sc_path = path.strip_prefix("/sc").unwrap_or(path);
-    let sc_path = if sc_path.is_empty() { "/" } else { sc_path };
-    proxy_to_sc(&state, reqwest::Method::GET, sc_path, &headers, None).await
-}
-
-async fn sc_post(
-    State(state): State<Arc<AppState>>,
-    uri: axum::http::Uri,
-    headers: HeaderMap,
-    body: bytes::Bytes,
-) -> Response<Body> {
-    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
-    let sc_path = path.strip_prefix("/sc").unwrap_or(path);
-    let sc_path = if sc_path.is_empty() { "/" } else { sc_path };
-    proxy_to_sc(&state, reqwest::Method::POST, sc_path, &headers, Some(body)).await
-}
-
-async fn sc_patch(
-    State(state): State<Arc<AppState>>,
-    uri: axum::http::Uri,
-    headers: HeaderMap,
-    body: bytes::Bytes,
-) -> Response<Body> {
-    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
-    let sc_path = path.strip_prefix("/sc").unwrap_or(path);
-    let sc_path = if sc_path.is_empty() { "/" } else { sc_path };
-    proxy_to_sc(&state, reqwest::Method::PATCH, sc_path, &headers, Some(body)).await
-}
-
-async fn sc_delete(
-    State(state): State<Arc<AppState>>,
-    uri: axum::http::Uri,
-    headers: HeaderMap,
-) -> Response<Body> {
-    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or(uri.path());
-    let sc_path = path.strip_prefix("/sc").unwrap_or(path);
-    let sc_path = if sc_path.is_empty() { "/" } else { sc_path };
-    proxy_to_sc(&state, reqwest::Method::DELETE, sc_path, &headers, None).await
-}
+// ClawChat removed 2026-04-02 — Mattermost is the chat server
 
 // --- /s3/* handlers (MinIO S3 proxy via RCC) ---
 async fn s3_get(
@@ -359,7 +313,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Response<Body> {
         .map(|r| r.status().is_success())
         .unwrap_or(false);
 
-    // Check squirrelchat connectivity
+    // Check Mattermost connectivity
     let sc_ok = state
         .client
         .get(format!("{}/health", state.sc_url))
@@ -419,14 +373,11 @@ pub fn build_app(state: Arc<AppState>, dist: &str) -> Router {
         .route("/api/*path", get(api_get).post(api_post).patch(api_patch).delete(api_delete))
         .route("/bus/*path", get(bus_get).post(bus_post))
         .route("/s3/*path", get(s3_get).put(s3_put).delete(s3_delete))
-        .route("/sc/*path", get(sc_get).post(sc_post).patch(sc_patch).delete(sc_delete))
         // SPA deep-link routes — serve index.html for all named tab paths
         // Synced with leptos_router routes in dashboard-ui/src/app.rs
         .route("/geek-view",   get(spa_index))
         .route("/geek_view",   get(spa_index))  // alias
         .route("/kanban",      get(spa_index))
-        .route("/squirrelchat",get(spa_index))
-        .route("/chat",        get(spa_index))   // alias
         .route("/agents",      get(spa_index))
         .route("/issues",      get(spa_index))
         .route("/providers",   get(spa_index))
@@ -657,68 +608,7 @@ mod tests {
         assert_eq!(body["ok"], true);
     }
 
-    // ── /sc/* squirrelchat proxy ───────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn sc_get_proxies_to_sc_upstream() {
-        let rcc = MockServer::start();
-        let sc  = MockServer::start();
-        // sc handlers strip the /sc prefix before forwarding
-        sc.mock(|when, then| {
-            when.method(GET).path("/channels");
-            then.status(200).json_body(json!({"channels": ["#general"]}));
-        });
-        let srv = make_server(&rcc, &sc, "");
-        let body: Value = srv.get("/sc/channels").await.json();
-        assert_eq!(body["channels"][0], "#general");
-    }
-
-    #[tokio::test]
-    async fn sc_post_without_token_returns_401() {
-        let rcc = MockServer::start();
-        let sc  = MockServer::start();
-        let srv = make_server(&rcc, &sc, "secret");
-        let resp = srv.post("/sc/messages").await;
-        resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn sc_post_with_token_proxies_to_sc() {
-        let rcc = MockServer::start();
-        let sc  = MockServer::start();
-        // sc handlers strip /sc prefix
-        sc.mock(|when, then| {
-            when.method(POST).path("/messages");
-            then.status(201).json_body(json!({"id": "msg-1"}));
-        });
-        let srv = make_server(&rcc, &sc, "tok");
-        let body: Value = srv
-            .post("/sc/messages")
-            .add_header("Authorization", "Bearer tok")
-            .json(&json!({"text": "hello"}))
-            .await
-            .json();
-        assert_eq!(body["id"], "msg-1");
-    }
-
-    #[tokio::test]
-    async fn sc_patch_without_token_returns_401() {
-        let rcc = MockServer::start();
-        let sc  = MockServer::start();
-        let srv = make_server(&rcc, &sc, "tok");
-        srv.patch("/sc/messages/1").await
-            .assert_status(axum::http::StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn sc_delete_without_token_returns_401() {
-        let rcc = MockServer::start();
-        let sc  = MockServer::start();
-        let srv = make_server(&rcc, &sc, "tok");
-        srv.delete("/sc/messages/1").await
-            .assert_status(axum::http::StatusCode::UNAUTHORIZED);
-    }
-
+    
     // ── /s3/* MinIO S3 proxy ─────────────────────────────────────────────────
 
     #[tokio::test]

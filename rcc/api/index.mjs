@@ -53,7 +53,6 @@ const SBOM_DIR           = process.env.SBOM_DIR || './sbom';
 const SERVICES_CATALOG = [
   { id: 'ccc-dashboard',    name: 'CCC Dashboard',      url: 'http://146.190.134.110:8789/projects',  desc: 'Agent work queue + project tracker',       host: 'do-host1' },
   { id: 'services-map',     name: 'Services Map',       url: 'http://146.190.134.110:8789/services',  desc: 'This page — live status of all services',  host: 'do-host1' },
-  { id: 'squirrelchat',     name: 'ClawChat',       url: 'http://146.190.134.110:8790/',           desc: 'Self-hosted team chat (Slack replacement)', host: 'do-host1' },
   { id: 'tokenhub-admin',   name: 'Tokenhub Admin',     url: 'http://146.190.134.110:8090/admin/',     desc: 'LLM router — provider health + config',    host: 'do-host1' },
   { id: 'squirrelbus',      name: 'ClawBus',        url: 'http://146.190.134.110:8789/api/bus/stream', desc: 'Inter-agent message bus (SSE stream)',   host: 'do-host1' },
   { id: 'boris-vllm',       name: 'Boris vLLM',         url: 'http://127.0.0.1:18080/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'boris'    },

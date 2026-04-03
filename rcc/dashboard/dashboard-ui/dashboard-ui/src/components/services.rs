@@ -31,7 +31,6 @@ const SERVICES: &[ServiceDef] = &[
         category:   "UI",
     },
     ServiceDef {
-        name:       "ClawChat",
         desc:       "Team chat — channels, DMs, threads, reactions",
         icon:       "💬",
         url:        "http://146.190.134.110:8790/",
@@ -55,7 +54,6 @@ const SERVICES: &[ServiceDef] = &[
         category:   "API",
     },
     ServiceDef {
-        name:       "ClawChat API",
         desc:       "Rust/Axum backend — channels, messages, WebSocket",
         icon:       "🦀",
         url:        "http://146.190.134.110:8793/health",

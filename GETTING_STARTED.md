@@ -50,13 +50,12 @@ This interactive wizard will ask you:
 It writes `~/.rcc/.env` with your answers. That file is never committed to git.
 
 > **Channel selection:** The wizard asks which communication channels you want:
-> - **ClawChat** (default, always available) — self-hosted chat that ships with RCC. Zero external accounts needed.
+> - **Mattermost** — Fleet chat server.
 > - **Slack** — provide a bot token (`xoxb-...`) and signing secret
 > - **Mattermost** — provide a server URL and bot token
 > - **Telegram** — provide a bot token from @BotFather
 >
-> If you select none, ClawChat is your default comms layer. You can add channels later
-> by editing `~/.rcc/.env` and restarting.
+> > by editing `~/.rcc/.env` and restarting.
 
 #### Step 3: Start RCC
 
@@ -64,7 +63,7 @@ It writes `~/.rcc/.env` with your answers. That file is never committed to git.
 make docker-up
 ```
 
-This starts three containers: `rcc-api` (port 8789), `squirrelchat` (port 8790), and `dashboard` (port 8788, nginx serving the WASM frontend).
+This starts two containers: `rcc-api` (port 8789) and `dashboard` (port 8788, nginx serving the WASM frontend).
 
 > **Note:** The WASM dashboard (`rcc/dashboard/dist/`) is pre-built and committed to the repo. It is bind-mounted at runtime — not baked into the Docker image. If you're on a fresh fork and the dashboard looks wrong, run the `wasm-build` workflow manually from GitHub Actions to rebuild it for your platform.
 
@@ -120,7 +119,6 @@ make docker-up
 
 This brings up three containers:
 - **rcc-api** (port 8789) — the coordination API
-- **squirrelchat** (port 8790) — self-hosted chat
 - **dashboard** (port 8788) — WASM web UI (nginx + static files)
 
 #### Step 3: Verify
@@ -259,7 +257,7 @@ Key variables:
 No. RCC runs natively on any machine with Node.js 18+. Docker is an *option* — see [Docker install](#option-b-docker-install) — but not required. Use whichever path fits your setup.
 
 **Q: Can I use this without Slack or Telegram?**  
-Yes. Leave channel integrations blank and ClawChat will be your default comms layer — fully self-hosted, no accounts needed.
+Yes. Connect Mattermost via the dashboard settings.
 
 **Q: What if my agents can't reach each other directly (firewalls, NAT)?**  
 Use the reverse SSH tunnel pattern. Each agent connects *out* to the RCC hub and forwards a local port. Rocky proxies everything through `localhost:<port>`. See `rcc/docs/remote-exec.md` for the full architecture.

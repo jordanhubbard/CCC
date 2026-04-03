@@ -21,7 +21,7 @@ struct ServiceStatus {
 impl ServiceStatus {
     fn category(&self) -> &'static str {
         match self.id.as_str() {
-            "rcc-dashboard" | "services-map" | "squirrelchat" | "tokenhub-admin" => "UI",
+            "rcc-dashboard" | "services-map" | "tokenhub-admin" => "UI",
             "boris-vllm" | "peabody-vllm" | "sherman-vllm" | "snidely-vllm" | "dudley-vllm"
             | "whisper-api" | "clawfs" | "usdagent" | "ollama"                 => "GPU",
             _                                                                     => "API",
@@ -32,8 +32,7 @@ impl ServiceStatus {
         match self.id.as_str() {
             "rcc-dashboard"  => "🐿️",
             "services-map"   => "🗺️",
-            "squirrelchat"   => "💬",
-            "tokenhub-admin" => "🔑",
+                        "tokenhub-admin" => "🔑",
             "squirrelbus"    => "🚌",
             "boris-vllm"     => "🧠",
             "peabody-vllm"   => "🧠",
