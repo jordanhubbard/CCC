@@ -2301,7 +2301,7 @@ async function handleRequest(req, res) {
 
       // Load deploy key
       const keyPath = new URL('../data/github-key.json', import.meta.url).pathname;
-      let repoUrl = 'https://github.com/jordanhubbard/rockyandfriends.git';
+      let repoUrl = 'https://github.com/jordanhubbard/CCC.git';
       let deployKeyBlock = '';
       if (existsSync(keyPath)) {
         try {
@@ -2350,7 +2350,7 @@ ROLE_HINT="${roleHint}"
 RCC_URL="${RCC_PUBLIC_URL}"
 RCC_HOST="${rccHost}"
 REPO_URL="${repoUrl}"
-WORKSPACE="\$HOME/Src/rockyandfriends"
+WORKSPACE="\$HOME/Src/CCC"
 
 echo ""
 echo "🐿️  CCC Agent Onboard — \$AGENT_NAME"

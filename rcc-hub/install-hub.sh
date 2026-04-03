@@ -1,6 +1,6 @@
 #!/bin/bash
 # CCC Hub — one-liner installer for Ubuntu/Debian VPS
-# Usage: curl -fsSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/rcc-hub/install-hub.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/jordanhubbard/CCC/main/rcc-hub/install-hub.sh | bash
 #
 # What this does:
 #   1. Checks / installs Node.js 20+
@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-REPO="https://github.com/jordanhubbard/rockyandfriends.git"
+REPO="https://github.com/jordanhubbard/CCC.git"
 INSTALL_DIR="/opt/rcc-hub"
 SERVICE_NAME="rcc-hub"
 NODE_MIN_VERSION=18

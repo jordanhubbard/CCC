@@ -11,7 +11,7 @@
  * Prints the context string to stdout for OpenClaw to inject into the system prompt.
  *
  * OpenClaw config: add to openclaw.json:
- *   agents.system_context_hook: "node /home/jkh/Src/rockyandfriends/rcc/scripts/openclaw-context-hook.mjs"
+ *   agents.system_context_hook: "node /home/jkh/Src/CCC/rcc/scripts/openclaw-context-hook.mjs"
  *
  * Env vars:
  *   RCC_URL         (default: http://localhost:8789)

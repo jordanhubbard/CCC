@@ -215,7 +215,7 @@ These nodes have no inbound network access. ClawBus exec is the **only** mechani
 
 ```bash
 # On the target node (run once during onboarding):
-curl -sO https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/rcc/deploy/systemd/agent-listener.service
+curl -sO https://raw.githubusercontent.com/jordanhubbard/CCC/main/rcc/deploy/systemd/agent-listener.service
 sudo cp agent-listener.service /etc/systemd/system/
 sudo mkdir -p /etc/rcc
 

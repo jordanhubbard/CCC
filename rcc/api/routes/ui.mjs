@@ -312,7 +312,7 @@ export default function registerRoutes(app, state) {
 
     // Load deploy key
     const keyPath = new URL('../../data/github-key.json', import.meta.url).pathname;
-    let repoUrl = 'https://github.com/jordanhubbard/rockyandfriends.git';
+    let repoUrl = 'https://github.com/jordanhubbard/CCC.git';
     let deployKeyBlock = '';
     if (existsSync(keyPath)) {
       try {
@@ -362,7 +362,7 @@ ROLE_HINT="${roleHint}"
 RCC_URL="${state.RCC_PUBLIC_URL}"
 RCC_HOST="${rccHost}"
 REPO_URL="${repoUrl}"
-WORKSPACE="\$HOME/Src/rockyandfriends"
+WORKSPACE="\$HOME/Src/CCC"
 
 echo ""
 echo "🐿️  RCC Agent Onboard — \$AGENT_NAME"

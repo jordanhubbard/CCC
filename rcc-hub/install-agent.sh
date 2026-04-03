@@ -1,7 +1,7 @@
 #!/bin/bash
 # CCC Agent — one-liner installer for Linux
 # Onboards this machine as an agent node to an existing CCC Hub.
-# Usage: curl -fsSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/rcc-hub/install-agent.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/jordanhubbard/CCC/main/rcc-hub/install-agent.sh | bash
 #
 # What this does:
 #   1. Checks / installs Node.js 18+

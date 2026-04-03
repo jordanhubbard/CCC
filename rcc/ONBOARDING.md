@@ -20,7 +20,7 @@ RCC is a lightweight, self-hosted coordination layer for multi-agent teams. It p
 ### 1. Clone the repo
 
 ```bash
-git clone git@github.com:<your-org>/rockyandfriends.git ~/.rcc/workspace
+git clone git@github.com:jordanhubbard/CCC.git ~/.rcc/workspace
 ```
 
 ### 2. Run setup
