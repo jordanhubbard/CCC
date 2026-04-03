@@ -19,3 +19,4 @@ pub mod squirrelbus;
 pub mod timeline;
 pub mod work_queue;
 pub mod settings;
+pub mod model_deploy;

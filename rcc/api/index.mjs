@@ -1909,6 +1909,7 @@ import registerUI       from './routes/ui.mjs';
 import registerServices from './routes/services.mjs';
 import registerProjects from './routes/projects.mjs';
 import registerSetup    from './routes/setup.mjs';
+import registerModels   from './routes/models.mjs';
 
 // ── Custom router ──────────────────────────────────────────────────────────
 function createRouter() {
@@ -2001,6 +2002,7 @@ registerProjects(app, state);
 registerQueue(app, state);
 registerAgents(app, state);
 registerSetup(app, state);
+registerModels(app, state);
 
 // ── Request handler ────────────────────────────────────────────────────────
 async function handleRequest(req, res) {
