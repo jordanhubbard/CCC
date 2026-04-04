@@ -222,6 +222,10 @@ CREATE TABLE publications (
 );
 ```
 
+**Upsert semantics (Natasha's call):** The `UNIQUE(agent, name)` constraint is for the DB layer. The API does an **upsert**, not a 409 reject. Agents re-deploy services constantly — requiring DELETE→POST for every redeploy is friction with zero benefit. If an agent POSTs a publish with the same `(agent, name)` pair, the existing entry is updated (port reallocated if needed, status reset to `pending`). No explicit DELETE required for redeployment.
+
+**`live_at` estimation:** `max(p95(last 20 reloads), 5000ms)`. The p95 measurement converges on truth over time; the 5s floor keeps it safe on day 1 when there's no reload history. Conservative enough that agents never DM a link that 404s.
+
 **Status transitions:**
 ```
 pending ──agent calls PUT /ready──→ verifying ──port OK──→ active
@@ -442,7 +446,10 @@ For `service` type, the tunnel is the critical path:
 - ACK with allocated port + `live_at` estimate
 - Rocky-side tunnel liveness probes (30s interval, 3-strike escalation)
 - ClawBus death notifications to publishing agents (on `dead` transition)
-- **Startup reconciliation:** On daemon restart, scan `snippets.d/*.caddy` + SQLite catalog → rebuild in-memory port pool → probe all `active` services → mark dead ones
+- **Startup reconciliation (bidirectional):** On daemon restart, one pass handles both directions:
+  - (a) Catalog says `active`, port NOT in `ss -tlnp` → immediately `degraded` (fast-path, no 3-strike)
+  - (b) Port in `ss -tlnp`, NO catalog entry → orphan tunnel, 60s grace period, then reclaim port
+  - Rebuild in-memory port pool from catalog + `ss` scan. Snippets regenerated for all `active` entries.
 
 ### Phase 3: Stream Publishing (1 day)
 - ClawBus topic filtering extension (`?topic={name}`)
