@@ -253,7 +253,7 @@ export default function registerRoutes(app, state) {
       agent: agentName,
       agentToken,
       rccUrl: state.RCC_PUBLIC_URL,
-      squirrelbusToken: process.env.SQUIRRELBUS_TOKEN || null,
+      clawbusToken: process.env.CLAWBUS_TOKEN || process.env.SQUIRRELBUS_TOKEN || null,
       role: entry.role || 'agent',
     });
   });

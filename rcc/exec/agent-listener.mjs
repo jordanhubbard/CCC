@@ -18,8 +18,10 @@
  * - ALLOW_SHELL_EXEC env must be explicitly set to "true" to enable shell mode
  *
  * Environment variables:
- *   SQUIRRELBUS_TOKEN  — shared secret for HMAC verification (required)
- *   SQUIRRELBUS_URL    — bus URL (default: http://localhost:8788)
+ *   CLAWBUS_TOKEN      — shared secret for HMAC verification (required)
+ *   CLAWBUS_URL        — bus URL (default: http://localhost:8788)
+ *   SQUIRRELBUS_TOKEN  — (deprecated) fallback for CLAWBUS_TOKEN
+ *   SQUIRRELBUS_URL    — (deprecated) fallback for CLAWBUS_URL
  *   RCC_URL            — RCC API base URL (default: http://localhost:8789)
  *   RCC_AUTH_TOKEN     — bearer token for RCC API (required)
  *   AGENT_NAME         — agent identifier (default: 'unknown')
@@ -42,7 +44,7 @@ import { verifyPayload } from './index.mjs';
 const execFileAsync = promisify(execFile);
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const SQUIRRELBUS_URL   = process.env.SQUIRRELBUS_URL || 'http://localhost:8788';
+const SQUIRRELBUS_URL   = process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || 'http://localhost:8788';
 const ALLOW_SHELL_EXEC  = process.env.ALLOW_SHELL_EXEC === 'true';
 const DEFAULT_ALLOWLIST = [
   'systemctl status', 'journalctl', 'df ', 'df\t', 'free', 'uptime',
@@ -58,7 +60,7 @@ const SHELL_ALLOWLIST   = process.env.SHELL_ALLOWLIST
 const RCC_URL         = process.env.RCC_URL         || 'http://localhost:8789';
 const RCC_AUTH_TOKEN  = process.env.RCC_AUTH_TOKEN  || process.env.RCC_AUTH_TOKENS?.split(',')[0] || '';
 const AGENT_NAME      = process.env.AGENT_NAME      || 'unknown';
-const BUS_TOKEN       = process.env.SQUIRRELBUS_TOKEN || '';
+const BUS_TOKEN       = process.env.CLAWBUS_TOKEN || process.env.SQUIRRELBUS_TOKEN || '';
 const EXEC_TIMEOUT_MS = 10_000;
 
 const LOG_DIR  = join(homedir(), '.rcc', 'logs');
@@ -189,7 +191,7 @@ async function handleExecMessage(message) {
 
   // ── Verify HMAC signature ─────────────────────────────────────────────
   if (!BUS_TOKEN) {
-    console.error('[exec-listener] SQUIRRELBUS_TOKEN not set — cannot verify exec payload');
+    console.error('[exec-listener] CLAWBUS_TOKEN not set — cannot verify exec payload');
     await logExecution({
       ts, execId, agent: AGENT_NAME, target, status: 'rejected',
       reason: 'no_secret', code: code.slice(0, 200),
@@ -323,7 +325,7 @@ async function subscribe() {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 if (!BUS_TOKEN) {
-  console.error('[exec-listener] FATAL: SQUIRRELBUS_TOKEN is not set. Refusing to start.');
+  console.error('[exec-listener] FATAL: CLAWBUS_TOKEN (or SQUIRRELBUS_TOKEN) is not set. Refusing to start.');
   process.exit(1);
 }
 

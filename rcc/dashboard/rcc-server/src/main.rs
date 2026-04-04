@@ -147,7 +147,6 @@ async fn main() {
         .merge(routes::exec::router())
         .merge(routes::geek::router())
         .merge(routes::ui::router())
-        .merge(routes::agentos::router())
         .merge(routes::memory::router())
         .merge(routes::issues::router())
         .merge(routes::fs::router())

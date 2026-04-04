@@ -51,10 +51,12 @@ async fn post_exec(
         _ => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error":"code required"}))).into_response(),
     };
 
-    let squirrelbus_token = std::env::var("SQUIRRELBUS_TOKEN").unwrap_or_default();
-    if squirrelbus_token.is_empty() {
+    let clawbus_token = std::env::var("CLAWBUS_TOKEN")
+        .or_else(|_| std::env::var("SQUIRRELBUS_TOKEN"))  // backwards compat
+        .unwrap_or_default();
+    if clawbus_token.is_empty() {
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error":"SQUIRRELBUS_TOKEN not configured"}))).into_response();
+            Json(json!({"error":"CLAWBUS_TOKEN not configured"}))).into_response();
     }
 
     let exec_id = format!("exec-{}", uuid::Uuid::new_v4());
@@ -81,7 +83,7 @@ async fn post_exec(
         "replyTo":    body.get("replyTo").cloned(),
         "ts":         now.clone(),
     });
-    let sig = sign_payload(&payload, &squirrelbus_token);
+    let sig = sign_payload(&payload, &clawbus_token);
     let envelope = {
         let mut e = payload.clone();
         e.as_object_mut().unwrap().insert("sig".to_string(), json!(sig));
@@ -89,9 +91,10 @@ async fn post_exec(
     };
 
     // Broadcast via ClawBus
-    let bus_url = std::env::var("SQUIRRELBUS_URL")
+    let bus_url = std::env::var("CLAWBUS_URL")
+        .or_else(|_| std::env::var("SQUIRRELBUS_URL"))  // backwards compat
         .unwrap_or_else(|_| format!("http://localhost:{}", std::env::var("RCC_PORT").unwrap_or_else(|_| "8789".to_string())));
-    let bus_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or(squirrelbus_token.clone());
+    let bus_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or(clawbus_token.clone());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))

@@ -54,7 +54,7 @@ const SERVICES_CATALOG = [
   { id: 'ccc-dashboard',    name: 'CCC Dashboard',      url: 'http://146.190.134.110:8789/projects',  desc: 'Agent work queue + project tracker',       host: 'do-host1' },
   { id: 'services-map',     name: 'Services Map',       url: 'http://146.190.134.110:8789/services',  desc: 'This page — live status of all services',  host: 'do-host1' },
   { id: 'tokenhub-admin',   name: 'Tokenhub Admin',     url: 'http://146.190.134.110:8090/admin/',     desc: 'LLM router — provider health + config',    host: 'do-host1' },
-  { id: 'squirrelbus',      name: 'ClawBus',        url: 'http://146.190.134.110:8789/api/bus/stream', desc: 'Inter-agent message bus (SSE stream)',   host: 'do-host1' },
+  { id: 'clawbus',          name: 'ClawBus',        url: 'http://146.190.134.110:8789/api/bus/stream', desc: 'Inter-agent message bus (SSE stream)',   host: 'do-host1' },
   { id: 'boris-vllm',       name: 'Boris vLLM',         url: 'http://127.0.0.1:18080/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'boris'    },
   { id: 'peabody-vllm',     name: 'Peabody vLLM',       url: 'http://127.0.0.1:18081/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'peabody'  },
   { id: 'sherman-vllm',     name: 'Sherman vLLM',       url: 'http://127.0.0.1:18082/v1/models',       desc: 'Nemotron-120B FP8 — 4x L40 (Sweden)',      host: 'sherman'  },
@@ -170,9 +170,9 @@ async function indexPendingQueueItems() {
 }
 
 // ── ClawBus paths ──────────────────────────────────────────────────────
-const BUS_LOG_PATH   = process.env.BUS_LOG_PATH   || new URL('../../squirrelbus/bus.jsonl', import.meta.url).pathname;
-const ACK_LOG_PATH   = process.env.ACK_LOG_PATH   || new URL('../../squirrelbus/acks.jsonl', import.meta.url).pathname;
-const DEAD_LOG_PATH  = process.env.DEAD_LOG_PATH  || new URL('../../squirrelbus/dead-letter.jsonl', import.meta.url).pathname;
+const BUS_LOG_PATH   = process.env.BUS_LOG_PATH   || new URL('../../clawbus/bus.jsonl', import.meta.url).pathname;
+const ACK_LOG_PATH   = process.env.ACK_LOG_PATH   || new URL('../../clawbus/acks.jsonl', import.meta.url).pathname;
+const DEAD_LOG_PATH  = process.env.DEAD_LOG_PATH  || new URL('../../clawbus/dead-letter.jsonl', import.meta.url).pathname;
 
 // ── ClawBus in-memory state ────────────────────────────────────────────
 let _busSeq = 0;
@@ -1133,13 +1133,9 @@ function dashboardHtml() {
         m.addEventListener('mouseleave', () => { _tlTooltip.style.display='none'; });
       });
     }
-    function loadTimeline() {
-      fetch('/api/agentos/events').then(r=>r.json()).then(d=>renderTimeline(d.events||[])).catch(e=>{document.getElementById('tl-root').innerHTML='<p class="err">Failed: '+esc(e.message)+'</p>';});
-    }
+    // agentOS timeline removed — routes deleted in cleanup sprint 2026-04-04
     paneLoaders['timeline'] = () => {
-      loadTimeline();
-      if (_tlTimer) clearInterval(_tlTimer);
-      _tlTimer = setInterval(loadTimeline, 10000);
+      document.getElementById('tl-root').innerHTML = '<p class="err">Timeline view removed (agentOS deprecated)</p>';
     };
 
     // ── Init: switch to default tab AFTER all loaders are registered ────
@@ -1605,14 +1601,8 @@ function timelineHtml() {
         m.addEventListener('mouseleave', () => { tooltip.style.display='none'; });
       });
     }
-    function load() {
-      fetch('/api/agentos/events')
-        .then(r=>r.json())
-        .then(d=>{ renderTimeline(d.events||[]); document.getElementById('tl-auto').textContent='updated '+new Date().toLocaleTimeString(); })
-        .catch(e=>{document.getElementById('tl-root').innerHTML='<p class="error">Failed: '+esc(e.message)+'</p>';});
-    }
-    load();
-    setInterval(load, 10000);
+    // agentOS timeline removed — routes deleted in cleanup sprint 2026-04-04
+    document.getElementById('tl-root').innerHTML = '<p class="error">Timeline view removed (agentOS deprecated)</p>';
   </script></body></html>`;
 }
 
@@ -1903,7 +1893,6 @@ async function formatAgentStatus() {
 import registerQueue    from './routes/queue.mjs';
 import registerAgents   from './routes/agents.mjs';
 import registerBus      from './routes/bus.mjs';
-import registerAgentOS  from './routes/agentos.mjs';
 import registerMemory   from './routes/memory.mjs';
 import registerUI       from './routes/ui.mjs';
 import registerServices from './routes/services.mjs';
@@ -1995,7 +1984,6 @@ const state = {
 const app = createRouter();
 registerUI(app, state);        // includes GET / redirect and onboard — must be first for proxy catch-all
 registerBus(app, state);
-registerAgentOS(app, state);
 registerMemory(app, state);
 registerServices(app, state);
 registerProjects(app, state);

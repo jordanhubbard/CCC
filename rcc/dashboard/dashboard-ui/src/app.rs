@@ -20,8 +20,7 @@ use crate::components::{
     services::Services,
     settings::Settings,
     model_deploy::ModelDeploy,
-    squirrelbus::ClawBus,
-    timeline::Timeline,
+    clawbus::ClawBus,
     work_queue::WorkQueue,
 };
 
@@ -35,7 +34,6 @@ fn path_to_tab(path: &str) -> u8 {
         "/providers"                   => 6,
         "/coding"                      => 7,
         "/services"                    => 8,
-        "/timeline"                    => 9,
         "/clawfs"                     => 10,
         "/settings"                    => 11,
         "/models"                      => 12,
@@ -53,7 +51,6 @@ fn tab_to_path(tab: u8) -> &'static str {
         6 => "/providers",
         7 => "/coding",
         8 => "/services",
-        9  => "/timeline",
         10 => "/clawfs",
         11 => "/settings",
         12 => "/models",
@@ -141,11 +138,6 @@ fn AppInner() -> impl IntoView {
                     >"🗺️ Services"</button>
                     <button
                         class="tab-btn"
-                        class:tab-active=move || tab.get() == 9
-                        on:click=move |_| select_tab.with_value(|f| f(9))
-                    >"⏱️ Timeline"</button>
-                    <button
-                        class="tab-btn"
                         class:tab-active=move || tab.get() == 10
                         on:click=move |_| select_tab.with_value(|f| f(10))
                     >"📁 ClawFS"</button>
@@ -171,7 +163,6 @@ fn AppInner() -> impl IntoView {
                     6 => view! { <Providers /> }.into_view(),
                     7 => view! { <CodingAgent /> }.into_view(),
                     8 => view! { <Services /> }.into_view(),
-                    9  => view! { <Timeline /> }.into_view(),
                     10 => view! { <AgentFs /> }.into_view(),
                     11 => view! { <Settings /> }.into_view(),
                     12 => view! { <ModelDeploy /> }.into_view(),

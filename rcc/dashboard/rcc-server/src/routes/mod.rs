@@ -13,7 +13,6 @@ pub mod ui;
 pub mod setup;
 pub mod providers;
 pub mod acp;
-pub mod agentos;
 pub mod memory;
 pub mod issues;
 pub mod fs;

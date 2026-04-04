@@ -2,7 +2,7 @@
  * rcc/exec/index.mjs — HMAC-SHA256 signing/verification for ClawBus exec payloads
  *
  * Security model:
- * - All exec payloads MUST be signed with a shared secret (SQUIRRELBUS_TOKEN)
+ * - All exec payloads MUST be signed with a shared secret (CLAWBUS_TOKEN)
  * - canonicalize() produces deterministic JSON (sorted keys, no whitespace)
  * - signPayload() computes HMAC-SHA256 over canonical JSON, returns hex sig
  * - verifyPayload() recomputes HMAC over envelope minus sig field, compares via timingSafeEqual
@@ -35,7 +35,7 @@ export function canonicalize(obj) {
  * Returns hex signature string.
  *
  * @param {object} payload - the payload to sign (will be canonicalized)
- * @param {string} secret  - shared secret (SQUIRRELBUS_TOKEN)
+ * @param {string} secret  - shared secret (CLAWBUS_TOKEN)
  * @returns {string} hex HMAC-SHA256 signature
  */
 export function signPayload(payload, secret) {
@@ -48,7 +48,7 @@ export function signPayload(payload, secret) {
  * Recomputes HMAC over envelope minus the `sig` field, compares in constant time.
  *
  * @param {object} envelope - full envelope including `sig` field
- * @param {string} secret   - shared secret (SQUIRRELBUS_TOKEN)
+ * @param {string} secret   - shared secret (CLAWBUS_TOKEN)
  * @returns {boolean} true if valid, false if tampered/missing sig
  */
 export function verifyPayload(envelope, secret) {

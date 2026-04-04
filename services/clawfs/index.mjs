@@ -168,7 +168,7 @@ async function publishBusEvent(type, payload) {
       signal: AbortSignal.timeout(5000),
     });
   } catch (err) {
-    console.warn(`[agentfs] squirrelbus publish failed (best-effort): ${err.message}`);
+    console.warn(`[agentfs] clawbus publish failed (best-effort): ${err.message}`);
   }
 }
 

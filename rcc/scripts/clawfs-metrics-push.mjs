@@ -9,12 +9,13 @@
  *
  * Environment:
  *   RCC_AUTH_TOKEN    — Bearer token for local RCC + ClawBus (default hardcoded)
- *   SQUIRRELBUS_URL   — ClawBus base URL (default http://100.89.199.14:8788)
+ *   CLAWBUS_URL       — ClawBus base URL (default http://100.89.199.14:8788)
+ *   SQUIRRELBUS_URL   — (deprecated) fallback for CLAWBUS_URL
  *   RCC_LOCAL_URL     — Local RCC metrics endpoint (default http://127.0.0.1:8789)
  */
 
 const TOKEN         = process.env.RCC_AUTH_TOKEN  || '<YOUR_RCC_TOKEN>';
-const BUS_URL       = process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
+const BUS_URL       = process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
 const RCC_LOCAL_URL = process.env.RCC_LOCAL_URL   || 'http://127.0.0.1:8789';
 const INTERVAL_MS   = 5_000;
 

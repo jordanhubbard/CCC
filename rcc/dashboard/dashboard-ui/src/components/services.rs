@@ -33,7 +33,7 @@ impl ServiceStatus {
             "rcc-dashboard"  => "🐿️",
             "services-map"   => "🗺️",
                         "tokenhub-admin" => "🔑",
-            "squirrelbus"    => "🚌",
+            "clawbus"        => "🚌",
             "boris-vllm"     => "🧠",
             "peabody-vllm"   => "🧠",
             "sherman-vllm"   => "🧠",

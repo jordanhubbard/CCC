@@ -11,7 +11,7 @@ import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const SQUIRRELBUS_TOKEN = process.env.SQUIRRELBUS_TOKEN || '';
+const SQUIRRELBUS_TOKEN = process.env.CLAWBUS_TOKEN || process.env.SQUIRRELBUS_TOKEN || '';
 const PLUGIN_ID = 'clawbus-receiver';
 
 /** Queue of pending bus messages to inject at next prompt build */

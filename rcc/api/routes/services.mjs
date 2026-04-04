@@ -610,8 +610,8 @@ export default function registerRoutes(app, state) {
     const body = await readBody(req);
     if (!body.code) return json(res, 400, { error: 'code required' });
 
-    const SQUIRRELBUS_TOKEN = process.env.SQUIRRELBUS_TOKEN || '';
-    if (!SQUIRRELBUS_TOKEN) return json(res, 500, { error: 'SQUIRRELBUS_TOKEN not configured' });
+    const SQUIRRELBUS_TOKEN = process.env.CLAWBUS_TOKEN || process.env.SQUIRRELBUS_TOKEN || '';
+    if (!SQUIRRELBUS_TOKEN) return json(res, 500, { error: 'CLAWBUS_TOKEN not configured' });
 
     const { signPayload } = await import('../exec/index.mjs');
 
@@ -627,7 +627,7 @@ export default function registerRoutes(app, state) {
     const sig = signPayload(payload, SQUIRRELBUS_TOKEN);
     const envelope = { ...payload, sig };
 
-    const BUS_URL   = process.env.SQUIRRELBUS_URL || `http://localhost:${process.env.RCC_PORT || 8789}`;
+    const BUS_URL   = process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || `http://localhost:${process.env.RCC_PORT || 8789}`;
     const BUS_TOKEN = process.env.RCC_AGENT_TOKEN || SQUIRRELBUS_TOKEN;
     let busSent = false;
     try {
