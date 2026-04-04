@@ -3,6 +3,7 @@ use leptos_router::*;
 
 use crate::context::DashboardContext;
 use crate::components::{
+    auth_gate::{AuthGate, LogoutButton},
     activity_feed::ActivityFeed,
     agent_cards::AgentCards,
     agent_detail::AgentDetail,
@@ -64,9 +65,11 @@ fn tab_to_path(tab: u8) -> &'static str {
 #[component]
 pub fn App() -> impl IntoView {
     view! {
-        <Router>
-            <AppInner />
-        </Router>
+        <AuthGate>
+            <Router>
+                <AppInner />
+            </Router>
+        </AuthGate>
     }
 }
 
@@ -98,6 +101,7 @@ fn AppInner() -> impl IntoView {
                     <span class="logo-text">"Claw Command Center"</span>
                 </div>
                 <div class="dash-subtitle">"v3 — Rust/WASM + GH Issues"</div>
+                <LogoutButton />
                 <div class="dash-tabs">
                     <button
                         class="tab-btn"
