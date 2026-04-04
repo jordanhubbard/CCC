@@ -1,0 +1,14 @@
+[Unit]
+Description=ClawFS (JuiceFS) mount at ~/clawfs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStart=/home/jkh/.local/bin/juicefs mount --background --cache-dir /tmp/jfscache redis://100.89.199.14:6379/1 /home/jkh/clawfs
+ExecStop=/home/jkh/.local/bin/juicefs umount /home/jkh/clawfs
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
