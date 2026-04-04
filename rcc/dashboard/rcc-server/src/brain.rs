@@ -1,11 +1,10 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 /// rcc-server/src/brain.rs — RCC LLM Request Queue + Retry Engine (Rust port of brain/index.mjs)
 ///
 /// Runs as a tokio background task. Accepts requests via the shared BrainQueue.
 /// Routes all calls through tokenhub (localhost:8090).
-
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -31,9 +30,15 @@ pub struct BrainRequest {
     pub metadata: Value,
 }
 
-fn default_max_tokens() -> u32 { 1024 }
-fn default_priority() -> String { "normal".to_string() }
-fn default_status() -> String { "pending".to_string() }
+fn default_max_tokens() -> u32 {
+    1024
+}
+fn default_priority() -> String {
+    "normal".to_string()
+}
+fn default_status() -> String {
+    "pending".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BrainState {
@@ -58,13 +63,16 @@ pub struct BrainQueue {
 
 impl BrainQueue {
     pub fn new() -> Self {
-        let tokenhub_url = std::env::var("TOKENHUB_URL")
-            .unwrap_or_else(|_| "http://localhost:8090".to_string());
+        let tokenhub_url =
+            std::env::var("TOKENHUB_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
         let tokenhub_key = std::env::var("TOKENHUB_AGENT_KEY")
             .or_else(|_| std::env::var("TOKENHUB_API_KEY"))
             .unwrap_or_default();
         let models: Vec<String> = std::env::var("BRAIN_MODELS")
-            .unwrap_or_else(|_| "nemotron,peabody-vllm,sherman-vllm,snidely-vllm,dudley-vllm,llama-3.3-70b-instruct".to_string())
+            .unwrap_or_else(|_| {
+                "nemotron,peabody-vllm,sherman-vllm,snidely-vllm,dudley-vllm,llama-3.3-70b-instruct"
+                    .to_string()
+            })
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -121,7 +129,9 @@ impl BrainQueue {
         // Sort: high > normal > low, then by created
         state.queue.sort_by(|a, b| {
             let po = priority_order(&a.priority).cmp(&priority_order(&b.priority));
-            if po != std::cmp::Ordering::Equal { return po; }
+            if po != std::cmp::Ordering::Equal {
+                return po;
+            }
             a.created.cmp(&b.created)
         });
         drop(state);
@@ -147,7 +157,9 @@ impl BrainQueue {
     pub async fn tick(&self, client: &reqwest::Client) {
         let pending_ids: Vec<String> = {
             let state = self.state.read().await;
-            state.queue.iter()
+            state
+                .queue
+                .iter()
                 .filter(|r| r.status == "pending")
                 .map(|r| r.id.clone())
                 .collect()
@@ -160,7 +172,10 @@ impl BrainQueue {
             return;
         }
 
-        info!("brain: tick — processing {} pending request(s)", pending_ids.len());
+        info!(
+            "brain: tick — processing {} pending request(s)",
+            pending_ids.len()
+        );
 
         for id in pending_ids {
             self.process_request(&id, client).await;
@@ -256,7 +271,10 @@ impl BrainQueue {
         max_tokens: u32,
     ) -> Result<(String, u32), String> {
         for model in &self.models {
-            match self.call_model_once(client, model, messages, max_tokens).await {
+            match self
+                .call_model_once(client, model, messages, max_tokens)
+                .await
+            {
                 Ok((text, tokens)) if !text.is_empty() => return Ok((text, tokens)),
                 Ok(_) => warn!("brain: empty response from {}", model),
                 Err(e) => warn!("brain: {} failed: {} — trying next", model, e),
@@ -293,7 +311,8 @@ impl BrainQueue {
 
         let data: Value = resp.json().await.map_err(|e| e.to_string())?;
         let msg = &data["choices"][0]["message"];
-        let text = msg["content"].as_str()
+        let text = msg["content"]
+            .as_str()
             .or_else(|| msg["reasoning"].as_str())
             .unwrap_or("")
             .to_string();
@@ -303,7 +322,11 @@ impl BrainQueue {
 }
 
 fn priority_order(p: &str) -> u8 {
-    match p { "high" => 0, "low" => 2, _ => 1 }
+    match p {
+        "high" => 0,
+        "low" => 2,
+        _ => 1,
+    }
 }
 
 // ── Background worker ─────────────────────────────────────────────────────

@@ -103,6 +103,45 @@ The `claude-worker.mjs` module in `workqueue/scripts/` is the CCC-specific integ
 
 If you're reading this with no agents, no queue, and no idea what a ClawBus is — good. That's where I started.
 
+### Step 0: Check out all the repos
+
+CCC doesn't live in one repo. These are the repos you need and where they belong on a command node (e.g. Rocky/do-host1):
+
+```bash
+# Core: the main crew workspace (you probably already have this)
+git clone https://github.com/jordanhubbard/rockyandfriends ~/Src/rockyandfriends
+
+# tokenhub: LLM gateway — must be running before any agent does inference
+git clone https://github.com/jordanhubbard/tokenhub ~/Src/tokenhub
+
+# nanolang: compiled systems language (needed if you work on agentOS or run .nano files)
+git clone https://github.com/jordanhubbard/nanolang ~/Src/nanolang
+
+# agentOS: seL4 RTOS for WASM agent slots (needed if you work on kernel-level stuff)
+git clone https://github.com/jordanhubbard/agentos ~/Src/agentos
+```
+
+**On a pure command node (Rocky-style, no GPU, no WASM dev):** you minimally need `rockyandfriends` and `tokenhub`. The others are needed only if you're building/running nanolang or agentOS work.
+
+**On a dev node (Natasha/Bullwinkle):** clone all four. You'll hit them eventually.
+
+> 🤖 **Agent note:** If you are an agent setting up a new node, clone these repos automatically rather than asking the human to do it. The human should only need to provide `RCC_AGENT_TOKEN` and `RCC_URL`. Everything else bootstraps from there.
+
+---
+
+### Step 0.5: Plan secrets management BEFORE starting any service
+
+Before you run anything, answer these questions:
+
+1. What credentials does this service need?
+2. Where will they be stored? (TokenHub + local `.env`)
+3. How does the service find them on restart?
+4. Are they registered in TokenHub *before* the service starts?
+
+**Do not start a service first and figure out secrets later.** See the "Secrets Management" section below for the full protocol.
+
+---
+
 ### Step 1: Stand up the CCC API
 
 The CCC API is the spine. Everything else talks to it.
@@ -325,6 +364,52 @@ AGENT_NAME=myagent \
 ```
 
 Logs: `~/.rcc/logs/remote-exec.jsonl`
+
+---
+
+## Secrets Management
+
+**Rule: never set up a service without planning secrets management first.**
+
+This crew learned this the hard way. Poor secrets handling caused an outage on both Milvus and MinIO (2026-04-04). Don't repeat it.
+
+### The Protocol
+
+Every secret this fleet uses must be stored in **two places**:
+
+1. **TokenHub** — the fleet secure store on Rocky (`http://127.0.0.1:8090`). This is the canonical, single source of truth for all LLM API keys, service tokens, and agent credentials.
+2. **Agent environment** — the agent's running env (`.env`, systemd unit, supervisor config). Populated automatically by `deploy/secrets-sync.sh` from TokenHub.
+
+**Never manually scatter secrets across agent configs.** If a key only lives in one place, it will get lost.
+
+### The Checklist (run before starting any new service)
+
+```
+Before starting <new-service>:
+[ ] List all credentials this service needs
+[ ] Register each credential in TokenHub
+[ ] Run secrets-sync.sh to push to agent environments
+[ ] Verify env vars are present before starting the service
+[ ] Document the credential names in deploy/.env.template
+```
+
+### Credential Ownership
+
+| Secret | Owner | How others get it |
+|--------|-------|-------------------|
+| `NVIDIA_API_KEY` | TokenHub vault | TokenHub proxies — agents never need it directly |
+| `TOKENHUB_API_KEY` | Per-agent | Provisioned at onboarding, stored in `~/.rcc/.env` |
+| `RCC_AGENT_TOKEN` | Per-agent | Provided by RCC admin at onboarding |
+| `SLACK_TOKEN` | Rocky (hub) | Other agents POST to `/api/slack/send` — no per-agent token needed |
+| `MATTERMOST_TOKEN` | Per-agent | Provisioned at onboarding via secrets-sync |
+| vLLM tokens | TokenHub | Rocky proxies via reverse tunnel — fleet doesn't hold these directly |
+
+### What Not To Do
+
+- ❌ Start a service, then figure out secrets
+- ❌ Put secrets in a README, commit message, or memory file
+- ❌ Use a token from one service for a different service (wrong-token incidents are real)
+- ❌ Skip TokenHub registration because "I'll add it later"
 
 ---
 

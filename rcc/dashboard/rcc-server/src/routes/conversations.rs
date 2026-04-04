@@ -1,8 +1,8 @@
+use crate::AppState;
 /// /api/conversations — File-backed conversation store
 ///
 /// Stored in CONVERSATIONS_PATH (default ./data/conversations.json).
 /// Format: array of conversation objects.
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -14,7 +14,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::AppState;
 
 static CONVERSATIONS: std::sync::OnceLock<RwLock<Vec<Value>>> = std::sync::OnceLock::new();
 static CONVERSATIONS_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -49,7 +48,10 @@ async fn flush_conversations() {
     let data = conversations().read().await;
     let content = match serde_json::to_string_pretty(&*data) {
         Ok(c) => c,
-        Err(e) => { tracing::warn!("conversations: serialize failed: {}", e); return; }
+        Err(e) => {
+            tracing::warn!("conversations: serialize failed: {}", e);
+            return;
+        }
     };
     drop(data);
     let path = conversations_path();
@@ -70,7 +72,10 @@ async fn flush_conversations() {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/conversations", get(list_conversations).post(create_conversation))
+        .route(
+            "/api/conversations",
+            get(list_conversations).post(create_conversation),
+        )
         .route("/api/conversations/:id", get(get_conversation))
         .route("/api/conversations/:id/messages", post(add_message))
 }
@@ -144,7 +149,11 @@ async fn create_conversation(
     conversations().write().await.push(conv.clone());
     flush_conversations().await;
 
-    (StatusCode::CREATED, Json(json!({"ok": true, "conversation": conv}))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(json!({"ok": true, "conversation": conv})),
+    )
+        .into_response()
 }
 
 // ── GET /api/conversations/:id ────────────────────────────────────────────────
@@ -154,12 +163,19 @@ async fn get_conversation(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let convs = conversations().read().await;
-    let conv = convs.iter().find(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id)).cloned();
+    let conv = convs
+        .iter()
+        .find(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id))
+        .cloned();
     drop(convs);
 
     match conv {
         Some(c) => Json(c).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Conversation not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Conversation not found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -172,11 +188,23 @@ async fn add_message(
 ) -> impl IntoResponse {
     let author = match body.get("author").and_then(|v| v.as_str()) {
         Some(a) => a.to_string(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "author and text required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "author and text required"})),
+            )
+                .into_response()
+        }
     };
     let text = match body.get("text").and_then(|v| v.as_str()) {
         Some(t) => t.to_string(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "author and text required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "author and text required"})),
+            )
+                .into_response()
+        }
     };
 
     let message = json!({
@@ -187,16 +215,27 @@ async fn add_message(
 
     {
         let mut convs = conversations().write().await;
-        let idx = convs.iter().position(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id));
+        let idx = convs
+            .iter()
+            .position(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id));
         match idx {
-            None => return (StatusCode::NOT_FOUND, Json(json!({"error": "Conversation not found"}))).into_response(),
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "Conversation not found"})),
+                )
+                    .into_response()
+            }
             Some(i) => {
                 if let Some(obj) = convs[i].as_object_mut() {
                     let messages = obj.entry("messages").or_insert_with(|| json!([]));
                     if let Some(arr) = messages.as_array_mut() {
                         arr.push(message.clone());
                     }
-                    obj.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
+                    obj.insert(
+                        "updatedAt".to_string(),
+                        json!(chrono::Utc::now().to_rfc3339()),
+                    );
                 }
             }
         }
@@ -204,5 +243,9 @@ async fn add_message(
 
     flush_conversations().await;
 
-    (StatusCode::CREATED, Json(json!({"ok": true, "message": message}))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(json!({"ok": true, "message": message})),
+    )
+        .into_response()
 }

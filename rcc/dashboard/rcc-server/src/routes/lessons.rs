@@ -1,9 +1,9 @@
+use crate::AppState;
 /// /api/lessons — File-backed lesson store (Rust port of rcc/lessons/index.mjs routes)
 ///
 /// Lessons are stored as JSONL in LESSONS_PATH (default ./data/lessons.jsonl).
 /// Vector search is delegated to SOA-007 (memory/vector module).
 /// For now, this implements file-based keyword search only.
-
 use axum::{
     extract::{Query, State},
     http::HeaderMap,
@@ -16,15 +16,13 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::AppState;
 
 static LESSONS_STORE: std::sync::OnceLock<RwLock<Vec<Value>>> = std::sync::OnceLock::new();
 static LESSONS_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn lessons_path() -> &'static str {
     LESSONS_PATH.get_or_init(|| {
-        std::env::var("LESSONS_PATH")
-            .unwrap_or_else(|_| "./data/lessons.jsonl".to_string())
+        std::env::var("LESSONS_PATH").unwrap_or_else(|_| "./data/lessons.jsonl".to_string())
     })
 }
 
@@ -58,7 +56,12 @@ async fn save_lesson(lesson: &Value) {
     if let Ok(mut line) = serde_json::to_string(lesson) {
         line.push('\n');
         use tokio::io::AsyncWriteExt;
-        if let Ok(mut f) = tokio::fs::OpenOptions::new().create(true).append(true).open(path).await {
+        if let Ok(mut f) = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .await
+        {
             let _ = f.write_all(line.as_bytes()).await;
         }
     }
@@ -79,14 +82,24 @@ async fn post_lesson(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     for required in &["domain", "symptom", "fix"] {
-        if body.get(required).and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+        if body
+            .get(required)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty()
+        {
             return (
                 axum::http::StatusCode::BAD_REQUEST,
                 Json(json!({"error": format!("{} required", required)})),
-            ).into_response();
+            )
+                .into_response();
         }
     }
     let now = chrono::Utc::now().to_rfc3339();
@@ -106,7 +119,11 @@ async fn post_lesson(
     lessons_store().write().await.push(lesson.clone());
     save_lesson(&lesson).await;
 
-    (axum::http::StatusCode::CREATED, Json(json!({"ok": true, "lesson": lesson}))).into_response()
+    (
+        axum::http::StatusCode::CREATED,
+        Json(json!({"ok": true, "lesson": lesson})),
+    )
+        .into_response()
 }
 
 // ── GET /api/lessons ──────────────────────────────────────────────────────
@@ -125,17 +142,25 @@ async fn get_lessons(
     Query(params): Query<LessonsQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let limit = params.limit.unwrap_or(20).min(100);
-    let keywords: Vec<String> = params.q.as_deref().unwrap_or("")
+    let keywords: Vec<String> = params
+        .q
+        .as_deref()
+        .unwrap_or("")
         .split_whitespace()
         .map(|s| s.to_lowercase())
         .filter(|s| !s.is_empty())
         .collect();
 
     let lessons = lessons_store().read().await;
-    let mut results: Vec<&Value> = lessons.iter()
+    let mut results: Vec<&Value> = lessons
+        .iter()
         .filter(|l| {
             // domain filter
             if let Some(d) = &params.domain {
@@ -150,10 +175,16 @@ async fn get_lessons(
                     l.get("symptom").and_then(|v| v.as_str()).unwrap_or(""),
                     l.get("fix").and_then(|v| v.as_str()).unwrap_or(""),
                     l.get("domain").and_then(|v| v.as_str()).unwrap_or(""),
-                    l.get("tags").and_then(|v| v.as_array())
-                        .map(|a| a.iter().filter_map(|t| t.as_str()).collect::<Vec<_>>().join(" "))
+                    l.get("tags")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a
+                            .iter()
+                            .filter_map(|t| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" "))
                         .unwrap_or_default(),
-                ).to_lowercase();
+                )
+                .to_lowercase();
                 if !keywords.iter().any(|kw| haystack.contains(kw.as_str())) {
                     return false;
                 }
@@ -173,13 +204,19 @@ async fn get_lessons(
 
     let context = if params.format.as_deref() == Some("context") {
         Some(format_for_context(&results))
-    } else { None };
+    } else {
+        None
+    };
 
-    (axum::http::StatusCode::OK, Json(json!({
-        "lessons": results,
-        "context": context,
-        "count": results.len(),
-    }))).into_response()
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({
+            "lessons": results,
+            "context": context,
+            "count": results.len(),
+        })),
+    )
+        .into_response()
 }
 
 // ── GET /api/lessons/trending ─────────────────────────────────────────────
@@ -197,7 +234,11 @@ async fn get_trending(
     Query(params): Query<TrendingQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let limit = params.limit.unwrap_or(5);
     let days = params.days.unwrap_or(7);
@@ -208,11 +249,16 @@ async fn get_trending(
     // Count by domain in the recent window
     let mut domain_counts: HashMap<String, usize> = HashMap::new();
     for l in lessons.iter() {
-        let created = l.get("createdAt").and_then(|v| v.as_str())
+        let created = l
+            .get("createdAt")
+            .and_then(|v| v.as_str())
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
         if created.map(|dt| dt >= cutoff).unwrap_or(false) {
-            let domain = l.get("domain").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let domain = l
+                .get("domain")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             *domain_counts.entry(domain.to_string()).or_default() += 1;
         }
     }
@@ -221,24 +267,34 @@ async fn get_trending(
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
     sorted.truncate(limit);
 
-    let trending: Vec<Value> = sorted.into_iter().map(|(domain, count)| {
-        // Get most recent lesson for this domain
-        let sample = lessons.iter()
-            .filter(|l| l.get("domain").and_then(|v| v.as_str()) == Some(&domain))
-            .last()
-            .cloned();
-        json!({ "domain": domain, "count": count, "sample": sample })
-    }).collect();
+    let trending: Vec<Value> = sorted
+        .into_iter()
+        .map(|(domain, count)| {
+            // Get most recent lesson for this domain
+            let sample = lessons
+                .iter()
+                .filter(|l| l.get("domain").and_then(|v| v.as_str()) == Some(&domain))
+                .last()
+                .cloned();
+            json!({ "domain": domain, "count": count, "sample": sample })
+        })
+        .collect();
 
     let context = if params.format.as_deref() == Some("context") {
         Some(format_trending_for_heartbeat(&trending))
-    } else { None };
+    } else {
+        None
+    };
 
-    (axum::http::StatusCode::OK, Json(json!({
-        "lessons": trending,
-        "context": context,
-        "count": trending.len(),
-    }))).into_response()
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({
+            "lessons": trending,
+            "context": context,
+            "count": trending.len(),
+        })),
+    )
+        .into_response()
 }
 
 // ── GET /api/lessons/heartbeat ────────────────────────────────────────────
@@ -254,18 +310,28 @@ async fn get_heartbeat(
     Query(params): Query<HeartbeatQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
-    let domains: Vec<String> = params.domains.as_deref().unwrap_or("")
+    let domains: Vec<String> = params
+        .domains
+        .as_deref()
+        .unwrap_or("")
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
     let lessons = lessons_store().read().await;
-    let recent: Vec<&Value> = lessons.iter()
+    let recent: Vec<&Value> = lessons
+        .iter()
         .filter(|l| {
-            if domains.is_empty() { return true; }
+            if domains.is_empty() {
+                return true;
+            }
             let d = l.get("domain").and_then(|v| v.as_str()).unwrap_or("");
             domains.iter().any(|fd| fd == d)
         })
@@ -274,29 +340,41 @@ async fn get_heartbeat(
         .collect();
 
     let context = format_for_context(&recent.iter().map(|v| (*v).clone()).collect::<Vec<_>>());
-    (axum::http::StatusCode::OK, Json(json!({"context": context}))).into_response()
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({"context": context})),
+    )
+        .into_response()
 }
 
 // ── Formatting helpers ─────────────────────────────────────────────────────
 
 fn format_for_context(lessons: &[Value]) -> String {
-    lessons.iter().map(|l| {
-        format!(
-            "[{}] {}: {} → {}",
-            l.get("domain").and_then(|v| v.as_str()).unwrap_or("?"),
-            l.get("agent").and_then(|v| v.as_str()).unwrap_or("?"),
-            l.get("symptom").and_then(|v| v.as_str()).unwrap_or("?"),
-            l.get("fix").and_then(|v| v.as_str()).unwrap_or("?"),
-        )
-    }).collect::<Vec<_>>().join("\n")
+    lessons
+        .iter()
+        .map(|l| {
+            format!(
+                "[{}] {}: {} → {}",
+                l.get("domain").and_then(|v| v.as_str()).unwrap_or("?"),
+                l.get("agent").and_then(|v| v.as_str()).unwrap_or("?"),
+                l.get("symptom").and_then(|v| v.as_str()).unwrap_or("?"),
+                l.get("fix").and_then(|v| v.as_str()).unwrap_or("?"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn format_trending_for_heartbeat(trending: &[Value]) -> String {
-    trending.iter().map(|t| {
-        format!(
-            "{} ({}x)",
-            t.get("domain").and_then(|v| v.as_str()).unwrap_or("?"),
-            t.get("count").and_then(|v| v.as_u64()).unwrap_or(0),
-        )
-    }).collect::<Vec<_>>().join(", ")
+    trending
+        .iter()
+        .map(|t| {
+            format!(
+                "{} ({}x)",
+                t.get("domain").and_then(|v| v.as_str()).unwrap_or("?"),
+                t.get("count").and_then(|v| v.as_u64()).unwrap_or(0),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

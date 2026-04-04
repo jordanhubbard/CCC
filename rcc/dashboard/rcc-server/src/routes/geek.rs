@@ -1,8 +1,8 @@
+use crate::AppState;
 /// /api/geek — GeekView topology + SSE stream (Rust port of routes/agents.mjs geek section)
-
 use axum::{
     extract::State,
-    response::{IntoResponse, Json, Sse, sse::Event},
+    response::{sse::Event, IntoResponse, Json, Sse},
     routing::get,
     Router,
 };
@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -69,42 +68,61 @@ async fn topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     ];
 
     // Overlay heartbeat status on agent nodes
-    let nodes: Vec<Value> = raw_nodes.into_iter().map(|mut n| {
-        if n.get("type").and_then(|v| v.as_str()) != Some("agent") {
-            return n;
-        }
-        let agent_id = n.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let agent_data = agents.as_object()
-            .and_then(|m| m.get(&agent_id))
-            .cloned()
-            .unwrap_or(json!(null));
+    let nodes: Vec<Value> = raw_nodes
+        .into_iter()
+        .map(|mut n| {
+            if n.get("type").and_then(|v| v.as_str()) != Some("agent") {
+                return n;
+            }
+            let agent_id = n
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let agent_data = agents
+                .as_object()
+                .and_then(|m| m.get(&agent_id))
+                .cloned()
+                .unwrap_or(json!(null));
 
-        let last_seen = agent_data.get("lastSeen")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            let last_seen = agent_data
+                .get("lastSeen")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
-        let status = last_seen.as_deref()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| {
-                let age = now - dt.timestamp_millis();
-                if age < STALE_MS { "online" }
-                else if age < OFFLINE_MS { "stale" }
-                else { "offline" }
-            })
-            .unwrap_or("offline");
+            let status = last_seen
+                .as_deref()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| {
+                    let age = now - dt.timestamp_millis();
+                    if age < STALE_MS {
+                        "online"
+                    } else if age < OFFLINE_MS {
+                        "stale"
+                    } else {
+                        "offline"
+                    }
+                })
+                .unwrap_or("offline");
 
-        let obj = n.as_object_mut().unwrap();
-        obj.insert("status".to_string(), json!(status));
-        obj.insert("lastSeen".to_string(), json!(last_seen));
-        n
-    }).collect();
+            let obj = n.as_object_mut().unwrap();
+            obj.insert("status".to_string(), json!(status));
+            obj.insert("lastSeen".to_string(), json!(last_seen));
+            n
+        })
+        .collect();
 
     // Build heartbeat summary
-    let heartbeat_summary: Vec<Value> = agents.as_object()
-        .map(|m| m.iter().map(|(name, agent)| {
-            let ts = agent.get("lastSeen").cloned().unwrap_or(json!(null));
-            json!({"agent": name, "ts": ts, "status": "online"})
-        }).collect())
+    let heartbeat_summary: Vec<Value> = agents
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(name, agent)| {
+                    let ts = agent.get("lastSeen").cloned().unwrap_or(json!(null));
+                    json!({"agent": name, "ts": ts, "status": "online"})
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     drop(agents);
@@ -119,14 +137,15 @@ async fn topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 // ── GET /api/geek/stream — SSE ────────────────────────────────────────────
 
-async fn geek_stream(State(state): State<Arc<AppState>>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+async fn geek_stream(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
     let mut bus_rx = state.bus_tx.subscribe();
 
     let stream = stream::unfold((bus_rx, true), move |(mut rx, first)| {
         async move {
             if first {
-                let event = Event::default()
-                    .data(json!({"type":"connected"}).to_string());
+                let event = Event::default().data(json!({"type":"connected"}).to_string());
                 return Some((Ok::<Event, Infallible>(event), (rx, false)));
             }
             // Forward bus events tagged as geek updates, or keepalive every 15s
@@ -154,7 +173,6 @@ async fn geek_stream(State(state): State<Arc<AppState>>) -> Sse<impl futures_uti
         }
     });
 
-    Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15))
-    )
+    Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
 }

@@ -44,7 +44,13 @@ impl Supervisor {
         let handle = Arc::new(SupervisorHandle {
             statuses: statuses.clone(),
         });
-        (Supervisor { processes, statuses }, handle)
+        (
+            Supervisor {
+                processes,
+                statuses,
+            },
+            handle,
+        )
     }
 
     pub async fn run(self) {
@@ -105,11 +111,7 @@ async fn run_process(
                         entry.healthy = false;
                     }
                 }
-                tracing::info!(
-                    "[supervisor] '{}' started (pid={:?})",
-                    process.name,
-                    pid
-                );
+                tracing::info!("[supervisor] '{}' started (pid={:?})", process.name, pid);
 
                 // Schedule health check after 10s
                 if let Some(url) = process.health_url.clone() {
@@ -119,11 +121,7 @@ async fn run_process(
                         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                         let healthy = Supervisor::is_healthy(&url).await;
                         if healthy {
-                            tracing::info!(
-                                "[supervisor] '{}' health check OK at {}",
-                                name,
-                                url
-                            );
+                            tracing::info!("[supervisor] '{}' health check OK at {}", name, url);
                         } else {
                             tracing::warn!(
                                 "[supervisor] '{}' health check FAILED at {}",
@@ -144,19 +142,13 @@ async fn run_process(
                         process.name,
                         status
                     ),
-                    Err(e) => tracing::error!(
-                        "[supervisor] '{}' wait() error: {}",
-                        process.name,
-                        e
-                    ),
+                    Err(e) => {
+                        tracing::error!("[supervisor] '{}' wait() error: {}", process.name, e)
+                    }
                 }
             }
             Err(e) => {
-                tracing::error!(
-                    "[supervisor] failed to spawn '{}': {}",
-                    process.name,
-                    e
-                );
+                tracing::error!("[supervisor] failed to spawn '{}': {}", process.name, e);
             }
         }
 

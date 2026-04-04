@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use tokio::sync::{RwLock, broadcast};
 use crate::brain::BrainQueue;
 use crate::supervisor::SupervisorHandle;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use tokio::sync::{broadcast, RwLock};
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct QueueData {
@@ -21,12 +21,10 @@ pub struct AppState {
     pub secrets_path: String,
     pub bus_log_path: String,
     pub projects_path: String,
-    pub metrics_path: String,
     pub queue: RwLock<QueueData>,
     pub agents: RwLock<serde_json::Value>,
     pub secrets: RwLock<serde_json::Map<String, serde_json::Value>>,
     pub projects: RwLock<Vec<serde_json::Value>>,
-    pub metrics: RwLock<serde_json::Value>,
     pub brain: Arc<BrainQueue>,
     pub bus_tx: broadcast::Sender<String>,
     pub bus_seq: AtomicU64,
@@ -64,37 +62,6 @@ pub async fn load_all(state: &Arc<AppState>) {
     load_agents(state).await;
     load_secrets(state).await;
     load_projects(state).await;
-    load_metrics(state).await;
-}
-
-pub async fn load_metrics(state: &Arc<AppState>) {
-    match tokio::fs::read_to_string(&state.metrics_path).await {
-        Ok(content) => {
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-                *state.metrics.write().await = data;
-                tracing::info!("Loaded metrics from {}", state.metrics_path);
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::info!("Metrics file not found, starting empty");
-        }
-        Err(e) => tracing::warn!("Failed to load metrics: {}", e),
-    }
-}
-
-pub async fn flush_metrics(state: &Arc<AppState>) {
-    let data = state.metrics.read().await;
-    let content = match serde_json::to_string_pretty(&*data) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to serialize metrics: {}", e);
-            return;
-        }
-    };
-    drop(data);
-    if let Err(e) = write_atomic(&state.metrics_path, &content).await {
-        tracing::warn!("Failed to flush metrics: {}", e);
-    }
 }
 
 pub async fn load_projects(state: &Arc<AppState>) {
@@ -192,7 +159,9 @@ pub async fn flush_agents(state: &Arc<AppState>) {
 pub async fn load_secrets(state: &Arc<AppState>) {
     match tokio::fs::read_to_string(&state.secrets_path).await {
         Ok(content) => {
-            if let Ok(data) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content) {
+            if let Ok(data) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+            {
                 *state.secrets.write().await = data;
                 tracing::info!("Loaded secrets from {}", state.secrets_path);
             }
@@ -222,10 +191,8 @@ pub async fn flush_secrets(state: &Arc<AppState>) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(
-            &state.secrets_path,
-            std::fs::Permissions::from_mode(0o600),
-        );
+        let _ =
+            std::fs::set_permissions(&state.secrets_path, std::fs::Permissions::from_mode(0o600));
     }
 }
 

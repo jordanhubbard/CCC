@@ -1,3 +1,5 @@
+use crate::brain::BrainRequest;
+use crate::AppState;
 use axum::{
     extract::State,
     http::HeaderMap,
@@ -7,8 +9,6 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::AppState;
-use crate::brain::BrainRequest;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -16,9 +16,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/brain/request", post(brain_request))
 }
 
-async fn brain_status(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn brain_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(state.brain.status().await)
 }
 
@@ -31,15 +29,19 @@ async fn brain_request(
         return (
             axum::http::StatusCode::UNAUTHORIZED,
             Json(json!({"error": "Unauthorized"})),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let messages = match body.get("messages").and_then(|m| m.as_array()) {
         Some(m) => m.iter().cloned().collect::<Vec<_>>(),
-        None => return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "messages array required"})),
-        ).into_response(),
+        None => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": "messages array required"})),
+            )
+                .into_response()
+        }
     };
 
     let id = format!(
@@ -51,14 +53,24 @@ async fn brain_request(
     let req = BrainRequest {
         id: id.clone(),
         messages: messages.into_iter().map(|m| m).collect(),
-        max_tokens: body.get("maxTokens").and_then(|v| v.as_u64()).unwrap_or(1024) as u32,
-        priority: body.get("priority").and_then(|v| v.as_str()).unwrap_or("normal").to_string(),
+        max_tokens: body
+            .get("maxTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1024) as u32,
+        priority: body
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .unwrap_or("normal")
+            .to_string(),
         created: chrono::Utc::now().to_rfc3339(),
         attempts: vec![],
         status: "pending".to_string(),
         result: None,
         completed_at: None,
-        callback_url: body.get("callbackUrl").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        callback_url: body
+            .get("callbackUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         metadata: body.get("metadata").cloned().unwrap_or(json!({})),
     };
 
@@ -67,5 +79,6 @@ async fn brain_request(
     (
         axum::http::StatusCode::ACCEPTED,
         Json(json!({"ok": true, "requestId": request_id, "status": "queued"})),
-    ).into_response()
+    )
+        .into_response()
 }

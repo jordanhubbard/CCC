@@ -1,8 +1,8 @@
+use crate::AppState;
 /// /api/issues — File-backed GitHub issues store (Rust port of Node.js issues routes)
 ///
 /// Issues stored as JSON in ISSUES_PATH (default ./data/issues.json).
 /// Format: {"issues": [...], "lastSync": {"repo": "timestamp"}}
-
 use axum::{
     extract::{Path, Query, State},
     response::{IntoResponse, Json},
@@ -14,7 +14,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::AppState;
 
 static ISSUES_STORE: std::sync::OnceLock<RwLock<Vec<Value>>> = std::sync::OnceLock::new();
 static LAST_SYNC: std::sync::OnceLock<RwLock<HashMap<String, String>>> = std::sync::OnceLock::new();
@@ -22,8 +21,7 @@ static ISSUES_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn issues_path() -> &'static str {
     ISSUES_PATH.get_or_init(|| {
-        std::env::var("ISSUES_PATH")
-            .unwrap_or_else(|_| "./data/issues.json".to_string())
+        std::env::var("ISSUES_PATH").unwrap_or_else(|_| "./data/issues.json".to_string())
     })
 }
 
@@ -66,7 +64,8 @@ async fn save_issues() {
     }
     let issues = issues_store().read().await.clone();
     let sync: HashMap<String, String> = last_sync().read().await.clone();
-    let sync_val: serde_json::Map<String, Value> = sync.into_iter().map(|(k, v)| (k, json!(v))).collect();
+    let sync_val: serde_json::Map<String, Value> =
+        sync.into_iter().map(|(k, v)| (k, json!(v))).collect();
     let data = json!({"issues": issues, "lastSync": sync_val});
     if let Ok(content) = serde_json::to_string_pretty(&data) {
         let tmp = format!("{}.tmp", path);
@@ -124,7 +123,12 @@ async fn list_issues(
         .collect();
 
     let count = filtered.len();
-    let page: Vec<Value> = filtered.into_iter().skip(offset).take(limit).cloned().collect();
+    let page: Vec<Value> = filtered
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .cloned()
+        .collect();
     drop(issues);
 
     let last_sync_val: Option<String> = if let Some(repo) = &params.repo {
@@ -170,9 +174,11 @@ async fn get_issue(
         .cloned();
 
     match found {
-        Some(issue) => {
-            (axum::http::StatusCode::OK, Json(json!({"ok": true, "issue": issue}))).into_response()
-        }
+        Some(issue) => (
+            axum::http::StatusCode::OK,
+            Json(json!({"ok": true, "issue": issue})),
+        )
+            .into_response(),
         None => (
             axum::http::StatusCode::NOT_FOUND,
             Json(json!({"error": "Issue not found"})),
@@ -197,9 +203,8 @@ async fn sync_issues(
     match body.repo {
         None => Json(json!({"ok": true, "result": {"synced": 0, "repo": null}})).into_response(),
         Some(repo) => match do_sync_repo(&repo, &state_filter).await {
-            Ok(synced) => {
-                Json(json!({"ok": true, "result": {"synced": synced, "repo": repo}})).into_response()
-            }
+            Ok(synced) => Json(json!({"ok": true, "result": {"synced": synced, "repo": repo}}))
+                .into_response(),
             Err(e) => (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": e})),
@@ -231,8 +236,7 @@ async fn do_sync_repo(repo: &str, state_filter: &str) -> Result<usize, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
 
-    let fetched: Vec<Value> =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    let fetched: Vec<Value> = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
     let count = fetched.len();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -309,7 +313,11 @@ async fn link_issue(
             .into_response(),
         Some(issue) => {
             save_issues().await;
-            (axum::http::StatusCode::OK, Json(json!({"ok": true, "issue": issue}))).into_response()
+            (
+                axum::http::StatusCode::OK,
+                Json(json!({"ok": true, "issue": issue})),
+            )
+                .into_response()
         }
     }
 }

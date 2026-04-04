@@ -1,8 +1,9 @@
+use crate::AppState;
+use aws_sdk_s3::primitives::ByteStream;
 /// /api/fs/* — S3-backed ClawFS API (wq-AGENTFS-001)
 ///
 /// MinIO endpoint from MINIO_ENDPOINT env (default http://localhost:9000).
 /// Bucket from MINIO_BUCKET env (default "agents").
-
 use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
@@ -10,11 +11,9 @@ use axum::{
     routing::{delete, get, head, post},
     Router,
 };
-use aws_sdk_s3::primitives::ByteStream;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -47,7 +46,11 @@ fn validate_path(path: &str, agent: Option<&str>) -> Result<(), &'static str> {
 }
 
 fn s3_unavailable() -> Response {
-    (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "S3 not configured"}))).into_response()
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"error": "S3 not configured"})),
+    )
+        .into_response()
 }
 
 // ── GET /api/fs/read?path=...&agent=... ───────────────────────────────────────
@@ -59,20 +62,25 @@ struct ReadQuery {
     agent: Option<String>,
 }
 
-async fn fs_read(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<ReadQuery>,
-) -> Response {
+async fn fs_read(State(state): State<Arc<AppState>>, Query(params): Query<ReadQuery>) -> Response {
     let client = match &state.s3_client {
         Some(c) => c.clone(),
         None => return s3_unavailable(),
     };
 
     if params.path.contains("..") {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "path traversal not allowed"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path traversal not allowed"})),
+        )
+            .into_response();
     }
     if params.path.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "path required"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path required"})),
+        )
+            .into_response();
     }
 
     let result = client
@@ -196,9 +204,7 @@ async fn fs_list(
 
     let prefix = params.prefix.unwrap_or_default();
 
-    let mut req = client
-        .list_objects_v2()
-        .bucket(&state.s3_bucket);
+    let mut req = client.list_objects_v2().bucket(&state.s3_bucket);
     if !prefix.is_empty() {
         req = req.prefix(&prefix);
     }
@@ -218,7 +224,11 @@ async fn fs_list(
                     })
                 })
                 .collect();
-            (StatusCode::OK, Json(json!({"ok": true, "objects": objects}))).into_response()
+            (
+                StatusCode::OK,
+                Json(json!({"ok": true, "objects": objects})),
+            )
+                .into_response()
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -241,7 +251,11 @@ async fn fs_delete(
     Query(params): Query<DeleteQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     let client = match &state.s3_client {
@@ -250,10 +264,18 @@ async fn fs_delete(
     };
 
     if params.path.contains("..") {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "path traversal not allowed"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path traversal not allowed"})),
+        )
+            .into_response();
     }
     if params.path.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "path required"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path required"})),
+        )
+            .into_response();
     }
 
     match client

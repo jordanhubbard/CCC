@@ -1,3 +1,5 @@
+use crate::state::flush_queue;
+use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -7,8 +9,6 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::AppState;
-use crate::state::flush_queue;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -48,10 +48,12 @@ async fn get_stale(State(state): State<Arc<AppState>>) -> Json<Value> {
         .unwrap_or_default()
         .as_millis() as u64;
 
-    let stale: Vec<Value> = q.items.iter()
+    let stale: Vec<Value> = q
+        .items
+        .iter()
         .filter(|item| {
             item.get("status").and_then(|s| s.as_str()) == Some("in-progress")
-            && item.get("claimedAt").and_then(|s| s.as_str()).is_some()
+                && item.get("claimedAt").and_then(|s| s.as_str()).is_some()
         })
         .filter_map(|item| {
             let claimed_at = item.get("claimedAt")?.as_str()?;
@@ -75,33 +77,40 @@ async fn get_stale(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({"stale": stale, "count": stale.len()}))
 }
 
-async fn get_claimed(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn get_claimed(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let q = state.queue.read().await;
-    let claimed: Vec<&Value> = q.items.iter()
+    let claimed: Vec<&Value> = q
+        .items
+        .iter()
         .filter(|i| {
             i.get("status").and_then(|s| s.as_str()) == Some("in-progress")
-            && i.get("claimedBy").and_then(|s| s.as_str()).is_some()
+                && i.get("claimedBy").and_then(|s| s.as_str()).is_some()
         })
         .collect();
     Json(json!({"ok": true, "claimed": claimed, "count": claimed.len()})).into_response()
 }
 
-async fn get_item(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+async fn get_item(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse {
     let q = state.queue.read().await;
-    let item = q.items.iter().chain(q.completed.iter())
+    let item = q
+        .items
+        .iter()
+        .chain(q.completed.iter())
         .find(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item {
         Some(i) => (StatusCode::OK, Json(i.clone())).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Item not found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -112,27 +121,53 @@ async fn post_queue(
 ) -> impl IntoResponse {
     let title = match body.get("title").and_then(|t| t.as_str()) {
         Some(t) => t.to_string(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "title required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "title required"})),
+            )
+                .into_response()
+        }
     };
 
-    let priority_raw = body.get("priority").and_then(|p| p.as_str()).unwrap_or("normal");
+    let priority_raw = body
+        .get("priority")
+        .and_then(|p| p.as_str())
+        .unwrap_or("normal");
     let valid_priorities = ["critical", "high", "medium", "normal", "low", "idea"];
-    let priority = if valid_priorities.contains(&priority_raw) { priority_raw } else { "normal" };
+    let priority = if valid_priorities.contains(&priority_raw) {
+        priority_raw
+    } else {
+        "normal"
+    };
     let is_idea = priority == "idea";
-    let skip_dedup = body.get("_skip_dedup").and_then(|v| v.as_bool()).unwrap_or(false);
+    let skip_dedup = body
+        .get("_skip_dedup")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     if !is_idea && !skip_dedup {
-        let desc = body.get("description").and_then(|d| d.as_str()).unwrap_or("").trim().to_string();
+        let desc = body
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if desc.len() < 20 {
-            return (StatusCode::BAD_REQUEST, Json(json!({
-                "error": "description_required",
-                "message": "description must be at least 20 characters"
-            }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "description_required",
+                    "message": "description must be at least 20 characters"
+                })),
+            )
+                .into_response();
         }
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    let item_id = body.get("id")
+    let item_id = body
+        .get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("wq-API-{}", chrono::Utc::now().timestamp_millis()));
@@ -140,24 +175,51 @@ async fn post_queue(
     // Check for duplicate title in active items
     let mut q = state.queue.write().await;
     if !is_idea && !skip_dedup {
-        let norm = |s: &str| s.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+        let norm = |s: &str| {
+            s.trim()
+                .to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         let incoming_norm = norm(&title);
-        let active_statuses = ["pending", "in-progress", "in_progress", "claimed", "incubating"];
+        let active_statuses = [
+            "pending",
+            "in-progress",
+            "in_progress",
+            "claimed",
+            "incubating",
+        ];
         let dup = q.items.iter().find(|i| {
             let status = i.get("status").and_then(|s| s.as_str()).unwrap_or("");
             active_statuses.contains(&status)
-            && i.get("title").and_then(|t| t.as_str()).map(|t| norm(t) == incoming_norm).unwrap_or(false)
+                && i.get("title")
+                    .and_then(|t| t.as_str())
+                    .map(|t| norm(t) == incoming_norm)
+                    .unwrap_or(false)
         });
         if let Some(d) = dup {
-            let dup_id = d.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dup_title = d.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            return (StatusCode::CONFLICT, Json(json!({
-                "ok": false,
-                "error": "duplicate",
-                "reason": "exact_title_dedup",
-                "duplicate_id": dup_id,
-                "duplicate_title": dup_title
-            }))).into_response();
+            let dup_id = d
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let dup_title = d
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "ok": false,
+                    "error": "duplicate",
+                    "reason": "exact_title_dedup",
+                    "duplicate_id": dup_id,
+                    "duplicate_title": dup_title
+                })),
+            )
+                .into_response();
         }
     }
 
@@ -165,38 +227,62 @@ async fn post_queue(
     if let Some(scout_key) = body.get("scout_key").and_then(|s| s.as_str()) {
         let exists = q.items.iter().chain(q.completed.iter()).any(|i| {
             i.get("scout_key").and_then(|s| s.as_str()) == Some(scout_key)
-            || i.get("tags").and_then(|t| t.as_array()).map(|arr| {
-                arr.iter().any(|tag| tag.as_str() == Some(scout_key))
-            }).unwrap_or(false)
+                || i.get("tags")
+                    .and_then(|t| t.as_array())
+                    .map(|arr| arr.iter().any(|tag| tag.as_str() == Some(scout_key)))
+                    .unwrap_or(false)
         });
         if exists {
-            return (StatusCode::OK, Json(json!({"ok": false, "duplicate": true, "scout_key": scout_key}))).into_response();
+            return (
+                StatusCode::OK,
+                Json(json!({"ok": false, "duplicate": true, "scout_key": scout_key})),
+            )
+                .into_response();
         }
     }
 
     // Infer preferred_executor
-    let preferred_executor = if let Some(pe) = body.get("preferred_executor").and_then(|s| s.as_str()) {
+    let preferred_executor = if let Some(pe) =
+        body.get("preferred_executor").and_then(|s| s.as_str())
+    {
         pe.to_string()
     } else {
-        let tags: Vec<&str> = body.get("tags").and_then(|t| t.as_array())
+        let tags: Vec<&str> = body
+            .get("tags")
+            .and_then(|t| t.as_array())
             .map(|arr| arr.iter().filter_map(|t| t.as_str()).collect())
             .unwrap_or_default();
         if tags.contains(&"gpu") || tags.contains(&"render") || tags.contains(&"simulation") {
             "gpu".to_string()
-        } else if tags.contains(&"reasoning") || tags.contains(&"code") || tags.contains(&"complex") {
+        } else if tags.contains(&"reasoning") || tags.contains(&"code") || tags.contains(&"complex")
+        {
             "claude_cli".to_string()
-        } else if tags.contains(&"heartbeat") || tags.contains(&"status") || tags.contains(&"poll") {
+        } else if tags.contains(&"heartbeat") || tags.contains(&"status") || tags.contains(&"poll")
+        {
             "inference_key".to_string()
-        } else if tags.contains(&"embedding") || tags.contains(&"local-llm") || tags.contains(&"peer-llm") {
+        } else if tags.contains(&"embedding")
+            || tags.contains(&"local-llm")
+            || tags.contains(&"peer-llm")
+        {
             "llm_server".to_string()
         } else {
-            let assignee = body.get("assignee").and_then(|a| a.as_str()).unwrap_or("all");
-            if assignee != "all" { "claude_cli".to_string() } else { "inference_key".to_string() }
+            let assignee = body
+                .get("assignee")
+                .and_then(|a| a.as_str())
+                .unwrap_or("all");
+            if assignee != "all" {
+                "claude_cli".to_string()
+            } else {
+                "inference_key".to_string()
+            }
         }
     };
 
     // Check ID collision
-    let all_ids: std::collections::HashSet<&str> = q.items.iter().chain(q.completed.iter())
+    let all_ids: std::collections::HashSet<&str> = q
+        .items
+        .iter()
+        .chain(q.completed.iter())
         .filter_map(|i| i.get("id").and_then(|v| v.as_str()))
         .collect();
     let final_id = if all_ids.contains(item_id.as_str()) {
@@ -246,21 +332,48 @@ async fn claim_item(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    let agent = match body.get("agent").or_else(|| body.get("_author")).and_then(|a| a.as_str()) {
+    let agent = match body
+        .get("agent")
+        .or_else(|| body.get("_author"))
+        .and_then(|a| a.as_str())
+    {
         Some(a) => a.to_string(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "agent required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "agent required"})),
+            )
+                .into_response()
+        }
     };
 
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
 
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item_pos {
-        None => return (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Item not found"})),
+            )
+                .into_response()
+        }
         Some(pos) => {
             let item = &mut q.items[pos];
-            let status = item.get("status").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            let claimed_by = item.get("claimedBy").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let status = item
+                .get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let claimed_by = item
+                .get("claimedBy")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
 
             // Check if already claimed by someone else and not stale
             if !claimed_by.is_empty() && claimed_by != agent && status == "in-progress" {
@@ -273,23 +386,35 @@ async fn claim_item(
                     let executor = item.get("preferred_executor").and_then(|s| s.as_str());
                     let threshold = stale_threshold(executor);
                     if now_ms.saturating_sub(claimed_ms) < threshold {
-                        return (StatusCode::CONFLICT, Json(json!({
-                            "error": format!("Already claimed by {}", claimed_by),
-                            "claimedBy": claimed_by,
-                            "claimedAt": claimed_at_str
-                        }))).into_response();
+                        return (
+                            StatusCode::CONFLICT,
+                            Json(json!({
+                                "error": format!("Already claimed by {}", claimed_by),
+                                "claimedBy": claimed_by,
+                                "claimedAt": claimed_at_str
+                            })),
+                        )
+                            .into_response();
                     }
                 }
             }
 
             if status != "pending" && status != "in-progress" {
-                return (StatusCode::CONFLICT, Json(json!({
-                    "error": format!("Item is {}, cannot claim", status)
-                }))).into_response();
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "error": format!("Item is {}, cannot claim", status)
+                    })),
+                )
+                    .into_response();
             }
 
             let obj = item.as_object_mut().unwrap();
-            let prev_agent = obj.get("claimedBy").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            let prev_agent = obj
+                .get("claimedBy")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             obj.insert("claimedBy".into(), json!(agent));
             obj.insert("claimedAt".into(), json!(now));
             obj.insert("keepaliveAt".into(), json!(now));
@@ -314,7 +439,8 @@ async fn claim_item(
                 obj.insert("journal".into(), json!([journal_entry]));
             }
 
-            let events_entry = json!({"ts": now, "agent": agent, "type": "claim", "note": body.get("note")});
+            let events_entry =
+                json!({"ts": now, "agent": agent, "type": "claim", "note": body.get("note")});
             if let Some(e) = obj.get_mut("events").and_then(|e| e.as_array_mut()) {
                 e.push(events_entry);
             } else {
@@ -334,27 +460,48 @@ async fn complete_item(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    let agent = body.get("agent").or_else(|| body.get("_author")).and_then(|a| a.as_str()).unwrap_or("api").to_string();
+    let agent = body
+        .get("agent")
+        .or_else(|| body.get("_author"))
+        .and_then(|a| a.as_str())
+        .unwrap_or("api")
+        .to_string();
 
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
 
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item_pos {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Item not found"})),
+        )
+            .into_response(),
         Some(pos) => {
             let mut item = q.items.remove(pos);
             let obj = item.as_object_mut().unwrap();
             obj.insert("status".into(), json!("completed"));
             obj.insert("completedAt".into(), json!(now));
-            if let Some(r) = body.get("resolution") { obj.insert("resolution".into(), r.clone()); }
-            if let Some(r) = body.get("result") { obj.insert("result".into(), r.clone()); }
+            if let Some(r) = body.get("resolution") {
+                obj.insert("resolution".into(), r.clone());
+            }
+            if let Some(r) = body.get("result") {
+                obj.insert("result".into(), r.clone());
+            }
             let version = obj.get("itemVersion").and_then(|n| n.as_u64()).unwrap_or(0) + 1;
             obj.insert("itemVersion".into(), json!(version));
 
-            let text = body.get("resolution").or_else(|| body.get("result"))
-                .and_then(|v| v.as_str()).unwrap_or("Completed").to_string();
-            let journal_entry = json!({"ts": now, "author": agent, "type": "complete", "text": text});
+            let text = body
+                .get("resolution")
+                .or_else(|| body.get("result"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Completed")
+                .to_string();
+            let journal_entry =
+                json!({"ts": now, "author": agent, "type": "complete", "text": text});
             if let Some(j) = obj.get_mut("journal").and_then(|j| j.as_array_mut()) {
                 j.push(journal_entry);
             } else {
@@ -380,15 +527,31 @@ async fn fail_item(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
-    let agent = body.get("agent").or_else(|| body.get("_author")).and_then(|a| a.as_str()).unwrap_or("api").to_string();
-    let reason = body.get("reason").and_then(|r| r.as_str()).unwrap_or("Agent reported failure").to_string();
+    let agent = body
+        .get("agent")
+        .or_else(|| body.get("_author"))
+        .and_then(|a| a.as_str())
+        .unwrap_or("api")
+        .to_string();
+    let reason = body
+        .get("reason")
+        .and_then(|r| r.as_str())
+        .unwrap_or("Agent reported failure")
+        .to_string();
 
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
 
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item_pos {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Item not found"})),
+        )
+            .into_response(),
         Some(pos) => {
             let item = &mut q.items[pos];
             let obj = item.as_object_mut().unwrap();
@@ -406,9 +569,13 @@ async fn fail_item(
 
             if attempts >= max_attempts {
                 obj.insert("status".into(), json!("blocked"));
-                obj.insert("blockedReason".into(), json!(format!(
-                    "Exceeded maxAttempts ({}). Last failure: {}", max_attempts, reason
-                )));
+                obj.insert(
+                    "blockedReason".into(),
+                    json!(format!(
+                        "Exceeded maxAttempts ({}). Last failure: {}",
+                        max_attempts, reason
+                    )),
+                );
                 let dlq_entry = json!({"ts": now, "author": "rcc-api", "type": "dlq", "text": "Moved to blocked — maxAttempts exceeded"});
                 if let Some(j) = obj.get_mut("journal").and_then(|j| j.as_array_mut()) {
                     j.push(journal_entry);
@@ -447,9 +614,16 @@ async fn keepalive_item(
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
 
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item_pos {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Item not found"})),
+        )
+            .into_response(),
         Some(pos) => {
             let item = &mut q.items[pos];
             let obj = item.as_object_mut().unwrap();
@@ -473,18 +647,33 @@ async fn stale_reset_item(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
 
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item_pos {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Item not found"})),
+        )
+            .into_response(),
         Some(pos) => {
             let item = &mut q.items[pos];
             let obj = item.as_object_mut().unwrap();
-            let prev_agent = obj.get("claimedBy").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            let prev_agent = obj
+                .get("claimedBy")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
             obj.insert("status".into(), json!("pending"));
             obj.insert("claimedBy".into(), json!(null));
             obj.insert("claimedAt".into(), json!(null));

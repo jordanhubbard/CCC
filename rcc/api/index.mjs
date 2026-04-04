@@ -44,6 +44,7 @@ const USERS_PATH         = process.env.USERS_PATH         || './data/users.json'
 const LLM_REGISTRY_PATH  = process.env.LLM_REGISTRY_PATH  || './data/llm-registry.json';
 const PROVIDERS_PATH     = process.env.PROVIDERS_PATH     || './data/providers.json';
 const TUNNEL_STATE_PATH  = process.env.TUNNEL_STATE_PATH  || './data/tunnel-state.json';
+const SWAP_STATE_PATH    = process.env.SWAP_STATE_PATH    || './data/swap-state.json';
 const TUNNEL_USER        = process.env.TUNNEL_USER        || 'tunnel';
 const TUNNEL_AUTH_KEYS   = process.env.TUNNEL_AUTH_KEYS   || '/home/tunnel/.ssh/authorized_keys';
 const TUNNEL_PORT_START  = parseInt(process.env.TUNNEL_PORT_START || '18080', 10);
@@ -1937,7 +1938,7 @@ const state = {
   BUS_LOG_PATH, ACK_LOG_PATH,
   EXEC_LOG_PATH, EXEC_LOG_PATH_ABS, AGENTS_PATH, CAPABILITIES_PATH, REPOS_PATH, PROJECTS_PATH,
   CALENDAR_PATH, REQUESTS_PATH, SECRETS_PATH, CONVERSATIONS_PATH, USERS_PATH,
-  LLM_REGISTRY_PATH, PROVIDERS_PATH, TUNNEL_STATE_PATH, TUNNEL_AUTH_KEYS,
+  LLM_REGISTRY_PATH, PROVIDERS_PATH, TUNNEL_STATE_PATH, TUNNEL_AUTH_KEYS, SWAP_STATE_PATH,
   TUNNEL_PORT_START, SBOM_DIR, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, SLACK_API,
   START_TIME, STALE_THRESHOLDS,
   // mutable collections

@@ -1,12 +1,13 @@
 use axum::Router;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+pub mod brain;
+pub mod config;
 mod routes;
 pub mod state;
-pub mod brain;
 pub mod supervisor;
 
 pub use state::AppState;
@@ -20,64 +21,34 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let port: u16 = std::env::var("RCC_PORT")
-        .unwrap_or_else(|_| "8789".to_string())
-        .parse()
-        .unwrap_or(8789);
-
-    let data_dir = std::env::var("RCC_DATA_DIR")
-        .unwrap_or_else(|_| "./data".to_string());
-
-    let queue_path = std::env::var("QUEUE_PATH")
-        .unwrap_or_else(|_| format!("{}/queue.json", data_dir));
-    let agents_path = std::env::var("AGENTS_PATH")
-        .unwrap_or_else(|_| format!("{}/agents.json", data_dir));
-    let secrets_path = std::env::var("SECRETS_PATH")
-        .unwrap_or_else(|_| format!("{}/secrets.json", data_dir));
-    let bus_log_path = std::env::var("BUS_LOG_PATH")
-        .unwrap_or_else(|_| format!("{}/bus.jsonl", data_dir));
-    let projects_path = std::env::var("PROJECTS_PATH")
-        .unwrap_or_else(|_| format!("{}/projects.json", data_dir));
-    let metrics_path = std::env::var("METRICS_PATH")
-        .unwrap_or_else(|_| format!("{}/metrics.json", data_dir));
-
-    let auth_tokens: std::collections::HashSet<String> = std::env::var("RCC_AUTH_TOKENS")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let cfg = config::load();
+    let port = cfg.port;
 
     // Build optional process supervisor
-    let supervisor_handle = if std::env::var("SUPERVISOR_ENABLED").unwrap_or_default() == "true" {
-        let tokenhub_bin = std::env::var("TOKENHUB_BIN")
-            .unwrap_or_else(|_| "/home/jkh/tokenhub/bin/tokenhub".to_string());
-        let processes = vec![
-            supervisor::ManagedProcess {
-                name: "tokenhub".to_string(),
-                command: tokenhub_bin,
-                args: vec![],
-                env: vec![],
-                health_url: Some("http://127.0.0.1:8090/health".to_string()),
-                restart_delay_ms: 5000,
-            },
-        ];
+    let supervisor_handle = if cfg.supervisor_enabled {
+        let processes = vec![supervisor::ManagedProcess {
+            name: "tokenhub".to_string(),
+            command: cfg.tokenhub_bin.clone(),
+            args: vec![],
+            env: vec![],
+            health_url: Some("http://127.0.0.1:8090/health".to_string()),
+            restart_delay_ms: 5000,
+        }];
         let (sup, handle) = supervisor::Supervisor::new(processes);
         tokio::spawn(sup.run());
         tracing::info!("Supervisor enabled: managing tokenhub");
         Some(handle)
     } else {
-        tracing::info!("Supervisor disabled (set SUPERVISOR_ENABLED=true to enable)");
+        tracing::info!("Supervisor disabled");
         None
     };
 
     // Build MinIO/S3 client
-    let s3_bucket = std::env::var("MINIO_BUCKET").unwrap_or_else(|_| "agents".to_string());
+    let s3_bucket = cfg.minio_bucket.clone();
     let s3_client = {
-        let endpoint = std::env::var("MINIO_ENDPOINT")
-            .unwrap_or_else(|_| "http://localhost:9000".to_string());
-        let access_key = std::env::var("MINIO_ACCESS_KEY").ok();
-        let secret_key = std::env::var("MINIO_SECRET_KEY").ok();
+        let endpoint = cfg.minio_endpoint.clone();
+        let access_key = cfg.minio_access_key.clone();
+        let secret_key = cfg.minio_secret_key.clone();
         match (access_key, secret_key) {
             (Some(ak), Some(sk)) => {
                 use aws_credential_types::Credentials;
@@ -101,18 +72,16 @@ async fn main() {
     };
 
     let app_state = Arc::new(AppState {
-        auth_tokens,
-        queue_path,
-        agents_path,
-        secrets_path,
-        bus_log_path,
-        projects_path,
-        metrics_path,
+        auth_tokens: cfg.auth_tokens,
+        queue_path: cfg.queue_path,
+        agents_path: cfg.agents_path,
+        secrets_path: cfg.secrets_path,
+        bus_log_path: cfg.bus_log_path,
+        projects_path: cfg.projects_path,
         queue: RwLock::new(state::QueueData::default()),
         agents: RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
         secrets: RwLock::new(serde_json::Map::new()),
         projects: tokio::sync::RwLock::new(Vec::new()),
-        metrics: tokio::sync::RwLock::new(serde_json::Value::Null),
         brain: Arc::new(brain::BrainQueue::new()),
         bus_tx: tokio::sync::broadcast::channel(256).0,
         bus_seq: std::sync::atomic::AtomicU64::new(0),
@@ -166,7 +135,11 @@ async fn main() {
     tracing::info!("rcc-server listening on port {}", port);
     tracing::info!(
         "Auth: {} token(s) configured",
-        if app_state.auth_tokens.is_empty() { "OPEN".to_string() } else { format!("{}", app_state.auth_tokens.len()) }
+        if app_state.auth_tokens.is_empty() {
+            "OPEN".to_string()
+        } else {
+            format!("{}", app_state.auth_tokens.len())
+        }
     );
 
     // Spawn periodic flush
@@ -196,7 +169,9 @@ async fn main() {
 async fn shutdown_signal() {
     use tokio::signal;
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
     #[cfg(unix)]
     let terminate = async {

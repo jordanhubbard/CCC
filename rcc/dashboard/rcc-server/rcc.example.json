@@ -1,0 +1,23 @@
+{
+  "_comment": "rcc-server config — copy to ~/.rcc/rcc.json or set RCC_CONFIG env var. Env vars always override.",
+  "port": 8789,
+  "data_dir": "./data",
+  "auth_tokens": [],
+  "minio": {
+    "endpoint": "http://100.89.199.14:9000",
+    "bucket": "agents",
+    "access_key": "REPLACE_ME",
+    "secret_key": "REPLACE_ME"
+  },
+  "qdrant": {
+    "url": "http://100.89.199.14:6333",
+    "api_key": "REPLACE_ME"
+  },
+  "tokenhub": {
+    "url": "http://127.0.0.1:8090"
+  },
+  "supervisor": {
+    "enabled": false,
+    "tokenhub_bin": "/home/jkh/tokenhub/bin/tokenhub"
+  }
+}

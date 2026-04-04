@@ -1,3 +1,4 @@
+use crate::AppState;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -11,11 +12,10 @@ use axum::{
 use futures_util::stream::{self, Stream, StreamExt};
 use serde_json::{json, Value};
 use std::convert::Infallible;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::wrappers::BroadcastStream;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -30,20 +30,15 @@ async fn bus_stream(
     let replay = load_recent_bus_messages(&state.bus_log_path, 50).await;
 
     let rx = state.bus_tx.subscribe();
-    let live = BroadcastStream::new(rx)
-        .filter_map(|msg| async move {
-            match msg {
-                Ok(data) => Some(Ok(Event::default().data(data))),
-                Err(_) => None,
-            }
-        });
-
-    let connected = stream::once(async {
-        Ok(Event::default().data(r#"{"type":"connected"}"#))
+    let live = BroadcastStream::new(rx).filter_map(|msg| async move {
+        match msg {
+            Ok(data) => Some(Ok(Event::default().data(data))),
+            Err(_) => None,
+        }
     });
-    let replayed = stream::iter(replay.into_iter().map(|msg| {
-        Ok(Event::default().data(msg))
-    }));
+
+    let connected = stream::once(async { Ok(Event::default().data(r#"{"type":"connected"}"#)) });
+    let replayed = stream::iter(replay.into_iter().map(|msg| Ok(Event::default().data(msg))));
 
     let combined = connected.chain(replayed).chain(live);
     Sse::new(combined).keep_alive(
@@ -59,7 +54,11 @@ async fn bus_send(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     let seq = state.bus_seq.fetch_add(1, Ordering::SeqCst);
@@ -81,11 +80,10 @@ async fn bus_send(
     Json(json!({"ok": true, "message": msg})).into_response()
 }
 
-async fn bus_messages(
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+async fn bus_messages(State(state): State<Arc<AppState>>) -> Json<Value> {
     let msgs = load_recent_bus_messages(&state.bus_log_path, 100).await;
-    let parsed: Vec<Value> = msgs.iter()
+    let parsed: Vec<Value> = msgs
+        .iter()
         .filter_map(|s| serde_json::from_str(s).ok())
         .collect();
     Json(json!(parsed))
@@ -96,7 +94,8 @@ async fn load_recent_bus_messages(path: &str, limit: usize) -> Vec<String> {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    content.lines()
+    content
+        .lines()
         .filter(|l| !l.trim().is_empty())
         .rev()
         .take(limit)
@@ -112,7 +111,11 @@ async fn append_line(path: &str, line: &str) -> std::io::Result<()> {
     if let Some(parent) = std::path::Path::new(path).parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(path).await?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
     file.write_all(line.as_bytes()).await?;
     Ok(())
 }

@@ -1,7 +1,7 @@
+use crate::AppState;
 use axum::{extract::State, response::Json, routing::get, Router};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/api/supervisor/status", get(status_handler))

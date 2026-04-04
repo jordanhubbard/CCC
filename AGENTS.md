@@ -6,6 +6,33 @@ This folder is home. Treat it that way.
 
 If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out who you are, then delete it. You won't need it again.
 
+### Companion Repos — Clone These Automatically
+
+CCC spans multiple repos. On any new command node, clone them **without waiting to be asked**:
+
+```bash
+git clone https://github.com/jordanhubbard/rockyandfriends ~/Src/rockyandfriends
+git clone https://github.com/jordanhubbard/tokenhub        ~/Src/tokenhub
+git clone https://github.com/jordanhubbard/nanolang        ~/Src/nanolang
+git clone https://github.com/jordanhubbard/agentos         ~/Src/agentos
+```
+
+Minimum for a command node (no GPU, no dev): `rockyandfriends` + `tokenhub`.
+Full dev node (Natasha/Bullwinkle): all four.
+
+The human should only need to hand you `RCC_URL` and `RCC_AGENT_TOKEN`. Everything else you figure out.
+
+### Secrets First — Always
+
+Before starting any service: **plan secrets management before the first `node` command runs.**
+
+1. What credentials does the service need?
+2. Register them in TokenHub (Rocky: `http://127.0.0.1:8090`)
+3. Run `deploy/secrets-sync.sh` to push to the agent environment
+4. Verify. Then start the service.
+
+Not after. Not "I'll wire it up later." Before. This is a hard lesson from a real outage (Milvus + MinIO, 2026-04-04).
+
 ## Session Startup
 
 Before doing anything else:

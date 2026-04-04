@@ -1,8 +1,8 @@
+use crate::AppState;
 /// /api/projects/:owner/:repo/metrics — Project CI metrics store
 ///
 /// Persists metrics (e.g. coverage_pct, test_count, build_time) as JSONL.
 /// Agents and CI pipelines POST new data points; the dashboard reads a sparkline.
-
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::AppState;
 
 /// A single time-series data point stored in the metrics table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,8 +31,7 @@ static METRICS_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn metrics_path() -> &'static str {
     METRICS_PATH.get_or_init(|| {
-        std::env::var("METRICS_PATH")
-            .unwrap_or_else(|_| "./data/metrics.jsonl".to_string())
+        std::env::var("METRICS_PATH").unwrap_or_else(|_| "./data/metrics.jsonl".to_string())
     })
 }
 
@@ -79,11 +77,10 @@ async fn append_metric(entry: &Value) {
 }
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route(
-            "/api/projects/:owner/:repo/metrics",
-            get(get_metrics).post(post_metric),
-        )
+    Router::new().route(
+        "/api/projects/:owner/:repo/metrics",
+        get(get_metrics).post(post_metric),
+    )
 }
 
 // ── POST /api/projects/:owner/:repo/metrics ───────────────────────────────
@@ -201,7 +198,8 @@ async fn get_metrics(
     let results: Vec<Value> = results.into_iter().cloned().collect();
 
     // Build sparkline: group by metric name, latest N values
-    let mut sparklines: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+    let mut sparklines: std::collections::HashMap<String, Vec<f64>> =
+        std::collections::HashMap::new();
     for e in &results {
         let m = e.get("metric").and_then(|v| v.as_str()).unwrap_or("?");
         let v = e.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);

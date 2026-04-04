@@ -1,5 +1,5 @@
+use crate::AppState;
 /// /routes/setup.rs — RCC setup/config API and status endpoint.
-
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -9,7 +9,6 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -25,9 +24,11 @@ async fn get_setup_status(State(state): State<Arc<AppState>>) -> impl IntoRespon
     let tokenhub_url = std::env::var("TOKENHUB_URL").unwrap_or_default();
     let has_tokenhub = !tokenhub_url.is_empty()
         && tokenhub_url != "http://127.0.0.1:8090"  // non-default
-        || !tokenhub_url.is_empty();                 // any configured value counts
+        || !tokenhub_url.is_empty(); // any configured value counts
 
-    let has_minio = !std::env::var("MINIO_ENDPOINT").unwrap_or_default().is_empty();
+    let has_minio = !std::env::var("MINIO_ENDPOINT")
+        .unwrap_or_default()
+        .is_empty();
 
     let agent_name = std::env::var("AGENT_NAME").unwrap_or_else(|_| "rcc".to_string());
 
@@ -42,12 +43,13 @@ async fn get_setup_status(State(state): State<Arc<AppState>>) -> impl IntoRespon
 
 // ── GET /api/setup/config ─────────────────────────────────────────────────
 
-async fn get_config(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn get_config(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let port: u16 = std::env::var("RCC_PORT")
@@ -79,23 +81,33 @@ async fn put_config(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let obj = match body.as_object() {
         Some(o) => o,
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error":"body must be a JSON object"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"body must be a JSON object"})),
+            )
+                .into_response()
+        }
     };
 
     let allowed = [
-        ("agent_name",       "AGENT_NAME"),
-        ("public_url",       "RCC_HOST_PUBLIC"),
-        ("tokenhub_url",     "TOKENHUB_URL"),
-        ("minio_endpoint",   "MINIO_ENDPOINT"),
-        ("minio_bucket",     "MINIO_BUCKET"),
-        ("log_level",        "RUST_LOG"),
+        ("agent_name", "AGENT_NAME"),
+        ("public_url", "RCC_HOST_PUBLIC"),
+        ("tokenhub_url", "TOKENHUB_URL"),
+        ("minio_endpoint", "MINIO_ENDPOINT"),
+        ("minio_bucket", "MINIO_BUCKET"),
+        ("log_level", "RUST_LOG"),
         ("crush_server_url", "CRUSH_SERVER_URL"),
-        ("sc_url",           "SC_URL"),
+        ("sc_url", "SC_URL"),
     ];
 
     let mut applied = Vec::new();
@@ -117,5 +129,6 @@ async fn put_config(
         "ok": true,
         "applied": applied,
         "note": "Runtime-only. Restart rcc-server or persist to .env for permanence."
-    })).into_response()
+    }))
+    .into_response()
 }
