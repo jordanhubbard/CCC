@@ -22,7 +22,7 @@ static CATALOG: &[(&str, &str, &str, &str)] = &[
     ("sherman-vllm",   "Sherman vLLM",      "http://127.0.0.1:18082/health",      "sherman"),
     ("snidely-vllm",   "Snidely vLLM",      "http://127.0.0.1:18083/health",      "snidely"),
     ("dudley-vllm",    "Dudley vLLM",       "http://127.0.0.1:18084/health",      "dudley"),
-    ("milvus",         "Milvus",            "http://100.89.199.14:9091/healthz",  "do-host1"),
+    ("qdrant",         "Qdrant",            "http://146.190.134.110:6333/",       "do-host1"),
 ];
 
 const CACHE_TTL_SECS: u64 = 30;
