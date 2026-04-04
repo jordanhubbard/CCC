@@ -1,8 +1,8 @@
 {
   "boris": {
     "id": "boris",
-    "model": "nemotron-3-super-120b-fp8",
-    "baseUrl": "http://135.225.53.8:8080/v1",
+    "model": "gemma",
+    "baseUrl": "http://localhost:18080/v1",
     "local_port": 18080,
     "status": "online",
     "owner": "boris",
@@ -11,15 +11,26 @@
       "large",
       "gpu",
       "l40",
-      "vllm"
+      "vllm",
+      "gemma"
     ],
     "createdAt": "2026-03-29T02:08:00.871Z",
-    "updatedAt": "2026-03-29T02:08:01.130Z"
+    "updatedAt": "2026-03-29T02:08:01.130Z",
+    "model_path": "google/gemma-4-31B-it",
+    "served_model_name": "gemma",
+    "capabilities": {
+      "tool_calls": true,
+      "tool_call_parser": "hf_internvl",
+      "reasoning": false,
+      "kv_cache": "none",
+      "tensor_parallel": 4,
+      "attention_backend": "TRITON_ATTN"
+    }
   },
   "peabody": {
     "id": "peabody",
-    "model": "nemotron",
-    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "model": "gemma",
+    "model_path": "google/gemma-4-31B-it",
     "baseUrl": "http://localhost:18081/v1",
     "local_port": 18081,
     "status": "online",
@@ -37,25 +48,24 @@
       "gpu",
       "l40",
       "vllm",
-      "nemotron",
-      "fp8"
+      "gemma"
     ],
     "capabilities": {
       "tool_calls": true,
-      "tool_call_parser": "qwen3_coder",
-      "reasoning": true,
-      "reasoning_parser": "nemotron_v3",
-      "kv_cache": "fp8",
+      "tool_call_parser": "hf_internvl",
+      "reasoning": false,
+      "kv_cache": "none",
       "tensor_parallel": 4,
       "attention_backend": "TRITON_ATTN"
     },
     "createdAt": "2026-04-02T02:04:00.000Z",
-    "updatedAt": "2026-04-02T02:04:00.000Z"
+    "updatedAt": "2026-04-02T02:04:00.000Z",
+    "served_model_name": "gemma"
   },
   "sherman": {
     "id": "sherman",
-    "model": "nemotron",
-    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "model": "gemma",
+    "model_path": "google/gemma-4-31B-it",
     "baseUrl": "http://localhost:18082/v1",
     "local_port": 18082,
     "status": "unknown",
@@ -70,16 +80,24 @@
       "gpu",
       "l40",
       "vllm",
-      "nemotron",
-      "fp8"
+      "gemma"
     ],
     "createdAt": "2026-04-02T02:04:00.000Z",
-    "updatedAt": "2026-04-02T02:04:00.000Z"
+    "updatedAt": "2026-04-02T02:04:00.000Z",
+    "served_model_name": "gemma",
+    "capabilities": {
+      "tool_calls": true,
+      "tool_call_parser": "hf_internvl",
+      "reasoning": false,
+      "kv_cache": "none",
+      "tensor_parallel": 4,
+      "attention_backend": "TRITON_ATTN"
+    }
   },
   "snidely": {
     "id": "snidely",
-    "model": "nemotron",
-    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "model": "gemma",
+    "model_path": "google/gemma-4-31B-it",
     "baseUrl": "http://localhost:18083/v1",
     "local_port": 18083,
     "status": "unknown",
@@ -94,16 +112,24 @@
       "gpu",
       "l40",
       "vllm",
-      "nemotron",
-      "fp8"
+      "gemma"
     ],
     "createdAt": "2026-04-02T02:04:00.000Z",
-    "updatedAt": "2026-04-02T02:04:00.000Z"
+    "updatedAt": "2026-04-02T02:04:00.000Z",
+    "served_model_name": "gemma",
+    "capabilities": {
+      "tool_calls": true,
+      "tool_call_parser": "hf_internvl",
+      "reasoning": false,
+      "kv_cache": "none",
+      "tensor_parallel": 4,
+      "attention_backend": "TRITON_ATTN"
+    }
   },
   "dudley": {
     "id": "dudley",
-    "model": "nemotron",
-    "model_path": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8",
+    "model": "gemma",
+    "model_path": "google/gemma-4-31B-it",
     "baseUrl": "http://localhost:18084/v1",
     "local_port": 18084,
     "status": "unknown",
@@ -118,10 +144,18 @@
       "gpu",
       "l40",
       "vllm",
-      "nemotron",
-      "fp8"
+      "gemma"
     ],
     "createdAt": "2026-04-02T02:04:00.000Z",
-    "updatedAt": "2026-04-02T02:04:00.000Z"
+    "updatedAt": "2026-04-02T02:04:00.000Z",
+    "served_model_name": "gemma",
+    "capabilities": {
+      "tool_calls": true,
+      "tool_call_parser": "hf_internvl",
+      "reasoning": false,
+      "kv_cache": "none",
+      "tensor_parallel": 4,
+      "attention_backend": "TRITON_ATTN"
+    }
   }
 }

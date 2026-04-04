@@ -2903,11 +2903,12 @@ echo "│  Phase 9: vLLM Service                                  │"
 echo "└─────────────────────────────────────────────────────────┘"
 
 VLLM_VENV="\$HOME/.vllm-venv"
-VLLM_MODEL_DIR="/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8"
+VLLM_MODEL_DIR="\${VLLM_MODEL_DIR:-/tmp/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8}"
+VLLM_SERVED_NAME="\${VLLM_SERVED_NAME:-\$(basename \$VLLM_MODEL_DIR | tr '[:upper:]' '[:lower:]' | sed 's/-fp8.*//;s/-it$//')}"
 TP_SIZE=\$(nvidia-smi --list-gpus 2>/dev/null | wc -l || echo 1)
 
 # Container-aware vLLM service setup: systemd user > supervisord > nohup
-VLLM_START_CMD="\$VLLM_VENV/bin/python3 -m vllm.entrypoints.openai.api_server --model \$VLLM_MODEL_DIR --served-model-name nemotron --port 8080 --tensor-parallel-size \$TP_SIZE --max-model-len 262144 --enforce-eager --trust-remote-code"
+VLLM_START_CMD="\$VLLM_VENV/bin/python3 -m vllm.entrypoints.openai.api_server --model \$VLLM_MODEL_DIR --served-model-name \$VLLM_SERVED_NAME --port 8080 --tensor-parallel-size \$TP_SIZE --max-model-len 262144 --enforce-eager --trust-remote-code"
 
 # Re-use HAS_SYSTEMD / HAS_SUPERVISORD detected in phase 8 (or re-detect)
 if [ -z "\${HAS_SYSTEMD:-}" ]; then
