@@ -1,8 +1,8 @@
-/// /api/memory/* and /api/vector/* — Milvus vector memory (SOA-007)
+use crate::AppState;
+/// /api/memory/* and /api/vector/* — Qdrant vector memory (SOA-007)
 ///
 /// Embeddings via tokenhub at http://127.0.0.1:8090/v1/embeddings (text-embedding-3-large)
-/// Milvus REST API v2 at http://100.89.199.14:19530
-
+/// Qdrant REST API at QDRANT_URL (default http://127.0.0.1:6333)
 use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
@@ -14,14 +14,14 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use crate::AppState;
 
-const MILVUS_BASE: &str = "http://100.89.199.14:19530";
 const TOKENHUB_BASE: &str = "http://127.0.0.1:8090";
 const EMBED_MODEL: &str = "text-embedding-3-large";
 const RCC_MEMORY_COLLECTION: &str = "rcc_memory";
 
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+static QDRANT_BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static QDRANT_API_KEY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
 fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(|| {
@@ -32,9 +32,19 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
+fn qdrant_base() -> &'static str {
+    QDRANT_BASE.get_or_init(|| {
+        std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://127.0.0.1:6333".to_string())
+    })
+}
+
+fn qdrant_api_key() -> &'static Option<String> {
+    QDRANT_API_KEY.get_or_init(|| std::env::var("QDRANT_API_KEY").ok())
+}
+
 // ── Embedding helper ──────────────────────────────────────────────────────────
 
-async fn embed(text: &str) -> Result<Vec<f64>, String> {
+async fn embed(text: &str) -> Result<Vec<f32>, String> {
     let resp = http_client()
         .post(format!("{}/v1/embeddings", TOKENHUB_BASE))
         .json(&json!({ "model": EMBED_MODEL, "input": text }))
@@ -42,146 +52,185 @@ async fn embed(text: &str) -> Result<Vec<f64>, String> {
         .await
         .map_err(|e| format!("tokenhub request failed: {}", e))?;
 
-    let body: Value = resp.json().await
+    let body: Value = resp
+        .json()
+        .await
         .map_err(|e| format!("tokenhub response parse failed: {}", e))?;
 
     body["data"][0]["embedding"]
         .as_array()
         .ok_or_else(|| format!("no embedding in tokenhub response: {:?}", body))?
         .iter()
-        .map(|v| v.as_f64().ok_or_else(|| "non-float in embedding".to_string()))
+        .map(|v| {
+            v.as_f64()
+                .map(|f| f as f32)
+                .ok_or_else(|| "non-float in embedding".to_string())
+        })
         .collect()
 }
 
 // ── Content-addressed ID ──────────────────────────────────────────────────────
 
-fn content_id(agent: &str, text: &str) -> String {
+fn content_id(agent: &str, text: &str) -> (String, u64) {
     let prefix: String = text.chars().take(128).collect();
     let input = format!("{}:{}", agent, prefix);
-    hex::encode(Sha256::digest(input.as_bytes()))
+    let digest = Sha256::digest(input.as_bytes());
+    let id_hex = hex::encode(&digest);
+    let id_u64 = u64::from_be_bytes(digest[0..8].try_into().expect("slice len 8"));
+    (id_hex, id_u64)
 }
 
-// ── Milvus helpers ────────────────────────────────────────────────────────────
+// ── Qdrant helpers ────────────────────────────────────────────────────────────
 
-async fn milvus_upsert_batch(collection: &str, records: Vec<Value>) -> Result<(), String> {
+fn qdrant_headers() -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+    if let Some(key) = qdrant_api_key() {
+        if let Ok(val) = reqwest::header::HeaderValue::from_str(key) {
+            headers.insert("api-key", val);
+        }
+    }
+    headers
+}
+
+async fn qdrant_upsert_batch(collection: &str, points: Vec<Value>) -> Result<(), String> {
+    let url = format!(
+        "{}/collections/{}/points?wait=true",
+        qdrant_base(),
+        collection
+    );
     let resp = http_client()
-        .post(format!("{}/v2/vectordb/entities/upsert", MILVUS_BASE))
-        .json(&json!({ "collectionName": collection, "data": records }))
+        .put(&url)
+        .headers(qdrant_headers())
+        .json(&json!({ "points": points }))
         .send()
         .await
-        .map_err(|e| format!("milvus upsert request failed: {}", e))?;
+        .map_err(|e| format!("qdrant upsert request failed: {}", e))?;
 
-    let body: Value = resp.json().await
-        .map_err(|e| format!("milvus upsert response parse failed: {}", e))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("qdrant upsert response parse failed: {}", e))?;
 
-    let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if code != 0 {
-        return Err(format!("milvus upsert error {}: {:?}", code, body.get("message")));
+    let status = body.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "ok" {
+        return Err(format!("qdrant upsert error: {:?}", body));
     }
     Ok(())
 }
 
-async fn milvus_upsert(collection: &str, record: Value) -> Result<(), String> {
-    let resp = http_client()
-        .post(format!("{}/v2/vectordb/entities/upsert", MILVUS_BASE))
-        .json(&json!({ "collectionName": collection, "data": [record] }))
-        .send()
-        .await
-        .map_err(|e| format!("milvus upsert request failed: {}", e))?;
-
-    let body: Value = resp.json().await
-        .map_err(|e| format!("milvus upsert response parse failed: {}", e))?;
-
-    let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if code != 0 {
-        return Err(format!("milvus upsert error {}: {:?}", code, body.get("message")));
-    }
-    Ok(())
+async fn qdrant_upsert(collection: &str, point: Value) -> Result<(), String> {
+    qdrant_upsert_batch(collection, vec![point]).await
 }
 
-async fn milvus_search(
+async fn qdrant_search(
     collection: &str,
-    vector: Vec<f64>,
+    vector: Vec<f32>,
     limit: usize,
-    filter: Option<&str>,
-    output_fields: &[&str],
+    filter: Option<Value>,
 ) -> Result<Vec<Value>, String> {
     let mut req = json!({
-        "collectionName": collection,
-        "data": [vector],
+        "vector": vector,
         "limit": limit,
-        "outputFields": output_fields,
+        "with_payload": true,
     });
     if let Some(f) = filter {
-        req["filter"] = json!(f);
+        req["filter"] = f;
     }
 
+    let url = format!("{}/collections/{}/points/search", qdrant_base(), collection);
     let resp = http_client()
-        .post(format!("{}/v2/vectordb/entities/search", MILVUS_BASE))
+        .post(&url)
+        .headers(qdrant_headers())
         .json(&req)
         .send()
         .await
-        .map_err(|e| format!("milvus search request failed: {}", e))?;
+        .map_err(|e| format!("qdrant search request failed: {}", e))?;
 
-    let body: Value = resp.json().await
-        .map_err(|e| format!("milvus search response parse failed: {}", e))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("qdrant search response parse failed: {}", e))?;
 
-    let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if code != 0 {
-        return Err(format!("milvus search error {}: {:?}", code, body.get("message")));
+    let status = body.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "ok" {
+        return Err(format!("qdrant search error: {:?}", body));
     }
 
-    Ok(body["data"].as_array().cloned().unwrap_or_default())
+    Ok(body["result"].as_array().cloned().unwrap_or_default())
 }
 
-async fn milvus_query(
+async fn qdrant_scroll(
     collection: &str,
-    filter: &str,
+    filter: Option<Value>,
     limit: usize,
-    output_fields: &[&str],
 ) -> Result<Vec<Value>, String> {
-    let req = json!({
-        "collectionName": collection,
-        "filter": filter,
+    let mut req = json!({
         "limit": limit,
-        "outputFields": output_fields,
+        "with_payload": true,
     });
+    if let Some(f) = filter {
+        req["filter"] = f;
+    }
 
+    let url = format!("{}/collections/{}/points/scroll", qdrant_base(), collection);
     let resp = http_client()
-        .post(format!("{}/v2/vectordb/entities/query", MILVUS_BASE))
+        .post(&url)
+        .headers(qdrant_headers())
         .json(&req)
         .send()
         .await
-        .map_err(|e| format!("milvus query request failed: {}", e))?;
+        .map_err(|e| format!("qdrant scroll request failed: {}", e))?;
 
-    let body: Value = resp.json().await
-        .map_err(|e| format!("milvus query response parse failed: {}", e))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("qdrant scroll response parse failed: {}", e))?;
 
-    let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if code != 0 {
-        return Err(format!("milvus query error {}: {:?}", code, body.get("message")));
+    let status = body.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "ok" {
+        return Err(format!("qdrant scroll error: {:?}", body));
     }
 
-    Ok(body["data"].as_array().cloned().unwrap_or_default())
+    Ok(body["result"]["points"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default())
 }
 
-async fn milvus_list_collections() -> Result<Vec<Value>, String> {
+async fn qdrant_list_collections() -> Result<Vec<String>, String> {
+    let url = format!("{}/collections", qdrant_base());
     let resp = http_client()
-        .post(format!("{}/v2/vectordb/collections/list", MILVUS_BASE))
-        .json(&json!({}))
+        .get(&url)
+        .headers(qdrant_headers())
         .send()
         .await
-        .map_err(|e| format!("milvus list request failed: {}", e))?;
+        .map_err(|e| format!("qdrant list request failed: {}", e))?;
 
-    let body: Value = resp.json().await
-        .map_err(|e| format!("milvus list response parse failed: {}", e))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("qdrant list response parse failed: {}", e))?;
 
-    let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if code != 0 {
-        return Err(format!("milvus list error {}: {:?}", code, body.get("message")));
+    let status = body.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "ok" {
+        return Err(format!("qdrant list error: {:?}", body));
     }
 
-    Ok(body["data"].as_array().cloned().unwrap_or_default())
+    let names = body["result"]["collections"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|c| {
+            c.get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    Ok(names)
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -217,6 +266,8 @@ struct IngestBody {
     agent: Option<String>,
     #[serde(default)]
     source: Option<String>,
+    #[serde(default)]
+    source_type: Option<String>,
 }
 
 async fn memory_ingest(
@@ -225,15 +276,30 @@ async fn memory_ingest(
     Json(body): Json<IngestBody>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if body.text.is_empty() {
-        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "text required"}))).into_response();
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "text required"})),
+        )
+            .into_response();
     }
 
     let agent = body.agent.as_deref().unwrap_or("unknown");
-    let id = content_id(agent, &body.text);
+    let (id_hex, id_u64) = content_id(agent, &body.text);
     let source = body.source.as_deref().unwrap_or("api");
+    let source_type = body
+        .source_type
+        .as_deref()
+        .unwrap_or("api")
+        .chars()
+        .take(64)
+        .collect::<String>();
     let ts = chrono::Utc::now().timestamp_millis();
 
     // Log optional scope fields for tracing; not stored in rcc_memory schema
@@ -248,26 +314,44 @@ async fn memory_ingest(
 
     let vector = match embed(&body.text).await {
         Ok(v) => v,
-        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
     };
 
-    let content: String = body.text.chars().take(4096).collect();
+    let text_trunc: String = body.text.chars().take(4096).collect();
     let agent_trunc: String = agent.chars().take(32).collect();
     let source_trunc: String = source.chars().take(64).collect();
-    let id_trunc: String = id.chars().take(128).collect();
 
-    let record = json!({
-        "id":      id_trunc,
-        "vector":  vector,
-        "agent":   agent_trunc,
-        "content": content,
-        "source":  source_trunc,
-        "ts":      ts,
+    let point = json!({
+        "id": id_u64,
+        "vector": vector,
+        "payload": {
+            "text":        text_trunc,
+            "agent":       agent_trunc,
+            "source":      source_trunc,
+            "source_type": source_type,
+            "ingested_at": ts,
+            "ts":          ts,
+            "id_hex":      id_hex,
+        }
     });
 
-    match milvus_upsert(RCC_MEMORY_COLLECTION, record).await {
-        Ok(_) => (axum::http::StatusCode::OK, Json(json!({"ok": true, "id": id_trunc}))).into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+    match qdrant_upsert(RCC_MEMORY_COLLECTION, point).await {
+        Ok(_) => (
+            axum::http::StatusCode::OK,
+            Json(json!({"ok": true, "id": id_hex})),
+        )
+            .into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"ok": false, "error": e})),
+        )
+            .into_response(),
     }
 }
 
@@ -292,59 +376,88 @@ async fn memory_recall(
     Query(params): Query<RecallQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if params.q.is_empty() {
-        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "Missing query parameter q"}))).into_response();
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Missing query parameter q"})),
+        )
+            .into_response();
     }
 
     let vector = match embed(&params.q).await {
         Ok(v) => v,
-        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
     };
 
     let k = params.k.unwrap_or(8);
 
-    // Build Milvus filter from available schema fields (agent only; platform/channel_id not in schema)
-    let mut filter_parts: Vec<String> = Vec::new();
-    if let Some(agent) = &params.agent {
-        if !agent.is_empty() {
-            filter_parts.push(format!("agent == \"{}\"", agent.replace('"', "\\\"")));
-        }
-    }
-    // Log scope params for debugging even if not filterable
+    // Build Qdrant filter (agent only; platform/channel_id not in payload schema)
     tracing::debug!(platform = ?params.platform, channel_id = ?params.channel_id, "memory recall scope");
-    let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" && ")) };
+    let filter = params
+        .agent
+        .as_deref()
+        .filter(|a| !a.is_empty())
+        .map(|agent| json!({ "must": [{ "key": "agent", "match": { "value": agent } }] }));
 
-    let raw = match milvus_search(
-        RCC_MEMORY_COLLECTION,
-        vector,
-        k,
-        filter.as_deref(),
-        &["id", "content", "agent", "source", "ts"],
-    ).await {
+    let raw = match qdrant_search(RCC_MEMORY_COLLECTION, vector, k, filter).await {
         Ok(r) => r,
-        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
     };
 
-    let results: Vec<Value> = raw.into_iter().map(|r| json!({
-        "id":      r.get("id").cloned().unwrap_or(Value::Null),
-        "content": r.get("content").cloned().unwrap_or(Value::Null),
-        "agent":   r.get("agent").cloned().unwrap_or(Value::Null),
-        "source":  r.get("source").cloned().unwrap_or(Value::Null),
-        "score":   r.get("distance").cloned().unwrap_or(Value::Null),
-        "ts":      r.get("ts").cloned().unwrap_or(Value::Null),
-    })).collect();
+    let results: Vec<Value> = raw
+        .into_iter()
+        .map(|r| {
+            let p = &r["payload"];
+            json!({
+                "id":      p.get("id_hex").cloned().unwrap_or(Value::Null),
+                "text":    p.get("text").cloned().unwrap_or(Value::Null),
+                "agent":   p.get("agent").cloned().unwrap_or(Value::Null),
+                "source":  p.get("source").cloned().unwrap_or(Value::Null),
+                "score":   r.get("score").cloned().unwrap_or(Value::Null),
+                "ts":      p.get("ts").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
 
-    (axum::http::StatusCode::OK, Json(json!({"ok": true, "results": results}))).into_response()
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({"ok": true, "results": results})),
+    )
+        .into_response()
 }
 
 // ── GET /api/vector/health ────────────────────────────────────────────────────
 
 async fn vector_health() -> impl IntoResponse {
-    match milvus_list_collections().await {
-        Ok(collections) => (axum::http::StatusCode::OK, Json(json!({"ok": true, "collections": collections}))).into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+    match qdrant_list_collections().await {
+        Ok(collections) => (
+            axum::http::StatusCode::OK,
+            Json(json!({"ok": true, "collections": collections})),
+        )
+            .into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"ok": false, "error": e})),
+        )
+            .into_response(),
     }
 }
 
@@ -365,43 +478,68 @@ async fn vector_search(
     Query(params): Query<VectorSearchQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if params.q.is_empty() {
-        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "Missing query parameter q"}))).into_response();
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Missing query parameter q"})),
+        )
+            .into_response();
     }
 
     let vector = match embed(&params.q).await {
         Ok(v) => v,
-        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
     };
 
     let k = params.k.unwrap_or(10);
     let collections_param = params.collections.as_deref().unwrap_or("all");
 
     let target_collections: Vec<String> = if collections_param == "all" {
-        match milvus_list_collections().await {
-            Ok(cols) => cols.iter()
-                .filter_map(|c| c.as_str().map(|s| s.to_string()))
-                .collect(),
-            Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        match qdrant_list_collections().await {
+            Ok(cols) => cols,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"ok": false, "error": e})),
+                )
+                    .into_response()
+            }
         }
     } else {
-        collections_param.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        collections_param
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     };
 
     let mut all_results: Vec<Value> = Vec::new();
     for col in &target_collections {
-        match milvus_search(col, vector.clone(), k, None, &["id", "content", "agent", "source", "ts"]).await {
+        match qdrant_search(col, vector.clone(), k, None).await {
             Ok(hits) => {
-                for mut hit in hits {
-                    if let Some(obj) = hit.as_object_mut() {
-                        obj.insert("collection".to_string(), json!(col));
-                        if let Some(dist) = obj.remove("distance") {
-                            obj.insert("score".to_string(), dist);
-                        }
-                    }
-                    all_results.push(hit);
+                for hit in hits {
+                    let p = &hit["payload"];
+                    all_results.push(json!({
+                        "collection": col,
+                        "id":     p.get("id_hex").cloned().unwrap_or(Value::Null),
+                        "text":   p.get("text").cloned().unwrap_or(Value::Null),
+                        "agent":  p.get("agent").cloned().unwrap_or(Value::Null),
+                        "source": p.get("source").cloned().unwrap_or(Value::Null),
+                        "score":  hit.get("score").cloned().unwrap_or(Value::Null),
+                        "ts":     p.get("ts").cloned().unwrap_or(Value::Null),
+                    }));
                 }
             }
             Err(e) => tracing::warn!("vector search on collection {}: {}", col, e),
@@ -415,7 +553,11 @@ async fn vector_search(
     });
     all_results.truncate(k);
 
-    (axum::http::StatusCode::OK, Json(json!({"ok": true, "results": all_results}))).into_response()
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({"ok": true, "results": all_results})),
+    )
+        .into_response()
 }
 
 // ── POST /api/vector/upsert ───────────────────────────────────────────────────
@@ -435,34 +577,60 @@ async fn vector_upsert(
     Json(body): Json<VectorUpsertBody>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if body.collection.is_empty() || body.id.is_empty() || body.text.is_empty() {
-        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "Missing required fields: collection, id, text"}))).into_response();
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Missing required fields: collection, id, text"})),
+        )
+            .into_response();
     }
 
     let vector = match embed(&body.text).await {
         Ok(v) => v,
-        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
     };
 
-    let mut record = json!({
-        "id":     body.id,
-        "vector": vector,
-        "content": body.text,
-    });
+    // Derive numeric point ID from the provided string id via sha256
+    let digest = Sha256::digest(body.id.as_bytes());
+    let id_u64 = u64::from_be_bytes(digest[0..8].try_into().expect("slice len 8"));
 
+    let mut payload = json!({
+        "text":    body.text,
+        "id_hex":  body.id,
+    });
     if let Some(meta) = body.metadata {
-        if let (Some(meta_obj), Some(rec_obj)) = (meta.as_object(), record.as_object_mut()) {
+        if let (Some(meta_obj), Some(pay_obj)) = (meta.as_object(), payload.as_object_mut()) {
             for (k, v) in meta_obj {
-                rec_obj.entry(k.clone()).or_insert_with(|| v.clone());
+                pay_obj.entry(k.clone()).or_insert_with(|| v.clone());
             }
         }
     }
 
-    match milvus_upsert(&body.collection, record).await {
+    let point = json!({
+        "id":      id_u64,
+        "vector":  vector,
+        "payload": payload,
+    });
+
+    match qdrant_upsert(&body.collection, point).await {
         Ok(_) => (axum::http::StatusCode::OK, Json(json!({"ok": true}))).into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"ok": false, "error": e})),
+        )
+            .into_response(),
     }
 }
 
@@ -477,6 +645,8 @@ struct BulkIngestItem {
     agent: Option<String>,
     #[serde(default)]
     source: Option<String>,
+    #[serde(default)]
+    source_type: Option<String>,
 }
 
 async fn memory_ingest_bulk(
@@ -485,46 +655,79 @@ async fn memory_ingest_bulk(
     Json(items): Json<Vec<BulkIngestItem>>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if items.is_empty() {
         return (StatusCode::OK, Json(json!({"ok": true, "ingested": 0}))).into_response();
     }
 
     let ts = chrono::Utc::now().timestamp_millis();
-    let mut records: Vec<Value> = Vec::new();
+    let mut points: Vec<Value> = Vec::new();
 
     for item in &items {
-        if item.text.is_empty() { continue; }
+        if item.text.is_empty() {
+            continue;
+        }
         let agent = item.agent.as_deref().unwrap_or("unknown");
         let source = item.source.as_deref().unwrap_or("api");
-        let id = item.id.as_deref()
-            .map(|s| s.chars().take(128).collect::<String>())
-            .unwrap_or_else(|| content_id(agent, &item.text));
+        let source_type = item
+            .source_type
+            .as_deref()
+            .unwrap_or("api")
+            .chars()
+            .take(64)
+            .collect::<String>();
+
+        let (id_hex, id_u64) = if let Some(s) = item.id.as_deref() {
+            let digest = Sha256::digest(s.as_bytes());
+            let u = u64::from_be_bytes(digest[0..8].try_into().expect("slice len 8"));
+            (s.chars().take(128).collect::<String>(), u)
+        } else {
+            content_id(agent, &item.text)
+        };
 
         let vector = match embed(&item.text).await {
             Ok(v) => v,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"ok": false, "error": e})),
+                )
+                    .into_response()
+            }
         };
 
-        records.push(json!({
-            "id":      id,
-            "vector":  vector,
-            "agent":   agent.chars().take(32).collect::<String>(),
-            "content": item.text.chars().take(4096).collect::<String>(),
-            "source":  source.chars().take(64).collect::<String>(),
-            "ts":      ts,
+        points.push(json!({
+            "id": id_u64,
+            "vector": vector,
+            "payload": {
+                "text":        item.text.chars().take(4096).collect::<String>(),
+                "agent":       agent.chars().take(32).collect::<String>(),
+                "source":      source.chars().take(64).collect::<String>(),
+                "source_type": source_type,
+                "ingested_at": ts,
+                "ts":          ts,
+                "id_hex":      id_hex,
+            }
         }));
     }
 
-    let n = records.len();
+    let n = points.len();
     if n == 0 {
         return (StatusCode::OK, Json(json!({"ok": true, "ingested": 0}))).into_response();
     }
 
-    match milvus_upsert_batch(RCC_MEMORY_COLLECTION, records).await {
+    match qdrant_upsert_batch(RCC_MEMORY_COLLECTION, points).await {
         Ok(_) => (StatusCode::OK, Json(json!({"ok": true, "ingested": n}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"ok": false, "error": e})),
+        )
+            .into_response(),
     }
 }
 
@@ -546,43 +749,58 @@ async fn memory_recent(
     Query(params): Query<RecentQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     let limit = params.limit.unwrap_or(20).min(100);
 
-    // ts is stored as VarChar (stringified millis) — use string comparisons only
-    let mut filter_parts: Vec<String> = vec!["id != \"\"".to_string()];
+    // Build Qdrant filter: agent match and/or ts >= since (stored as numeric millis)
+    let mut must: Vec<Value> = Vec::new();
     if let Some(agent) = &params.agent {
         if !agent.is_empty() {
-            filter_parts.push(format!("agent == \"{}\"", agent.replace('"', "\\\"")));
+            must.push(json!({ "key": "agent", "match": { "value": agent } }));
         }
     }
     if let Some(since) = &params.since {
-        if chrono::DateTime::parse_from_rfc3339(since).is_ok() {
-            // ts is VarChar storing ISO-8601 strings — compare lexicographically
-            filter_parts.push(format!("ts >= \"{}\"", since.replace('"', "\\\"")));
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(since) {
+            let since_ms = dt.timestamp_millis();
+            must.push(json!({ "key": "ts", "range": { "gte": since_ms } }));
         }
     }
-    let filter = filter_parts.join(" && ");
-
-    let raw = match milvus_query(
-        RCC_MEMORY_COLLECTION,
-        &filter,
-        limit,
-        &["id", "content", "agent", "source", "ts"],
-    ).await {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
+    let filter = if must.is_empty() {
+        None
+    } else {
+        Some(json!({ "must": must }))
     };
 
-    let mut items: Vec<Value> = raw.into_iter().map(|r| json!({
-        "id":      r.get("id").cloned().unwrap_or(Value::Null),
-        "content": r.get("content").cloned().unwrap_or(Value::Null),
-        "agent":   r.get("agent").cloned().unwrap_or(Value::Null),
-        "source":  r.get("source").cloned().unwrap_or(Value::Null),
-        "ts":      r.get("ts").cloned().unwrap_or(Value::Null),
-    })).collect();
+    let raw = match qdrant_scroll(RCC_MEMORY_COLLECTION, filter, limit).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
+    };
+
+    let mut items: Vec<Value> = raw
+        .into_iter()
+        .map(|r| {
+            let p = &r["payload"];
+            json!({
+                "id":     p.get("id_hex").cloned().unwrap_or(Value::Null),
+                "text":   p.get("text").cloned().unwrap_or(Value::Null),
+                "agent":  p.get("agent").cloned().unwrap_or(Value::Null),
+                "source": p.get("source").cloned().unwrap_or(Value::Null),
+                "ts":     p.get("ts").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
 
     items.sort_by(|a, b| {
         let ta = a.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -612,10 +830,18 @@ async fn memory_context(
     Json(body): Json<ContextBody>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if body.query.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "query required"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "query required"})),
+        )
+            .into_response();
     }
 
     let k = body.k.unwrap_or(8);
@@ -623,43 +849,56 @@ async fn memory_context(
 
     let vector = match embed(&body.query).await {
         Ok(v) => v,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
-    };
-
-    let mut filter_parts: Vec<String> = Vec::new();
-    if let Some(agent) = &body.agent {
-        if !agent.is_empty() {
-            filter_parts.push(format!("agent == \"{}\"", agent.replace('"', "\\\"")));
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
         }
-    }
-    let filter = if filter_parts.is_empty() { None } else { Some(filter_parts.join(" && ")) };
-
-    let raw = match milvus_search(
-        RCC_MEMORY_COLLECTION,
-        vector,
-        k,
-        filter.as_deref(),
-        &["id", "content", "agent", "source", "ts"],
-    ).await {
-        Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response(),
     };
 
-    let items: Vec<Value> = raw.into_iter().map(|r| json!({
-        "id":      r.get("id").cloned().unwrap_or(Value::Null),
-        "content": r.get("content").cloned().unwrap_or(Value::Null),
-        "agent":   r.get("agent").cloned().unwrap_or(Value::Null),
-        "source":  r.get("source").cloned().unwrap_or(Value::Null),
-        "ts":      r.get("ts").cloned().unwrap_or(Value::Null),
-    })).collect();
+    let filter = body
+        .agent
+        .as_deref()
+        .filter(|a| !a.is_empty())
+        .map(|agent| json!({ "must": [{ "key": "agent", "match": { "value": agent } }] }));
+
+    let raw = match qdrant_search(RCC_MEMORY_COLLECTION, vector, k, filter).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e})),
+            )
+                .into_response()
+        }
+    };
+
+    let items: Vec<Value> = raw
+        .into_iter()
+        .map(|r| {
+            let p = &r["payload"];
+            json!({
+                "id":     p.get("id_hex").cloned().unwrap_or(Value::Null),
+                "text":   p.get("text").cloned().unwrap_or(Value::Null),
+                "agent":  p.get("agent").cloned().unwrap_or(Value::Null),
+                "source": p.get("source").cloned().unwrap_or(Value::Null),
+                "ts":     p.get("ts").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
 
     let mut context = String::from("FLEET MEMORY CONTEXT:\n");
     let mut truncated = false;
 
     for item in &items {
-        let agent_str = item.get("agent").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let agent_str = item
+            .get("agent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let source_str = item.get("source").and_then(|v| v.as_str()).unwrap_or("");
-        let content_str = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let content_str = item.get("text").and_then(|v| v.as_str()).unwrap_or("");
         let line = format!("[{}] {}: {}\n", agent_str, source_str, content_str);
 
         if context.len() + line.len() > max_chars {
@@ -669,5 +908,9 @@ async fn memory_context(
         context.push_str(&line);
     }
 
-    (StatusCode::OK, Json(json!({"ok": true, "context": context, "items": items, "truncated": truncated}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({"ok": true, "context": context, "items": items, "truncated": truncated})),
+    )
+        .into_response()
 }
