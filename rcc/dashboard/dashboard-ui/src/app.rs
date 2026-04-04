@@ -22,6 +22,7 @@ use crate::components::{
     model_deploy::ModelDeploy,
     clawbus::ClawBus,
     work_queue::WorkQueue,
+    published::Published,
 };
 
 /// Map URL path → tab index
@@ -37,6 +38,7 @@ fn path_to_tab(path: &str) -> u8 {
         "/clawfs"                     => 10,
         "/settings"                    => 11,
         "/models"                      => 12,
+        "/published"                   => 13,
         _                              => 0, // default: Dashboard
     }
 }
@@ -54,6 +56,7 @@ fn tab_to_path(tab: u8) -> &'static str {
         10 => "/clawfs",
         11 => "/settings",
         12 => "/models",
+        13 => "/published",
         _  => "/",
     }
 }
@@ -151,6 +154,11 @@ fn AppInner() -> impl IntoView {
                         class:tab-active=move || tab.get() == 12
                         on:click=move |_| select_tab.with_value(|f| f(12))
                     >"🚀 Models"</button>
+                    <button
+                        class="tab-btn"
+                        class:tab-active=move || tab.get() == 13
+                        on:click=move |_| select_tab.with_value(|f| f(13))
+                    >"📡 Published"</button>
                 </div>
             </header>
             <main class="dash-main">
@@ -166,6 +174,7 @@ fn AppInner() -> impl IntoView {
                     10 => view! { <AgentFs /> }.into_view(),
                     11 => view! { <Settings /> }.into_view(),
                     12 => view! { <ModelDeploy /> }.into_view(),
+                    13 => view! { <Published /> }.into_view(),
                     _ => view! {
                         <div class="dash-main-content">
                             <div class="dash-row dash-row-top">

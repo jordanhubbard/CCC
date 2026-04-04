@@ -19,3 +19,4 @@ pub mod clawbus;
 pub mod work_queue;
 pub mod settings;
 pub mod model_deploy;
+pub mod published;
