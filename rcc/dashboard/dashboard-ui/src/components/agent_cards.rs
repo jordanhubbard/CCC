@@ -183,6 +183,18 @@ pub fn AgentCards() -> impl IntoView {
                         let caps = info.as_ref().and_then(|i| i.capabilities.as_ref()).cloned();
                         let llm = info.as_ref().and_then(|i| i.llm.as_ref()).cloned();
 
+                        // RAM telemetry (GB10 unified memory — vRAM IS system RAM)
+                        let ram_used_mb = info.as_ref().and_then(|i| i.ram_used_mb.or(i.unified_vram_used_mb));
+                        let ram_total_mb = info.as_ref().and_then(|i| i.ram_total_mb.or(i.unified_vram_total_mb));
+                        let gpu_temp_c = info.as_ref().and_then(|i| i.gpu_temp_c);
+                        let gpu_power_w = info.as_ref().and_then(|i| i.gpu_power_w);
+                        let gpu_util_pct = info.as_ref().and_then(|i| i.gpu_util_pct);
+
+                        // RAM progress bar (0..=100)
+                        let ram_pct: Option<u32> = ram_used_mb.zip(ram_total_mb).and_then(|(used, total)| {
+                            if total > 0.0 { Some(((used / total) * 100.0) as u32) } else { None }
+                        });
+
                         // GPU badge
                         let gpu_badge = caps.as_ref().and_then(|c| {
                             if c.gpu.unwrap_or(false) {
@@ -255,6 +267,37 @@ pub fn AgentCards() -> impl IntoView {
                                             <span class="meta-item">
                                                 <span class="meta-label">"model:"</span>
                                                 <span style="font-family:monospace;font-size:10px;">{model}</span>
+                                            </span>
+                                        }.into_view()
+                                    } else { view! { <span></span> }.into_view() }}
+                                    {if let (Some(used), Some(total), Some(pct)) = (ram_used_mb, ram_total_mb, ram_pct) {
+                                        let bar_color = if pct >= 85 { "var(--red,#f85149)" }
+                                            else if pct >= 65 { "var(--orange,#d29922)" }
+                                            else { "var(--blue,#388bfd)" };
+                                        let used_gb = format!("{:.1}", used / 1024.0);
+                                        let total_gb = format!("{:.0}", total / 1024.0);
+                                        view! {
+                                            <span class="meta-item" style="flex-direction:column;align-items:stretch;gap:2px;">
+                                                <span style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-dim);">
+                                                    <span>"mem"</span>
+                                                    <span>{format!("{}GB / {}GB ({}%)", used_gb, total_gb, pct)}</span>
+                                                </span>
+                                                <span style="display:block;height:4px;border-radius:2px;background:var(--surface3,#2d333b);overflow:hidden;">
+                                                    <span style=format!("display:block;height:100%;width:{}%;background:{};border-radius:2px;transition:width 0.3s;", pct, bar_color)></span>
+                                                </span>
+                                            </span>
+                                        }.into_view()
+                                    } else { view! { <span></span> }.into_view() }}
+                                    {if gpu_temp_c.is_some() || gpu_power_w.is_some() || gpu_util_pct.is_some() {
+                                        let parts: Vec<String> = [
+                                            gpu_temp_c.map(|t| format!("{}°C", t as i32)),
+                                            gpu_power_w.map(|p| format!("{:.1}W", p)),
+                                            gpu_util_pct.map(|u| format!("{}%", u as i32)),
+                                        ].into_iter().flatten().collect();
+                                        view! {
+                                            <span class="meta-item">
+                                                <span class="meta-label">"gpu:"</span>
+                                                <span style="font-size:9px;color:var(--text-dim);font-family:monospace;">{parts.join(" · ")}</span>
                                             </span>
                                         }.into_view()
                                     } else { view! { <span></span> }.into_view() }}

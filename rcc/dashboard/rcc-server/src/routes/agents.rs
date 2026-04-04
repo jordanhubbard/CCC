@@ -108,7 +108,8 @@ async fn get_agent_health(
                 "gpu", "gpu_temp_c", "gpu_power_w", "gpu_util_pct",
                 "vram_used_mb", "vram_total_mb",
                 "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
-                "ram", "ollama_status", "ollama_models",
+                "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
+                "ollama_status", "ollama_models",
             ];
             let mut health = serde_json::Map::new();
             health.insert("agent".into(), json!(agent_name));
@@ -140,6 +141,8 @@ async fn agent_heartbeat(
     let telemetry_keys = [
         "gpu", "gpu_temp_c", "gpu_power_w", "gpu_util_pct",
         "vram_used_mb", "vram_total_mb",
+        "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
+        "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
         "ollama_status", "ollama_models",
     ];
 
@@ -353,6 +356,8 @@ async fn post_heartbeat(
     let telemetry_keys = [
         "gpu", "gpu_temp_c", "gpu_power_w", "gpu_util_pct",
         "vram_used_mb", "vram_total_mb",
+        "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
+        "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
         "ollama_status", "ollama_models",
     ];
 

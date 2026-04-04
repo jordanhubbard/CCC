@@ -267,7 +267,11 @@ async function reportToRCC(model, status) {
   // GB10 unified memory — system RAM IS the GPU memory pool
   if (ram) {
     payload.ram = ram;
-    // Expose as unified_vram fields for dashboard display
+    // Flat top-level fields for rcc-server telemetry merge
+    payload.ram_used_mb   = ram.used_mb;
+    payload.ram_avail_mb  = ram.available_mb;
+    payload.ram_total_mb  = ram.total_mb;
+    // Also expose as unified_vram fields for dashboard display
     payload.unified_vram_used_mb  = ram.used_mb;
     payload.unified_vram_free_mb  = ram.available_mb;
     payload.unified_vram_total_mb = ram.total_mb;

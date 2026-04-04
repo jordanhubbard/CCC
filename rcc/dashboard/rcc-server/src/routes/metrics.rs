@@ -10,11 +10,22 @@ use axum::{
     routing::get,
     Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::AppState;
+
+/// A single time-series data point stored in the metrics table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricPoint {
+    pub ts: String,
+    pub value: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
+}
 
 static METRICS_STORE: std::sync::OnceLock<RwLock<Vec<Value>>> = std::sync::OnceLock::new();
 static METRICS_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();

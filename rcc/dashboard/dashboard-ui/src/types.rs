@@ -73,6 +73,25 @@ pub struct AgentInfo {
     pub online_status: Option<String>,
     pub capabilities: Option<AgentCapabilities>,
     pub llm: Option<AgentLlm>,
+    // Live GPU/RAM telemetry (merged from heartbeat on rcc-server)
+    #[serde(rename = "gpu_temp_c")]
+    pub gpu_temp_c: Option<f64>,
+    #[serde(rename = "gpu_power_w")]
+    pub gpu_power_w: Option<f64>,
+    #[serde(rename = "gpu_util_pct")]
+    pub gpu_util_pct: Option<f64>,
+    #[serde(rename = "unified_vram_used_mb")]
+    pub unified_vram_used_mb: Option<f64>,
+    #[serde(rename = "unified_vram_free_mb")]
+    pub unified_vram_free_mb: Option<f64>,
+    #[serde(rename = "unified_vram_total_mb")]
+    pub unified_vram_total_mb: Option<f64>,
+    #[serde(rename = "ram_used_mb")]
+    pub ram_used_mb: Option<f64>,
+    #[serde(rename = "ram_avail_mb")]
+    pub ram_avail_mb: Option<f64>,
+    #[serde(rename = "ram_total_mb")]
+    pub ram_total_mb: Option<f64>,
 }
 
 pub type AgentList = Vec<AgentInfo>;
