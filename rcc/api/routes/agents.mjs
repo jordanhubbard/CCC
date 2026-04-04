@@ -545,7 +545,7 @@ export default function registerRoutes(app, state) {
       { id: 'slack-omgjkh',   label: 'Slack (omgjkh)', type: 'external',       url: 'omgjkh.slack.com' },
       { id: 'slack-offtera',  label: 'Slack (offtera)', type: 'external',      url: 'offtera.slack.com' },
       { id: 'telegram',       label: 'Telegram',       type: 'external',       url: 'api.telegram.org' },
-      { id: 'squirrelbus',    label: 'ClawBus',    type: 'bus',            host: 'do-host1' },
+      { id: 'clawbus',        label: 'ClawBus',    type: 'bus',            host: 'do-host1' },
     ];
     const edges = [
       { from: 'rocky',      to: 'rcc-api',        type: 'persistent',  protocol: 'internal' },
@@ -555,9 +555,9 @@ export default function registerRoutes(app, state) {
       { from: 'rocky',      to: 'milvus',          type: 'on-demand',   protocol: 'gRPC' },
       { from: 'rocky',      to: 'minio',           type: 'on-demand',   protocol: 'S3/HTTP' },
       { from: 'rocky',      to: 'searxng',         type: 'on-demand',   protocol: 'HTTP' },
-      { from: 'rocky',      to: 'squirrelbus',     type: 'persistent',  protocol: 'JSONL/fanout' },
-      { from: 'bullwinkle', to: 'squirrelbus',     type: 'on-demand',   protocol: 'HTTP' },
-      { from: 'natasha',    to: 'squirrelbus',     type: 'on-demand',   protocol: 'HTTP' },
+      { from: 'rocky',      to: 'clawbus',         type: 'persistent',  protocol: 'JSONL/fanout' },
+      { from: 'bullwinkle', to: 'clawbus',         type: 'on-demand',   protocol: 'HTTP' },
+      { from: 'natasha',    to: 'clawbus',         type: 'on-demand',   protocol: 'HTTP' },
       { from: 'rocky',      to: 'nvidia-gateway',  type: 'on-demand',   protocol: 'HTTPS/OpenAI' },
       { from: 'bullwinkle', to: 'nvidia-gateway',  type: 'on-demand',   protocol: 'HTTPS/OpenAI' },
       { from: 'natasha',    to: 'nvidia-gateway',  type: 'on-demand',   protocol: 'HTTPS/OpenAI' },
@@ -579,7 +579,7 @@ export default function registerRoutes(app, state) {
     });
     const agentsData = await readAgents().catch(() => ({}));
     let busMessages = [];
-    const busPath = new URL('../../../squirrelbus/bus.jsonl', import.meta.url).pathname;
+    const busPath = new URL('../../../clawbus/bus.jsonl', import.meta.url).pathname;
     if (existsSync(busPath)) {
       try {
         const busRaw = await readFile(busPath, 'utf8');
@@ -735,16 +735,8 @@ export default function registerRoutes(app, state) {
       });
     }
 
+    // agentOS slots removed — routes deleted in cleanup sprint 2026-04-04
     let vibeSlots = null;
-    try {
-      const ctrl = new AbortController();
-      setTimeout(() => ctrl.abort(), 3000);
-      const r = await fetch('http://127.0.0.1:8789/api/agentos/slots', {
-        signal: ctrl.signal,
-        headers: { Authorization: `Bearer ${process.env.RCC_AGENT_TOKEN || ''}` },
-      });
-      if (r.ok) vibeSlots = (await r.json()).vibe_engine || null;
-    } catch (_) {}
 
     let spawnLog = [];
     try {

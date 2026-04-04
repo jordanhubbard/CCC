@@ -84,10 +84,10 @@ async function replicateDelete(s3Client, bucket, payload) {
  *
  * @param {object} s3Client   - AWS S3Client instance
  * @param {string} bucket     - local MinIO bucket name
- * @param {object} opts       - { squirrelbusUrl, ownOriginUrl, fetchToken, signal }
+ * @param {object} opts       - { clawbusUrl, ownOriginUrl, fetchToken, signal }
  */
 export async function startReplicationSubscriber(s3Client, bucket, opts = {}) {
-  const busUrl     = opts.squirrelbusUrl || process.env.SQUIRRELBUS_URL    || 'http://100.89.199.14:8788/bus';
+  const busUrl     = opts.clawbusUrl || opts.squirrelbusUrl || process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788/bus';
   const ownOrigin  = opts.ownOriginUrl   || process.env.AGENTFS_ORIGIN_URL || 'http://sparky.tail407856.ts.net:8791';
   const fetchToken = opts.fetchToken     || process.env.AGENTFS_TOKEN      || 'agentfs-dev-token';
   const signal     = opts.signal;

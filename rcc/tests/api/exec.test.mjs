@@ -137,7 +137,7 @@ process.env.AGENTS_PATH       = TEST_AGENTS;
 process.env.CAPABILITIES_PATH = TEST_CAPS;
 process.env.RCC_AUTH_TOKENS   = `${ADMIN_TOKEN},${AGENT_TOKEN}`;
 process.env.RCC_ADMIN_TOKEN   = ADMIN_TOKEN;
-process.env.SQUIRRELBUS_TOKEN = 'test-squirrelbus-secret';
+process.env.CLAWBUS_TOKEN = 'test-clawbus-secret';
 process.env.EXEC_LOG_PATH     = TEST_EXEC_LOG;
 process.env.BRAIN_STATE_PATH  = join(tmpdir(), `rcc-exec-brain-${Date.now()}.json`);
 

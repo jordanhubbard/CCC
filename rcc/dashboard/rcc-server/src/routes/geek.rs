@@ -46,7 +46,7 @@ async fn topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         json!({"id":"mattermost",    "label":"Mattermost",      "type":"external",       "url":"chat.yourmom.photos"}),
         json!({"id":"slack-omgjkh",  "label":"Slack (omgjkh)",  "type":"external",       "url":"omgjkh.slack.com"}),
         json!({"id":"telegram",      "label":"Telegram",        "type":"external",       "url":"api.telegram.org"}),
-        json!({"id":"squirrelbus",   "label":"ClawBus",     "type":"bus",            "host":"do-host1"}),
+        json!({"id":"clawbus",       "label":"ClawBus",     "type":"bus",            "host":"do-host1"}),
     ];
 
     let edges: Vec<Value> = vec![
@@ -59,7 +59,7 @@ async fn topology(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         json!({"from":"dudley",    "to":"rocky",          "type":"persistent","protocol":"heartbeat/HTTP"}),
         json!({"from":"rocky",     "to":"milvus",         "type":"on-demand", "protocol":"gRPC"}),
         json!({"from":"rocky",     "to":"minio",          "type":"on-demand", "protocol":"S3/HTTP"}),
-        json!({"from":"rocky",     "to":"squirrelbus",    "type":"persistent","protocol":"JSONL/fanout"}),
+        json!({"from":"rocky",     "to":"clawbus",        "type":"persistent","protocol":"JSONL/fanout"}),
         json!({"from":"rocky",     "to":"tokenhub",       "type":"persistent","protocol":"HTTP/OpenAI"}),
         json!({"from":"rocky",     "to":"nvidia-gateway", "type":"on-demand", "protocol":"HTTPS/OpenAI"}),
         json!({"from":"rocky",     "to":"github",         "type":"on-demand", "protocol":"HTTPS/REST"}),

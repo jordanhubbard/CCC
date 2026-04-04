@@ -479,7 +479,7 @@ describe('AgentFS', () => {
     const controller = new AbortController();
     try {
       await startReplicationSubscriber(mockS3, 'test-repl-bucket', {
-        squirrelbusUrl: `http://localhost:${busReplPort}`,
+        clawbusUrl: `http://localhost:${busReplPort}`,
         ownOriginUrl: 'http://different-node:8791',
         fetchToken: TOKEN,
         signal: controller.signal,

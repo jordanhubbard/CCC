@@ -42,28 +42,28 @@ services:
     networks:
       - rcc-net
 
-  # ── SquirrelChat ──────────────────────────────────────────────────────────
+  # ── ClawChat ───────────────────────────────────────────────────────────
   # Node.js/Express backend — the portable version for Docker deployment.
-  # (The Rust/Axum version in rcc/dashboard/squirrelchat-server/ is for
+  # (The Rust/Axum version in rcc/dashboard/clawchat-server/ is for
   #  native bare-metal installs with full WASM dashboard integration.)
-  squirrelchat:
+  clawchat:
     image: ${RCC_IMAGE:-ghcr.io/jordanhubbard/rcc:latest}
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: squirrelchat
+    container_name: clawchat
     restart: unless-stopped
-    command: ["node", "squirrelchat/server.mjs"]
+    command: ["node", "clawchat/server.mjs"]
     env_file:
       - ./rcc-data/.env
     environment:
       - NODE_ENV=production
-      - SC_DB_PATH=/data/squirrelchat/squirrelchat.db
+      - SC_DB_PATH=/data/clawchat/clawchat.db
       - SC_PORT=8790
     ports:
       - "${SC_PORT:-8790}:8790"
     volumes:
-      - ./squirrelchat-data:/data/squirrelchat  # SQLite database persistence
+      - ./clawchat-data:/data/clawchat  # SQLite database persistence
       - ./logs:/data/logs
     depends_on:
       rcc-api:
@@ -94,5 +94,5 @@ networks:
     driver: bridge
 
 # NOTE: No named volumes defined here — all persistence uses bind mounts
-# (./rcc-data, ./squirrelchat-data, ./logs) so operators can easily inspect
+# (./rcc-data, ./clawchat-data, ./logs) so operators can easily inspect
 # and back up their data without docker volume commands.
