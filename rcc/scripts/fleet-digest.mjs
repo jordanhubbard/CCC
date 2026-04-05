@@ -206,6 +206,19 @@ async function qdrantSection() {
   }
 }
 
+async function watcherHealthSection() {
+  try {
+    const { execSync } = await import('child_process');
+    const status = execSync('systemctl --user is-active memory-ingest-watcher 2>&1', { encoding: 'utf8' }).trim();
+    const icon = status === 'active' ? '✅' : '⚠️';
+    return `📥 *memory-ingest-watcher* — ${icon} ${status}`;
+  } catch (e) {
+    // execSync throws on non-zero exit (inactive/failed returns exit code 3)
+    const status = (e.stdout || e.message || 'unknown').trim();
+    return `📥 *memory-ingest-watcher* — ⚠️ ${status || 'not running'}`;
+  }
+}
+
 async function swedenModelSection() {
   let agents;
   try {
@@ -233,15 +246,16 @@ async function swedenModelSection() {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 async function buildDigest() {
-  const [sparky, agents, queue, sweden, qdrant] = await Promise.allSettled([
+  const [sparky, agents, queue, sweden, qdrant, watcher] = await Promise.allSettled([
     sparkySection(),
     agentsSection(),
     queueSection(),
     swedenModelSection(),
     qdrantSection(),
+    watcherHealthSection(),
   ]);
 
-  const parts = [sparky, agents, queue, sweden, qdrant].map(r =>
+  const parts = [sparky, agents, queue, sweden, qdrant, watcher].map(r =>
     r.status === 'fulfilled' ? r.value : `⚠️ Section failed: ${r.reason}`
   );
 
