@@ -1,217 +1,195 @@
 ---
 name: ccc-node
-description: >
-  Interact with the CCC (Command Center Controller) infrastructure: register as an agent node,
-  post heartbeats, dispatch remote exec commands to fleet nodes via ClawBus, poll exec results,
-  query agent status and health, and post/read the message bus. Use when: running on a CCC command
-  center node (public/tailscale IP) or a CCC agent node (behind firewall, China-safe) that connects
-  back to a command center; checking fleet node status; running remote commands on fleet nodes;
-  integrating a new machine into the CCC fleet; or debugging ClawBus message delivery.
+description: Connect this agent to the CCC (Command and Control Center) fleet. Handles ClawBus registration, heartbeat, remote exec dispatch, and workqueue lifecycle. Use when setting up a new agent node, checking fleet connectivity, or managing workqueue items via Rocky's RCC API.
 version: 1.0.0
-author: rocky
-license: MIT
+platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [CCC, Fleet, Orchestration, ClawBus, Remote-Exec, Heartbeat, Infrastructure]
-    homepage: https://github.com/jordanhubbard/CCC
-  openclaw:
-    tags: [CCC, Fleet, Orchestration, ClawBus, Remote-Exec, Heartbeat, Infrastructure]
-prerequisites:
-  env:
-    - CCC_URL          # Base URL of CCC API, e.g. http://146.190.134.110:8789
-    - CCC_AGENT_TOKEN  # This node's auth token for the CCC API
-  optional_env:
-    - CLAWBUS_TOKEN    # ClawBus SSE subscription token (may equal CCC_AGENT_TOKEN)
-    - AGENT_NAME       # This node's registered name (e.g. "rocky", "peabody")
+    tags: [ccc, clawbus, fleet, rcc, workqueue]
+    category: infrastructure
+required_environment_variables:
+  - name: CCC_URL
+    prompt: "RCC API base URL (e.g. http://146.190.134.110:8789)"
+    help: "Rocky's RCC server URL. Internal agents use http://146.190.134.110:8789 directly."
+    required_for: all CCC operations
+  - name: CCC_AGENT_TOKEN
+    prompt: "CCC agent bearer token (rcc-agent-<name>-<hex>)"
+    help: "Pull from Rocky's secrets store: GET /api/secrets/<agentname>_ccc_token"
+    required_for: authenticated API calls
+  - name: AGENT_NAME
+    prompt: "This agent's name (e.g. bullwinkle, natasha)"
+    help: "Lowercase, matches the name registered in Rocky's RCC fleet."
+    required_for: heartbeat and workqueue routing
 ---
 
-# CCC Node Skill
+# CCC Node
 
-CCC has two deployment modes. Both use the same API.
+Connects a Hermes agent to the CCC fleet running on Rocky (do-host1, 146.190.134.110).
 
-**Command center node** — runs the full stack: CCC API server (Rust `rcc-server`), ClawBus (SSE message bus), MinIO, Redis, SquirrelChat, tokenhub. Lives on a public or Tailscale IP. This is the fleet's brain.
+CCC = the Command and Control Center. Rocky runs the RCC server (`rcc-server`, Rust/Axum).
+ClawBus is the SquirrelBus-based message bus. All fleet coordination goes through Rocky.
 
-**Agent node** — runs only an agent runtime (OpenClaw or Hermes gateway). No inbound ports required. Connects *out* to the command center. Works behind firewalls, NAT, or in China.
+## When to Use
 
-## Required environment
+- First-time setup of a new agent node on the fleet
+- Checking whether this agent is registered and heartbeating
+- Pulling or completing workqueue items
+- Sending or receiving ClawBus messages
+- Diagnosing connectivity to Rocky
 
-```bash
-export CCC_URL=http://146.190.134.110:8789   # or https://api.yourmom.photos
-export CCC_AGENT_TOKEN=claw-xxxxxxxxxxxxxxxx  # from TokenHub or .rcc/.env
-export AGENT_NAME=rocky                       # this node's name
+## Architecture
+
+```
+Agent (you) ──HTTP──▶ Rocky RCC API (http://146.190.134.110:8789)
+                         ├── /api/heartbeat/<name>    POST — heartbeat
+                         ├── /api/workqueue           GET — pull items
+                         ├── /api/workqueue/<id>      PATCH — update status
+                         ├── /api/bus/send            POST — ClawBus message
+                         ├── /api/exec/<id>/result    POST — exec result
+                         └── /api/secrets/<key>       GET — secrets store
 ```
 
-All API calls below use these variables. Inline them or source `~/.rcc/.env`.
+All requests require `Authorization: Bearer $CCC_AGENT_TOKEN`.
 
----
+**Network note:** Rocky's RCC API is NOT on the public internet — it's on the internal interface.
+- From puck (Bullwinkle): reach via Tailscale (`http://100.89.199.14:8789`) or direct IP if routed
+- From Sweden containers: they have no inbound; they connect outbound via SSH tunnel to Rocky
+- From sparky (Natasha): Tailscale IP works
 
-## Agent Registration & Heartbeat
+## Procedure
 
-### Register this node
+### 1. Verify connectivity
 
 ```bash
-curl -s -X POST "$CCC_URL/api/agents/register" \
+curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
+  $CCC_URL/api/health | jq .
+```
+
+Expected: `{"status":"ok",...}`
+
+### 2. Send a heartbeat
+
+```bash
+curl -s -X POST \
   -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"name\":\"$AGENT_NAME\",\"host\":\"$(hostname)\",\"role\":\"agent\"}"
+  -d "{\"agent\":\"$AGENT_NAME\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+  $CCC_URL/api/heartbeat/$AGENT_NAME
 ```
 
-### Post a heartbeat (keep the node online)
+Set this up as a cron job every 60s:
+```
+hermes cron create "Send CCC heartbeat" --interval 60s --quiet \
+  --task "Run the CCC heartbeat curl command using env vars CCC_URL, CCC_AGENT_TOKEN, AGENT_NAME"
+```
+
+### 3. Pull workqueue items
 
 ```bash
-curl -s -X POST "$CCC_URL/api/agents/$AGENT_NAME/heartbeat" \
+curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
+  "$CCC_URL/api/workqueue?assignee=$AGENT_NAME&status=pending" | jq .
+```
+
+Items have: `id`, `title`, `description`, `assignee`, `status`, `priority`, `created_at`
+
+### 4. Update workqueue item status
+
+```bash
+# Mark in_progress
+curl -s -X PATCH \
   -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"status\":\"ok\"}"
-```
+  -d '{"status":"in_progress"}' \
+  $CCC_URL/api/workqueue/<item-id>
 
-A node is considered **online** if its last heartbeat was < 5 minutes ago. Post at least every 2 minutes from a background loop or cron.
-
-### Check fleet status
-
-```bash
-# All agents + online status
-curl -s "$CCC_URL/api/agents" -H "Authorization: Bearer $CCC_AGENT_TOKEN" | jq '.agents[] | {name, online, lastSeen}'
-
-# Single agent health
-curl -s "$CCC_URL/api/agents/$AGENT_NAME/health" -H "Authorization: Bearer $CCC_AGENT_TOKEN"
-```
-
----
-
-## Remote Exec (ClawBus dispatch)
-
-Dispatch shell commands to one or more fleet nodes without SSH. Nodes must be running `agent-listener.mjs`. Results are posted back asynchronously.
-
-### Send a command
-
-```bash
-EXEC_RESP=$(curl -s -X POST "$CCC_URL/api/exec" \
+# Mark completed
+curl -s -X PATCH \
   -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"targets\": [\"peabody\"],
-    \"mode\": \"shell\",
-    \"code\": \"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader\",
-    \"timeout_ms\": 15000
-  }")
-EXEC_ID=$(echo "$EXEC_RESP" | jq -r '.execId')
-echo "Exec ID: $EXEC_ID"
+  -d '{"status":"completed","result":"summary of what was done"}' \
+  $CCC_URL/api/workqueue/<item-id>
 ```
 
-`targets` accepts node names or `["all"]`. `mode` is `shell` (default) or `js`.
-
-### Poll for results
+### 5. Send a ClawBus message
 
 ```bash
-# Poll until results arrive (typically < 5s if node is live)
-for i in $(seq 1 12); do
-  RESULT=$(curl -s "$CCC_URL/api/exec/$EXEC_ID" -H "Authorization: Bearer $CCC_AGENT_TOKEN")
-  STATUS=$(echo "$RESULT" | jq -r '.status // "pending"')
-  if [ "$STATUS" != "pending" ]; then
-    echo "$RESULT" | jq '.results'
-    break
-  fi
-  sleep 5
-done
-```
-
-### Send to all nodes
-
-```bash
-curl -s -X POST "$CCC_URL/api/exec" \
+curl -s -X POST \
   -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"targets":["all"],"mode":"shell","code":"uptime","timeout_ms":10000}'
+  -d "{\"from\":\"$AGENT_NAME\",\"to\":\"rocky\",\"type\":\"message\",\"payload\":{\"text\":\"Hello from $AGENT_NAME\"}}" \
+  $CCC_URL/api/bus/send
 ```
 
----
+### 6. Respond to a remote exec
 
-## ClawBus (Message Bus)
-
-The ClawBus is a Server-Sent Events broadcast bus. All fleet agents subscribe to it. The agent-listener uses it to receive exec commands.
-
-### Subscribe (SSE stream)
-
+If you're running `agent-listener.mjs`, exec results post back automatically.
+Manual result post:
 ```bash
-curl -N "$CCC_URL/api/bus/stream" \
-  -H "Authorization: Bearer ${CLAWBUS_TOKEN:-$CCC_AGENT_TOKEN}"
-```
-
-The stream replays the last 50 messages on connect, then delivers live events.
-
-### Post a message
-
-```bash
-curl -s -X POST "$CCC_URL/api/bus/send" \
+curl -s -X POST \
   -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"type\":\"agent.status\",\"from\":\"$AGENT_NAME\",\"payload\":{\"msg\":\"hello fleet\"}}"
+  -d '{"result":"output here","exitCode":0}' \
+  $CCC_URL/api/exec/<exec-id>/result
 ```
 
-### Read recent messages
+### 7. Fetch a secret from Rocky's store
 
 ```bash
-curl -s "$CCC_URL/api/bus/messages" -H "Authorization: Bearer $CCC_AGENT_TOKEN" | jq '.'
+curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
+  $CCC_URL/api/secrets/<secret-key>
 ```
 
----
+Common keys:
+- `bullwinkle_ccc_token` — Bullwinkle's CCC bearer token
+- `minio_access_key` / `minio_secret_key` — MinIO credentials
+- `slack_bot_token_<name>` — Slack tokens for Sweden fleet agents
 
-## Workqueue (Task Queue)
+### 8. Register with the fleet (first run)
 
-The workqueue is how agents assign, claim, and complete work items.
+Tell Rocky you exist:
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"$AGENT_NAME\",\"runtime\":\"hermes\",\"host\":\"$(hostname)\",\"capabilities\":[\"general\",\"coding\",\"browser\"]}" \
+  $CCC_URL/api/agents/register
+```
+
+## Hermes-specific wiring
+
+Add to `~/.hermes/config.yaml`:
+```yaml
+env:
+  CCC_URL: "http://100.89.199.14:8789"   # Tailscale IP for puck
+  CCC_AGENT_TOKEN: "<your token>"
+  AGENT_NAME: "bullwinkle"
+```
+
+Or export in your shell profile and let `hermes claw migrate` carry them over.
+
+**ClawBus plugin note:** OpenClaw had a native ClawBus plugin. Hermes doesn't — this skill is
+the replacement. Use the curl commands above, or wrap them in a Hermes hook script if you want
+automatic polling. The agent-listener daemon (`agent-listener.mjs` in the CCC repo) handles
+inbound exec dispatch independently of the agent runtime.
+
+## Pitfalls
+
+- **Wrong token type:** Use `rcc-agent-*` tokens, NOT `wq-*` workqueue tokens. They're different.
+- **Snidely token typo:** Rocky's fleet has `rcc-agent-Snidley` (note "Snidley" vs "Snidely") — use it as-is.
+- **ClawBus SSE from Sweden:** Use direct IP `http://146.190.134.110:8789`, NOT the Caddy proxy URL — Caddy returns 502 on SSE endpoints.
+- **puck networking:** puck has Tailscale, so use `http://100.89.199.14:8789` (Tailscale IP for do-host1).
+- **sessions_spawn / sessions_yield:** These are OpenClaw-specific. In Hermes, use `delegate_tool.py` or spawn subagents via the Hermes delegate API.
+
+## Verification
 
 ```bash
-# List open tasks
-curl -s "$CCC_URL/api/queue" -H "Authorization: Bearer $CCC_AGENT_TOKEN" | jq '.items[] | select(.status=="open") | {id, title}'
+# Health check
+curl -s $CCC_URL/api/health
 
-# Claim a task
-curl -s -X POST "$CCC_URL/api/queue/$TASK_ID/claim" \
-  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"agent\":\"$AGENT_NAME\"}"
+# Confirm you appear in the fleet
+curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
+  $CCC_URL/api/agents | jq '.[] | select(.name == env.AGENT_NAME)'
 
-# Complete a task
-curl -s -X POST "$CCC_URL/api/queue/$TASK_ID/complete" \
-  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"agent\":\"$AGENT_NAME\",\"result\":\"done\"}"
+# Check recent heartbeats in dashboard
+# https://dashboard.yourmom.photos → Fleet tab
 ```
-
----
-
-## Node Modes: When to Use What
-
-| Situation | Mode | What to run |
-|---|---|---|
-| VPS, Tailscale node, public IP | Command center | Full CCC stack + agent runtime |
-| Laptop behind NAT | Agent node | Agent runtime only; `CCC_URL` points to command center |
-| Sweden GPU container | Agent node | `agent-listener.mjs` + agent runtime; no inbound ports |
-| China / restrictive firewall | Agent node | Outbound HTTPS to `CCC_URL` only; SSE + HTTPS POST |
-
-Agent nodes need **outbound** access to `CCC_URL` only. No inbound ports. No Tailscale required.
-
----
-
-## Onboarding a New Agent Node
-
-1. Install agent runtime (OpenClaw or Hermes)
-2. Set `CCC_URL`, `CCC_AGENT_TOKEN`, `AGENT_NAME` in environment
-3. Register: `POST /api/agents/register`
-4. Start heartbeat loop (every 2 min)
-5. Start `agent-listener.mjs` for remote exec (Sweden containers: supervisord manages this)
-6. Verify: `GET /api/agents/$AGENT_NAME/health` → `{"online": true}`
-
-For Sweden containers (no inbound SSH), use the ClawBus exec API to bootstrap steps 3-6 via an already-registered node.
-
----
-
-## Troubleshooting
-
-**Node shows offline:** heartbeat interval > 5 min or listener crashed. Check `supervisorctl status` or `systemctl status openclaw`.
-
-**Exec results never arrive:** agent-listener not subscribed to bus, wrong `CLAWBUS_TOKEN`, or wrong `SQUIRRELBUS_URL`. Listener must use direct IP (`http://146.190.134.110:8789`), not Caddy proxy (502 on SSE).
-
-**401 on API calls:** token mismatch. Exec dispatch requires the *fleet exec token* (`claw-` prefix), not the general workqueue token (`wq-` prefix).
-
-**Bus stream closes immediately:** Caddy may be buffering SSE. Use the direct port (`8789`) for agent-listener subscriptions, not the proxied domain.
