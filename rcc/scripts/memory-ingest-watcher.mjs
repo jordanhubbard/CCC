@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * rcc/scripts/memory-ingest-watcher.mjs — Continuous memory→Milvus ingest watcher
+ * rcc/scripts/memory-ingest-watcher.mjs — Continuous memory→Milvus+Qdrant ingest watcher
  *
  * Watches ~/.openclaw/workspace/memory/ and MEMORY.md for writes.
- * On change: debounces 10s, then embeds via local ollama (nomic-embed-text, 768-dim)
- * and upserts into Rocky's Milvus rcc_memory_sparky collection.
- *
- * No cloud API calls — all local. Zero cost.
+ * On change: debounces 10s, then:
+ *   1. Embeds via local ollama (nomic-embed-text, 768-dim) → Milvus rcc_memory_sparky
+ *   2. Also spawns ingest-memory-qdrant.mjs → fleet Qdrant agent_memories (if keys present)
  *
  * Env vars:
  *   MEMORY_DIR          default: ~/.openclaw/workspace/memory/
@@ -17,14 +16,22 @@
  *   OLLAMA_BASE_URL     default: http://localhost:11434
  *   OLLAMA_EMBED_MODEL  default: nomic-embed-text
  *   DEBOUNCE_MS         default: 10000
+ *   QDRANT_API_KEY      (optional) fleet Qdrant api-key — if set, also ingest to Qdrant
+ *   EMBED_API_KEY       (optional) nvidia inference-api key for Qdrant ingest (3072-dim)
+ *   QDRANT_URL          default: http://146.190.134.110:6333
  */
 
 import { watch } from 'fs';
 import { readFile, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const HOME           = homedir();
 const AGENT_NAME     = process.env.AGENT_NAME         || 'natasha';
