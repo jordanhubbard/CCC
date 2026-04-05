@@ -94,7 +94,7 @@ async fn post_exec(
     let bus_url = std::env::var("CLAWBUS_URL")
         .or_else(|_| std::env::var("SQUIRRELBUS_URL"))  // backwards compat
         .unwrap_or_else(|_| format!("http://localhost:{}", std::env::var("RCC_PORT").unwrap_or_else(|_| "8789".to_string())));
-    let bus_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or(clawbus_token.clone());
+    let bus_token = std::env::var("CCC_AGENT_TOKEN").unwrap_or(clawbus_token.clone());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))

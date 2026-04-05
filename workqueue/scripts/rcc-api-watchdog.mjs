@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * rcc-api-watchdog.mjs
- * Natasha's RCC dashboard API watchdog.
+ * Natasha's CCC dashboard API watchdog.
  * Checks http://146.190.134.110:8788/api/queue — fires Mattermost alert to #agent-shared
  * if unreachable for >30 consecutive minutes.
  *
@@ -96,7 +96,7 @@ async function main() {
       // Post recovery notice if we had alerted
       if (state.alertSentTs) {
         await sendMattermostAlert(
-          `✅ **RCC API recovered** — dashboard at 146.190.134.110:8788 is back online after ~${downDuration} min outage. (Natasha watchdog)`
+          `✅ **CCC API recovered** — dashboard at 146.190.134.110:8788 is back online after ~${downDuration} min outage. (Natasha watchdog)`
         );
       }
     } else {
@@ -124,7 +124,7 @@ async function main() {
     // Alert if >30min and not already alerted this outage
     if (downMs >= ALERT_AFTER_MS && !state.alertSentTs) {
       state.alertSentTs = nowIso;
-      const msg = `🚨 **RCC API OUTAGE** — dashboard API at 146.190.134.110:8788 has been unreachable for **${downMin} minutes**. Sync to authoritative queue is blocked for all agents. Someone should check the dashboard service on the RCC host. (Natasha watchdog @ ${nowIso})`;
+      const msg = `🚨 **CCC API OUTAGE** — dashboard API at 146.190.134.110:8788 has been unreachable for **${downMin} minutes**. Sync to authoritative queue is blocked for all agents. Someone should check the dashboard service on the CCC host. (Natasha watchdog @ ${nowIso})`;
       await sendMattermostAlert(msg);
     } else if (downMs >= ALERT_AFTER_MS) {
       console.log(`[watchdog] Already alerted at ${state.alertSentTs}, still down`);

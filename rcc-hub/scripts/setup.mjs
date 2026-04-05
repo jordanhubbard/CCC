@@ -53,7 +53,7 @@ async function main() {
     `RCC_PORT=${port}`,
     `RCC_PUBLIC_URL=${publicUrl}`,
     `RCC_ADMIN_TOKEN=${finalAdmin}`,
-    `RCC_AUTH_TOKENS=${finalAgent}`,
+    `CCC_AUTH_TOKENS=${finalAgent}`,
     ``,
   ];
 

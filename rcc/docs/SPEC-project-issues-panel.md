@@ -3,13 +3,13 @@
 **Requested by:** jkh, 2026-03-23  
 **Design:** Rocky  
 **UI:** Natasha  
-**Target:** `/projects/:id` detail page in RCC API (`rcc/api/index.mjs`)
+**Target:** `/projects/:id` detail page in CCC API (`rcc/api/index.mjs`)
 
 ---
 
 ## Goal
 
-On the project detail page, show a live list of **open GitHub issues** and **open pull requests** for the project's repo — inline, without leaving RCC.
+On the project detail page, show a live list of **open GitHub issues** and **open pull requests** for the project's repo — inline, without leaving CCC.
 
 ---
 
@@ -126,7 +126,7 @@ Browser
   └─ fetch /api/projects/:id          → project metadata
   └─ fetch /api/queue                 → work queue items  
   └─ fetch /api/projects/:id/github   → issues + PRs (NEW)
-       └─ RCC API
+       └─ CCC API
             └─ gh issue list + gh pr list
 ```
 
@@ -148,7 +148,7 @@ All UI work (CSS, HTML template, responsive layout) goes in `projectDetailHtml()
 - Closed issues/PRs (open only for now)
 - Issue comments inline
 - Filtering/searching issues within the panel
-- Creating issues from RCC
+- Creating issues from CCC
 - CI/check status on PRs (already partially handled by scout queue items)
 
 ---

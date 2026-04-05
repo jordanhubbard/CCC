@@ -26,7 +26,7 @@
  *   SQUIRRELBUS_URL  — bus URL (default: http://localhost:8788)
  *   SQUIRRELBUS_TOKEN — shared secret (required for send; optional for receive)
  *   AGENT_NAME       — this agent's name (default: 'unknown')
- *   RCC_AUTH_TOKEN   — bearer token for ClawBus auth (required for send)
+ *   CCC_AUTH_TOKEN   — bearer token for ClawBus auth (required for send)
  */
 
 import { homedir } from 'os';
@@ -185,11 +185,11 @@ export async function handleQuenchMessage(message) {
  * @param {number} opts.duration_minutes — 1–30
  * @param {string} [opts.reason]         — optional human note
  * @param {string} [opts.busUrl]         — overrides SQUIRRELBUS_URL
- * @param {string} [opts.authToken]      — overrides RCC_AUTH_TOKEN
+ * @param {string} [opts.authToken]      — overrides CCC_AUTH_TOKEN
  */
 export async function sendQuench({ target, duration_minutes, reason, busUrl, authToken } = {}) {
   const url   = (busUrl   || process.env.SQUIRRELBUS_URL || 'http://localhost:8788') + '/api/bus/send';
-  const token = authToken || process.env.RCC_AUTH_TOKEN  || '';
+  const token = authToken || process.env.CCC_AUTH_TOKEN  || '';
 
   const mins = Math.min(Math.max(1, Math.round(duration_minutes || 1)), MAX_QUENCH_MINUTES);
 

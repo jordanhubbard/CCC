@@ -14,12 +14,12 @@
  *   agents.system_context_hook: "node /home/jkh/Src/CCC/rcc/scripts/openclaw-context-hook.mjs"
  *
  * Env vars:
- *   RCC_URL         (default: http://localhost:8789)
- *   RCC_AGENT_TOKEN (for auth)
+ *   CCC_URL         (default: http://localhost:8789)
+ *   CCC_AGENT_TOKEN (for auth)
  */
 
-const RCC_URL = process.env.RCC_URL ?? 'http://localhost:8789';
-const TOKEN   = process.env.RCC_AGENT_TOKEN ?? '';
+const CCC_URL = process.env.CCC_URL ?? 'http://localhost:8789';
+const TOKEN   = process.env.CCC_AGENT_TOKEN ?? '';
 
 const DEFAULT_QUERY = 'recent fleet activity and active projects';
 
@@ -39,14 +39,14 @@ async function main() {
   const headers = { 'Content-Type': 'application/json' };
   if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
 
-  const res = await fetch(`${RCC_URL}/api/memory/context`, {
+  const res = await fetch(`${CCC_URL}/api/memory/context`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ query, k: 10, max_tokens: 1500 }),
   });
 
   if (!res.ok) {
-    process.stderr.write(`[openclaw-context-hook] RCC context request failed: ${res.status}\n`);
+    process.stderr.write(`[openclaw-context-hook] CCC context request failed: ${res.status}\n`);
     process.exit(1);
   }
 

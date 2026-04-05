@@ -8,14 +8,14 @@
  * 4. POSTs summary back as a new fleet memory item
  *
  * Env vars:
- *   RCC_URL         (default: http://localhost:8789)
+ *   CCC_URL         (default: http://localhost:8789)
  *   TOKENHUB_URL    (default: http://127.0.0.1:8090)
- *   RCC_AGENT_TOKEN (required for auth)
+ *   CCC_AGENT_TOKEN (required for auth)
  */
 
-const RCC_URL      = process.env.RCC_URL      ?? 'http://localhost:8789';
+const CCC_URL      = process.env.CCC_URL      ?? 'http://localhost:8789';
 const TOKENHUB_URL = process.env.TOKENHUB_URL ?? 'http://127.0.0.1:8090';
-const TOKEN        = process.env.RCC_AGENT_TOKEN ?? '';
+const TOKEN        = process.env.CCC_AGENT_TOKEN ?? '';
 
 const COMPACT_THRESHOLD = 50;
 const SUMMARY_MODELS = [
@@ -31,7 +31,7 @@ function authHeaders() {
 
 async function fetchRecentMemory() {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const url = `${RCC_URL}/api/memory/recent?limit=500&since=${encodeURIComponent(since)}`;
+  const url = `${CCC_URL}/api/memory/recent?limit=500&since=${encodeURIComponent(since)}`;
   console.log(`[memory-compact] Fetching recent memory: ${url}`);
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) throw new Error(`GET /api/memory/recent failed: ${res.status} ${await res.text()}`);
@@ -85,7 +85,7 @@ async function ingestSummary(agent, summary) {
     scope: 'fleet',
     metadata: { compacted_agent: agent, compacted_at: new Date().toISOString() },
   };
-  const res = await fetch(`${RCC_URL}/api/memory/ingest`, {
+  const res = await fetch(`${CCC_URL}/api/memory/ingest`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(body),

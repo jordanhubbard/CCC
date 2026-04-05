@@ -3,18 +3,18 @@
  * clawfs-metrics-push.mjs
  *
  * Runs on sparky. Every 5 seconds:
- *   1. Fetches GET /api/agentos/metrics (Prometheus text format) from local RCC
+ *   1. Fetches GET /api/agentos/metrics (Prometheus text format) from local CCC
  *   2. Parses into a JSON metrics object
  *   3. POSTs to ClawBus as type "agentos.metrics"
  *
  * Environment:
- *   RCC_AUTH_TOKEN    — Bearer token for local RCC + ClawBus (default hardcoded)
+ *   CCC_AUTH_TOKEN    — Bearer token for local CCC + ClawBus (default hardcoded)
  *   CLAWBUS_URL       — ClawBus base URL (default http://100.89.199.14:8788)
  *   SQUIRRELBUS_URL   — (deprecated) fallback for CLAWBUS_URL
- *   RCC_LOCAL_URL     — Local RCC metrics endpoint (default http://127.0.0.1:8789)
+ *   RCC_LOCAL_URL     — Local CCC metrics endpoint (default http://127.0.0.1:8789)
  */
 
-const TOKEN         = process.env.RCC_AUTH_TOKEN  || '<YOUR_RCC_TOKEN>';
+const TOKEN         = process.env.CCC_AUTH_TOKEN  || '<YOUR_RCC_TOKEN>';
 const BUS_URL       = process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
 const RCC_LOCAL_URL = process.env.RCC_LOCAL_URL   || 'http://127.0.0.1:8789';
 const INTERVAL_MS   = 5_000;

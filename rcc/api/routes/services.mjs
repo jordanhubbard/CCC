@@ -628,7 +628,7 @@ export default function registerRoutes(app, state) {
     const envelope = { ...payload, sig };
 
     const BUS_URL   = process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || `http://localhost:${process.env.RCC_PORT || 8789}`;
-    const BUS_TOKEN = process.env.RCC_AGENT_TOKEN || SQUIRRELBUS_TOKEN;
+    const BUS_TOKEN = process.env.CCC_AGENT_TOKEN || SQUIRRELBUS_TOKEN;
     let busSent = false;
     try {
       const busResp = await fetch(`${BUS_URL}/bus/send`, {
@@ -824,7 +824,7 @@ export default function registerRoutes(app, state) {
     }
 
     return json(res, 200, {
-      text: '*CCC Slash Commands*\n`/ccc status` — agent heartbeat status\n`/ccc queue` — pending work items\n`/ccc ask <question>` — ask the RCC brain',
+      text: '*CCC Slash Commands*\n`/ccc status` — agent heartbeat status\n`/ccc queue` — pending work items\n`/ccc ask <question>` — ask the CCC brain',
       response_type: 'ephemeral',
     });
   });
@@ -971,7 +971,7 @@ export default function registerRoutes(app, state) {
       const script = await readFile(pathJoin(sbomDir, 'install-sbom.sh'), 'utf8').catch(() => null);
       if (!script) return json(res, 404, { error: 'install-sbom.sh not found' });
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(`AGENT_NAME=${agentName} RCC_URL=${process.env.RCC_EXTERNAL_URL || 'http://localhost:8789'}\n${script}`);
+      res.end(`AGENT_NAME=${agentName} CCC_URL=${process.env.RCC_EXTERNAL_URL || 'http://localhost:8789'}\n${script}`);
       return;
     } catch (e) {
       return json(res, 500, { error: e.message });

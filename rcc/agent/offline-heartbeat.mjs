@@ -1,5 +1,5 @@
 // rcc/agent/offline-heartbeat.mjs
-// Offline heartbeat fallback: writes to local SQLite when RCC API is unreachable,
+// Offline heartbeat fallback: writes to local SQLite when CCC API is unreachable,
 // replays buffered heartbeats when connectivity is restored.
 
 import Database from 'better-sqlite3';

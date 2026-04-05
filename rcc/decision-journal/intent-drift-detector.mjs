@@ -7,7 +7,7 @@
  *
  * Exposes: detectDrift(opts), buildBaseline(opts), driftReport(opts)
  *
- * Used by: RCC /api/drift endpoint, heartbeat checks, agent self-monitoring.
+ * Used by: CCC /api/drift endpoint, heartbeat checks, agent self-monitoring.
  *
  * Example drift signals:
  *   - Confidence trend declining (agent becoming less certain)

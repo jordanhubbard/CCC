@@ -4,7 +4,7 @@
 # Checks qwen2.5-coder:32b (coding fallback) every 15 min:
 #   1. POST a small test prompt, expect a valid response within 30s
 #   2. If degraded (timeout or garbled), restart: ollama stop + ollama run
-#   3. Surface ollama_status in RCC heartbeat payload
+#   3. Surface ollama_status in CCC heartbeat payload
 #
 # Deploy: run from cron every 15 min, or as a systemd timer.
 # See: wq-NAT-idea-20260401-01
@@ -14,7 +14,7 @@ set -uo pipefail
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 WATCH_MODEL="${OLLAMA_WATCH_MODEL:-qwen2.5-coder:32b}"
 TIMEOUT_SECS="${OLLAMA_HEALTH_TIMEOUT:-30}"
-RCC_URL="${RCC_URL:-http://146.190.134.110:8789}"
+CCC_URL="${CCC_URL:-http://146.190.134.110:8789}"
 RCC_TOKEN="${RCC_TOKEN:-wq-5dcad756f6d3e345c00b5cb3dfcbdedb}"
 AGENT_NAME="${AGENT_NAME:-natasha}"
 LOG_FILE="${HOME}/.rcc/logs/ollama-watchdog.log"
@@ -105,8 +105,8 @@ cat > "$STATUS_FILE" <<EOF
 }
 EOF
 
-# ── report to RCC heartbeat ───────────────────────────────────────────────────
-curl -sf -X POST "${RCC_URL}/api/heartbeat/${AGENT_NAME}" \
+# ── report to CCC heartbeat ───────────────────────────────────────────────────
+curl -sf -X POST "${CCC_URL}/api/heartbeat/${AGENT_NAME}" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${RCC_TOKEN}" \
   -d "{\"status\":\"online\",\"host\":\"sparky\",\"ts\":\"${TS}\",\"meta\":{\"ollama_status\":\"${STATUS}\",\"ollama_model\":\"${WATCH_MODEL}\",\"ollama_response_ms\":${ELAPSED_MS}}}" \

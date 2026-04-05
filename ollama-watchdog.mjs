@@ -2,7 +2,7 @@
 /**
  * ollama-watchdog.mjs — periodic health check for ollama models on sparky
  * Checks qwen2.5-coder:32b and qwen3-coder every 15 min.
- * Restarts degraded models, surfaces status in RCC heartbeat.
+ * Restarts degraded models, surfaces status in CCC heartbeat.
  *
  * Run: node ollama-watchdog.mjs [--once]
  * Cron: add to openclaw cron or run as systemd service.
@@ -13,8 +13,8 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const RCC_URL    = process.env.RCC_URL    || 'http://146.190.134.110:8789';
-const RCC_TOKEN  = process.env.RCC_AUTH_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const CCC_URL    = process.env.CCC_URL    || 'http://146.190.134.110:8789';
+const RCC_TOKEN  = process.env.CCC_AUTH_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const AGENT_NAME = process.env.AGENT_NAME || 'natasha';
 const INTERVAL_MS = 15 * 60 * 1000; // 15 min
 const TIMEOUT_MS  = 30_000;
@@ -69,7 +69,7 @@ async function pushStatus() {
   const payload = { status: 'online', host: 'sparky', ts: new Date().toISOString(), ollama: {} };
   for (const [m, s] of Object.entries(state)) payload.ollama[m] = s.status;
   try {
-    await fetch(`${RCC_URL}/api/heartbeat/${AGENT_NAME}`, {
+    await fetch(`${CCC_URL}/api/heartbeat/${AGENT_NAME}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RCC_TOKEN}` },
       body: JSON.stringify(payload),

@@ -65,7 +65,7 @@ Anything with a Claude/Codex CLI session in tmux, or any machine running OpenCla
 | Private Cloud | Azure Blob Storage | HTTPS + SAS token | In-progress work, agent-to-agent file transfer via cloud |
 | Local/Fast | MinIO (on CCC or agent cluster) | Internal network + key | High-speed inter-agent storage, queue state, logs |
 
-RCC's `rcc-storage` service abstracts all three tiers behind a single API. Agents don't need to know which tier they're talking to.
+CCC's `rcc-storage` service abstracts all three tiers behind a single API. Agents don't need to know which tier they're talking to.
 
 ---
 
@@ -106,7 +106,7 @@ CCC doesn't automate the SSO login. It accepts the agent once it's running.
 
 ## The Nervous System
 
-RCC's `rcc-brain` is not just a message queue — it's an autonomous loop:
+CCC's `rcc-brain` is not just a message queue — it's an autonomous loop:
 
 ```
 while true:

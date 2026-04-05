@@ -53,7 +53,7 @@ Lives at: `~/.rcc/sbom.json` (agent-local, committed to repo under `agents/<name
       "kind": "system",
       "check": "node --version",
       "min_version": "18.0.0",
-      "why": "RCC API runtime",
+      "why": "CCC API runtime",
       "required": true
     },
     {
@@ -79,7 +79,7 @@ Lives at: `~/.rcc/sbom.json` (agent-local, committed to repo under `agents/<name
       "kind": "script",
       "run": "openclaw config set gateway.mode local",
       "check": "openclaw config get gateway.mode | grep -q local",
-      "why": "required for RCC agent operation",
+      "why": "required for CCC agent operation",
       "required": true,
       "once": true
     }

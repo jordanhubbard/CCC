@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RCC test runner
+# CCC test runner
 # Run from the repo root: bash rcc/tests/run-tests.sh
 
 set -euo pipefail

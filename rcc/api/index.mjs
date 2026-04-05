@@ -5,7 +5,7 @@
  * Agents talk to this instead of maintaining local queue copies.
  *
  * Port: RCC_PORT env var (default 8789)
- * Auth: Bearer token — must be in RCC_AUTH_TOKENS (comma-separated)
+ * Auth: Bearer token — must be in CCC_AUTH_TOKENS (comma-separated)
  */
 
 import { createServer } from 'http';
@@ -33,8 +33,8 @@ const CAPABILITIES_PATH  = process.env.CAPABILITIES_PATH  || './data/agent-capab
 const REPOS_PATH      = process.env.REPOS_PATH    || './repos.json';
 const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
 const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://localhost:8789';
-const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
-const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0];
+const AUTH_TOKENS  = new Set((process.env.CCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
+const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.CCC_AUTH_TOKENS?.split(',')[0];
 const START_TIME   = Date.now();
 const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
 const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
@@ -866,7 +866,7 @@ function dashboardHtml() {
     <!-- PROJECTS -->
     <div class="pane" id="pane-projects">
       <h1>Projects</h1>
-      <p class="subtitle">Registered repos tracked by RCC</p>
+      <p class="subtitle">Registered repos tracked by CCC</p>
       <div id="proj-root"><p class="spinner">Loading…</p></div>
     </div>
     <!-- BUS -->
@@ -881,7 +881,7 @@ function dashboardHtml() {
     <!-- LOGS -->
     <div class="pane" id="pane-logs">
       <h1>Activity Log</h1>
-      <p class="subtitle">Recent events across RCC</p>
+      <p class="subtitle">Recent events across CCC</p>
       <button class="refresh-btn" onclick="loadLogs()" style="margin-bottom:.75rem">↻ Refresh</button>
       <div class="log-stream" id="log-root"><p class="spinner">Loading…</p></div>
     </div>
@@ -1833,7 +1833,7 @@ async function slackPost(endpoint, payload) {
 
 /**
  * Set the Slack channel topic and description (purpose) based on project metadata.
- * Topic:   "<description> | GitHub: <url> | Issues: <tracker> | RCC: <rcc_url>"
+ * Topic:   "<description> | GitHub: <url> | Issues: <tracker> | CCC: <rcc_url>"
  * Purpose: "<display_name> project channel. Post requests here — channel context = project context."
  * Fire-and-forget — errors are logged but do not fail the caller.
  */
@@ -1844,7 +1844,7 @@ async function setSlackChannelMeta(channelId, project) {
   if (project.description) parts.push(project.description);
   if (project.github_url)  parts.push(`GitHub: ${project.github_url}`);
   if (project.issue_tracker) parts.push(`Issues: ${project.issue_tracker}`);
-  if (project.rcc_url)     parts.push(`RCC: ${project.rcc_url}`);
+  if (project.rcc_url)     parts.push(`CCC: ${project.rcc_url}`);
   const topic   = parts.join(' | ');
   const purpose = `${project.display_name || project.id} project channel. Post requests here — channel context = project context.`;
 
@@ -2051,7 +2051,7 @@ export function startServer(port = PORT) {
 }
 
 // ── Reload persisted agent tokens into AUTH_TOKENS on startup ─────────────
-// Without this, agent tokens from agents.json are lost on every RCC restart,
+// Without this, agent tokens from agents.json are lost on every CCC restart,
 // causing Boris/RTX/etc to 401 and appear dead.
 async function reloadAgentTokens() {
   try {

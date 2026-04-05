@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-sbom.sh — Idempotent SBOM enforcer for RCC agent nodes
+# install-sbom.sh — Idempotent SBOM enforcer for CCC agent nodes
 # Usage: install-sbom.sh [path/to/sbom.json]
 # If no path given, looks for ~/.rcc/sbom.json or rcc/sbom/<AGENT_NAME>.json
 
@@ -7,8 +7,8 @@ set -euo pipefail
 
 SBOM_PATH="${1:-}"
 AGENT_NAME="${AGENT_NAME:-$(hostname -s)}"
-RCC_URL="${RCC_URL:-http://localhost:8789}"
-RCC_AGENT_TOKEN="${RCC_AGENT_TOKEN:-}"
+CCC_URL="${CCC_URL:-http://localhost:8789}"
+CCC_AGENT_TOKEN="${CCC_AGENT_TOKEN:-}"
 
 # ── Find SBOM ──────────────────────────────────────────────────────────────
 if [ -z "$SBOM_PATH" ]; then
@@ -126,11 +126,11 @@ if [ ${#ENV_MISSING[@]} -gt 0 ]; then
 fi
 
 # ── Post SBOM to hub ───────────────────────────────────────────────────────
-if [ -n "$RCC_AGENT_TOKEN" ] && [ -n "$RCC_URL" ]; then
+if [ -n "$CCC_AGENT_TOKEN" ] && [ -n "$CCC_URL" ]; then
   echo ""
-  echo "📡 Syncing SBOM to hub at $RCC_URL..."
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$RCC_URL/api/sbom/$AGENT_NAME" \
-    -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+  echo "📡 Syncing SBOM to hub at $CCC_URL..."
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CCC_URL/api/sbom/$AGENT_NAME" \
+    -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d @"$SBOM_PATH" 2>/dev/null || echo "000")
   if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then

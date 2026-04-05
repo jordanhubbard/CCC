@@ -1,4 +1,4 @@
-# RCC Dashboard v2 — Architecture & Dev Setup
+# CCC Dashboard v2 — Architecture & Dev Setup
 
 Replaces `dashboard/server.mjs` (Node.js, 2600+ lines) with a Rust/WASM stack
 that eliminates the `process.env` browser leakage bug and is significantly
@@ -16,7 +16,7 @@ Browser
            └── /*           ──static─→ dist/  (WASM bundle + CSS)
 ```
 
-**Key property:** `RCC_AGENT_TOKEN` never leaves the server. The browser only
+**Key property:** `CCC_AGENT_TOKEN` never leaves the server. The browser only
 sees the WASM binary and CSS. No Node.js, no `process.env`, no `require(`.
 
 ## Repo layout
@@ -51,8 +51,8 @@ rcc/dashboard/
 | Variable             | Default                  | Notes                                      |
 |---------------------|--------------------------|--------------------------------------------|
 | `RCC_DASHBOARD_PORT`| `8790`                   | Change to 8788 after cutover               |
-| `RCC_URL`           | `http://localhost:8789`  | Upstream RCC API address                   |
-| `RCC_AGENT_TOKEN`   | _(empty)_                | Bearer token for RCC API auth              |
+| `CCC_URL`           | `http://localhost:8789`  | Upstream CCC API address                   |
+| `CCC_AGENT_TOKEN`   | _(empty)_                | Bearer token for CCC API auth              |
 | `OPERATOR_HANDLE`   | `jkh`                    | Logged at startup                          |
 | `DASHBOARD_DIST`    | `dist`                   | Path to built WASM bundle                  |
 
@@ -102,13 +102,13 @@ cd rcc/dashboard
 make release
 
 RCC_DASHBOARD_PORT=8790 \
-RCC_URL=http://localhost:8789 \
-RCC_AGENT_TOKEN=<token> \
+CCC_URL=http://localhost:8789 \
+CCC_AGENT_TOKEN=<token> \
 DASHBOARD_DIST=dist \
 ./target/release/dashboard-server
 ```
 
-Or via systemd (see `deploy/systemd/rcc-dashboard.service`).
+Or via systemd (see `deploy/systemd/ccc-dashboard.service`).
 
 ## Smoke tests
 
@@ -155,4 +155,4 @@ The `dist/` folder produced by trunk can be copied as-is.
 - CORS header `Access-Control-Allow-Origin: *` is set on proxied responses so
   dev tools can inspect them; tighten this in production if desired.
 - Mutations (comment, choice, upvote, complete) require the server to be
-  running with a valid `RCC_AGENT_TOKEN`.
+  running with a valid `CCC_AGENT_TOKEN`.

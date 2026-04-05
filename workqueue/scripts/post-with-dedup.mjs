@@ -2,7 +2,7 @@
 /**
  * post-with-dedup.mjs — Dedup-gated workqueue item POST
  *
- * Wraps an RCC API item POST with a pre-flight Milvus similarity check.
+ * Wraps an CCC API item POST with a pre-flight Milvus similarity check.
  * If a near-dup exists (cosine similarity > threshold), skips the POST.
  * If Milvus/ollama is unreachable, falls through and posts anyway.
  *
@@ -19,7 +19,7 @@
  *     | node post-with-dedup.mjs --stdin
  *
  * Environment:
- *   RCC_URL      default: http://100.89.199.14:8789
+ *   CCC_URL      default: http://100.89.199.14:8789
  *   RCC_TOKEN    default: <YOUR_RCC_TOKEN>
  */
 
@@ -30,7 +30,7 @@ import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const RCC_URL   = process.env.RCC_URL   || 'http://100.89.199.14:8789';
+const CCC_URL   = process.env.CCC_URL   || 'http://100.89.199.14:8789';
 const RCC_TOKEN = process.env.RCC_TOKEN || '<YOUR_RCC_TOKEN>';
 const DEFAULT_THRESHOLD = parseFloat(process.env.DEDUP_THRESHOLD || '0.85');
 
@@ -76,9 +76,9 @@ async function checkDup(title, description, threshold) {
   return active.length > 0 ? active[0] : null;
 }
 
-// ── Post to RCC API ───────────────────────────────────────────────────────────
+// ── Post to CCC API ───────────────────────────────────────────────────────────
 async function postItem(item) {
-  const resp = await fetch(`${RCC_URL}/api/queue`, {
+  const resp = await fetch(`${CCC_URL}/api/queue`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -86,7 +86,7 @@ async function postItem(item) {
     },
     body: JSON.stringify(item),
   });
-  if (!resp.ok) throw new Error(`RCC POST failed: ${resp.status}`);
+  if (!resp.ok) throw new Error(`CCC POST failed: ${resp.status}`);
   return resp.json();
 }
 

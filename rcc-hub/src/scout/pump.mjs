@@ -18,7 +18,7 @@ import { existsSync } from 'fs';
 const REPOS_PATH         = process.env.REPOS_PATH || './repos.json';
 const QUEUE_PATH         = process.env.QUEUE_PATH || '../../workqueue/queue.json';
 const RCC_API            = process.env.RCC_API_INTERNAL || 'http://localhost:8789';
-const RCC_TOKEN          = process.env.RCC_AUTH_TOKENS?.split(',')[0] || '';
+const RCC_TOKEN          = process.env.CCC_AUTH_TOKENS?.split(',')[0] || '';
 const IDLE_THRESHOLD     = parseInt(process.env.PUMP_IDLE_THRESHOLD || '3', 10);  // items per agent
 const SCAN_INTERVAL_MS   = parseInt(process.env.PUMP_SCAN_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10); // 6h
 const IDLE_CHECK_MS      = parseInt(process.env.PUMP_IDLE_CHECK_MS || String(30 * 60 * 1000), 10); // 30min

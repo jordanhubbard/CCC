@@ -142,9 +142,9 @@ All 5 containers reachable via `ssh -o StrictHostKeyChecking=no -p <PORT> horde@
 
 **All Sweden containers spec (confirmed 2026-03-30):** 256GB RAM, 32 CPU, **4x L40 per container (49GB VRAM each, ~196GB total)**, Ubuntu 22.04, supervisord, no systemd, no Tailscale, no inbound. horde@horde-dgxc.nvidia.com, port per container (permanent). Reachable only from sparky (NVIDIA VPN/GlobalProtect). Rocky is the outbound gateway.
 **vLLM on all 5:** Nemotron-3-Super-120B-A12B-FP8, `--tensor-parallel-size 4`, `/home/horde/.vllm-venv/bin/vllm`, port 8080, supervisord-managed.
-**Slack tokens (2026-03-30, from Bullwinkle):** [REDACTED — stored in RCC secrets, not in repo]
+**Slack tokens (2026-03-30, from Bullwinkle):** [REDACTED — stored in CCC secrets, not in repo]
 - Peabody, Sherman, Snidely, Dudley each have xoxb- bot token + xapp- app token
-- Retrieve from RCC secrets store if needed
+- Retrieve from CCC secrets store if needed
 **Onboard state (2026-03-30):** All 5 fully onboarded via Natasha (VPN from sparky). supervisord manages: `openclaw-gateway` + `vllm` + `vllm-tunnel` on all. Shell access still requires sparky VPN or Rocky's new `/api/tunnel/shell` SSH tunnel (19080+ port range, from Rocky's bootstrap.sh update).
 
 nemo2/nemo4 have OpenClaw installed but no IDENTITY.md. Waiting on jkh for name→container mapping.
@@ -177,8 +177,8 @@ All HTTPS, Let's Encrypt certs via Caddy ACME. Verified 200 (via --resolve bypas
 | URL | What it is | Notes |
 |---|---|---|
 | https://dashboard.yourmom.photos | RCC Dashboard (WASM/Rust) | |
-| https://rcc.yourmom.photos | RCC API + Dashboard | |
-| https://api.yourmom.photos | RCC API | |
+| https://rcc.yourmom.photos | CCC API + Dashboard | |
+| https://api.yourmom.photos | CCC API | |
 | https://chat.yourmom.photos | SquirrelChat | split: /api/* + /ws* → :8793 (Rust Axum), / → :8790 (Node SPA) |
 | https://search.yourmom.photos | SearXNG meta-search | |
 | https://storage.yourmom.photos | MinIO Console | :9001 |
@@ -215,7 +215,7 @@ Fix applied: both workqueue crons (`:07` and `:37`) now fetch from `https://rcc.
 ---
 
 ## Bullwinkle RCC Heartbeat Gap (2026-03-24)
-puck is alive and sending Mattermost buddy pings every 30m. The `❓` on RCC dashboard is a config gap — Bullwinkle has never posted to `/api/heartbeat/bullwinkle` on RCC. Likely `RCC_URL` not set in his launchd environment, or launchd cron not wired to RCC. Not urgent — flag for his next setup pass.
+puck is alive and sending Mattermost buddy pings every 30m. The `❓` on CCC dashboard is a config gap — Bullwinkle has never posted to `/api/heartbeat/bullwinkle` on RCC. Likely `CCC_URL` not set in his launchd environment, or launchd cron not wired to CCC. Not urgent — flag for his next setup pass.
 
 ## Slack User IDs (omgjkh workspace, confirmed by jkh 2026-03-28)
 - **Natasha (me):** `U0AL0ECN4A1`

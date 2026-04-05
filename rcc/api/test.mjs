@@ -22,7 +22,7 @@ const TEST_AGENTS = join(tmpdir(), `rcc-test-agents-${Date.now()}.json`);
 process.env.RCC_PORT = String(TEST_PORT);
 process.env.QUEUE_PATH = TEST_QUEUE;
 process.env.AGENTS_PATH = TEST_AGENTS;
-process.env.RCC_AUTH_TOKENS = 'test-token-abc';
+process.env.CCC_AUTH_TOKENS = 'test-token-abc';
 process.env.BRAIN_STATE_PATH = join(tmpdir(), `rcc-brain-${Date.now()}.json`);
 
 // Write initial empty queue and agents

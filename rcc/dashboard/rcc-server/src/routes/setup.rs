@@ -1,5 +1,5 @@
 use crate::AppState;
-/// /routes/setup.rs — RCC setup/config API and status endpoint.
+/// /routes/setup.rs — CCC setup/config API and status endpoint.
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},

@@ -7,14 +7,14 @@ Live agentOS PD health dashboards: VibeEngine slots, GPU scheduler, watchdog mis
 ```
 sparky (seL4/Microkit) → metrics_exporter PD → shared memory ring
                                 ↓
-                      RCC /api/agentos/metrics  ← Prometheus scrapes
+                      CCC /api/agentos/metrics  ← Prometheus scrapes
                                 ↓
                          Grafana dashboard
 ```
 
 The `/api/agentos/metrics` endpoint (added to `rcc/api/index.mjs`) returns Prometheus text format
 by aggregating data from `/api/agentos/slots` and `/api/mesh`. No direct seL4 scrape needed —
-RCC is the bridge.
+CCC is the bridge.
 
 ## Prometheus Scrape Config
 
@@ -65,6 +65,6 @@ curl -X POST http://localhost:9090/-/reload
 
 ## Notes
 
-- The metrics endpoint requires Bearer auth (same token as RCC queue API)
+- The metrics endpoint requires Bearer auth (same token as CCC queue API)
 - Data is sourced from the `/api/agentos/slots` 30s cache — Prometheus scrape interval should be ≥30s
-- `metrics_exporter.c` PD (commit a3a7e4f) is the seL4-side source; RCC is the HTTP bridge
+- `metrics_exporter.c` PD (commit a3a7e4f) is the seL4-side source; CCC is the HTTP bridge

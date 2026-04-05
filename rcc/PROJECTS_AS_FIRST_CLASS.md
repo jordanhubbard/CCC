@@ -1,4 +1,4 @@
-# Projects as First-Class Objects in RCC
+# Projects as First-Class Objects in CCC
 
 **Status:** SPEC — Natasha, 2026-03-28  
 **Priority:** High  
@@ -15,7 +15,7 @@ All agent activity flows through `#agent-shared` (C0AMNRSN9EZ), intermingled. Yo
 
 ## What's Already There
 
-RCC already has most of the plumbing:
+CCC already has most of the plumbing:
 
 - **`repos.json`** — repo registry with `ownership.slack_channel` field (currently unused for routing)
 - **`projects.json`** — overlay with `slack_channels[]` array (workspace + channel_id pairs)
@@ -149,7 +149,7 @@ When posting a queue item, include `project`:
 }
 ```
 
-That's it. RCC handles the rest.
+That's it. CCC handles the rest.
 
 ---
 

@@ -33,8 +33,8 @@ cd rcc/heartbeat-local && npm install better-sqlite3
 node server.mjs
 
 # Or with env vars
-HB_LOCAL_PORT=8790 RCC_URL=http://146.190.134.110:8789 \
-RCC_AUTH_TOKEN=wq-xxx node server.mjs
+HB_LOCAL_PORT=8790 CCC_URL=http://146.190.134.110:8789 \
+CCC_AUTH_TOKEN=wq-xxx node server.mjs
 ```
 
 ## Agent heartbeat script
@@ -42,8 +42,8 @@ RCC_AUTH_TOKEN=wq-xxx node server.mjs
 In each agent's heartbeat, try CCC first, fall back to local:
 
 ```bash
-RCC_OK=$(curl -sf -X POST $RCC_URL/api/heartbeat/$AGENT_NAME \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+RCC_OK=$(curl -sf -X POST $CCC_URL/api/heartbeat/$AGENT_NAME \
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"status":"online","host":"sparky","ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}')
 

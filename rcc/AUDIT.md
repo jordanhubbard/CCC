@@ -1,11 +1,11 @@
-# RCC Codebase Audit
+# CCC Codebase Audit
 *Conducted by Natasha, 2026-04-01. Benchmark: README.md design philosophy — "as much as necessary, as little as possible." Delegate to openclaw, tokenhub, linux itself.*
 
 ---
 
 ## Executive Summary
 
-The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that has grown by accretion over multiple generations and now contains the REST API, auth, ClawBus, brain orchestration, Slack integration, tunnel management, inline HTML/JS for six different UIs (~1,220 lines), and two duplicated function definitions. The module directory structure (`brain/`, `scout/`, `vector/`, etc.) exists and has working code, but most of it is imported into the monolith rather than running as independent services. The design philosophy says "delegate to openclaw, tokenhub, linux" — in practice, RCC has re-implemented Slack messaging, LLM routing, and HTML-serving that already exists in those systems. **Recommendation: targeted refactor, not greenfield.** The core data model (queue, agents, heartbeats, secrets) is sound. The problem is surface area — too much code doing things it shouldn't own.
+The core of CCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that has grown by accretion over multiple generations and now contains the REST API, auth, ClawBus, brain orchestration, Slack integration, tunnel management, inline HTML/JS for six different UIs (~1,220 lines), and two duplicated function definitions. The module directory structure (`brain/`, `scout/`, `vector/`, etc.) exists and has working code, but most of it is imported into the monolith rather than running as independent services. The design philosophy says "delegate to openclaw, tokenhub, linux" — in practice, CCC has re-implemented Slack messaging, LLM routing, and HTML-serving that already exists in those systems. **Recommendation: targeted refactor, not greenfield.** The core data model (queue, agents, heartbeats, secrets) is sound. The problem is surface area — too much code doing things it shouldn't own.
 
 ---
 
@@ -13,12 +13,12 @@ The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that h
 
 | Section | Lines | What it does | Verdict | Notes |
 |---------|-------|--------------|---------|-------|
-| Config / env vars | 27–51 | 50+ process.env reads, path constants | **Extract** | Should be rcc.json + config module. wq-RCC-setup-001 covers this. |
+| Config / env vars | 27–51 | 50+ process.env reads, path constants | **Extract** | Should be rcc.json + config module. wq-CCC-setup-001 covers this. |
 | Services map | 52–128 | Probes URLs, returns health | **Keep / Extract** | Move to `rcc/services/index.mjs` |
 | Semantic dedup | 129–172 | Background Milvus indexer for queue dedup | **Keep / Extract** | Move to `rcc/vector/` (module already exists there) |
 | ClawBus | 173–238 | File-based message bus (JSONL) | **Extract** | `squirrelbus/` dir exists at repo root with a separate implementation. Duplication — needs reconciliation. |
-| Slack config + helpers | 239–285, 1802–1900 | Bot token, signing secret, post/verify/format | **Delegate** | openclaw handles Slack natively. RCC should send via openclaw or tokenhub, not own a bot. |
-| Heartbeats | 286–352 | In-memory agent heartbeat tracking, offline detection | **Keep / Extract** | Core RCC feature. Move to `rcc/agents/heartbeat.mjs` |
+| Slack config + helpers | 239–285, 1802–1900 | Bot token, signing secret, post/verify/format | **Delegate** | openclaw handles Slack natively. CCC should send via openclaw or tokenhub, not own a bot. |
+| Heartbeats | 286–352 | In-memory agent heartbeat tracking, offline detection | **Keep / Extract** | Core CCC feature. Move to `rcc/agents/heartbeat.mjs` |
 | Disappearance detection | 353–403 | Polls agents, fires Slack alert on offline | **Keep, simplify** | The Slack alert should go through openclaw, not a direct bot call |
 | JSON file helpers | 404–636 | readJsonFile, writeJsonFile, queue/agents/secrets I/O | **Keep / Extract** | Move to `rcc/lib/storage.mjs` |
 | HTML: dashboardHtml | 725–1157 | 432-line inline HTML dashboard | **Delete** | Superseded by Leptos WASM dashboard in `rcc/dashboard/`. Dead code. |
@@ -53,12 +53,12 @@ The core of RCC is a single 8,176-line Node.js file (`rcc/api/index.mjs`) that h
 
 | Feature | Currently in | Should delegate to | Reasoning |
 |---------|-------------|-------------------|-----------|
-| Slack messaging | rcc/api/index.mjs (~200 lines) | openclaw | openclaw has a full Slack plugin. RCC agents already receive Slack via openclaw. Having RCC maintain its own bot duplicates infrastructure and credentials. |
-| LLM calls | scattered in api/index.mjs | tokenhub | tokenhub is the LLM proxy. All LLM calls in RCC should go through `localhost:8090/v1/` — some do, some don't. |
+| Slack messaging | rcc/api/index.mjs (~200 lines) | openclaw | openclaw has a full Slack plugin. CCC agents already receive Slack via openclaw. Having CCC maintain its own bot duplicates infrastructure and credentials. |
+| LLM calls | scattered in api/index.mjs | tokenhub | tokenhub is the LLM proxy. All LLM calls in CCC should go through `localhost:8090/v1/` — some do, some don't. |
 | HTML serving | inline in api/index.mjs | dashboard-ui (Leptos) or standalone HTML files | The API should return JSON. HTML belongs in the dashboard or static files served by dashboard-server. |
-| SSH tunnel management | api/index.mjs tunnel routes | linux (systemd SSH tunnel services) | Tunnel lifecycle is better managed by systemd. RCC can read status but shouldn't own the lifecycle. |
-| SMTP/email | missing | nodemailer + Resend (wq-SC-auth-001) | Email sending is a utility, not a core RCC concern. Wire once, delegate everywhere. |
-| Config management | 50+ process.env vars | rcc.json + setup TUI (wq-RCC-setup-001) | linux env vars are fine for secrets; a config file is better for structured settings. |
+| SSH tunnel management | api/index.mjs tunnel routes | linux (systemd SSH tunnel services) | Tunnel lifecycle is better managed by systemd. CCC can read status but shouldn't own the lifecycle. |
+| SMTP/email | missing | nodemailer + Resend (wq-SC-auth-001) | Email sending is a utility, not a core CCC concern. Wire once, delegate everywhere. |
+| Config management | 50+ process.env vars | rcc.json + setup TUI (wq-CCC-setup-001) | linux env vars are fine for secrets; a config file is better for structured settings. |
 
 ---
 
@@ -80,7 +80,7 @@ rcc/
       github.mjs       ← /api/github/* handlers (or delegate to rcc/scout/)
       slack.mjs        ← /api/slack/* handlers (or delete if delegating to openclaw)
       users.mjs        ← /api/users/*, /api/auth/* handlers (wq-SC-auth-001)
-      setup.mjs        ← /api/setup/* handlers (wq-RCC-setup-001)
+      setup.mjs        ← /api/setup/* handlers (wq-CCC-setup-001)
   lib/
     storage.mjs        ← readJsonFile, writeJsonFile, all I/O helpers
     auth.mjs           ← isAuthed, isAdminAuthed, token management
@@ -96,8 +96,8 @@ rcc/
 
 | File | Status | Notes |
 |------|--------|-------|
-| wq-RCC-setup-001.json | **Active** (proposed) | First-run TUI + config management. Prerequisite for wq-RCC-audit-001 action items. |
-| wq-RCC-audit-001.json | **Active** (this audit) | Produces this document. |
+| wq-CCC-setup-001.json | **Active** (proposed) | First-run TUI + config management. Prerequisite for wq-CCC-audit-001 action items. |
+| wq-CCC-audit-001.json | **Active** (this audit) | Produces this document. |
 | queue.json.bak-20260329 | **Safe to delete** | Backup from March 29. Production queue has moved on. |
 | queue.json.bak-20260331-073218 | **Safe to delete** | Backup from March 31 morning. |
 
@@ -132,7 +132,7 @@ rcc/
 RCC_PORT                  Server port (default 8789)
 RCC_PUBLIC_URL            Public URL for callbacks and links
 RCC_ADMIN_TOKEN           Admin auth token
-RCC_AUTH_TOKENS           Comma-separated agent tokens
+CCC_AUTH_TOKENS           Comma-separated agent tokens
 ```
 
 **High value (features degrade without these):**
@@ -168,7 +168,7 @@ TUNNEL_PORT_START
 OMGJKH_BOT              Alias for SLACK_BOT_TOKEN? Or separate bot?
 AGENTFS_URL             agentOS filesystem — active or aspirational?
 AGENTOS_ARCH            agentOS architecture flag
-WORKSPACE_DIR           OpenClaw workspace path — why is RCC reading this?
+WORKSPACE_DIR           OpenClaw workspace path — why is CCC reading this?
 DEFAULT_TRIAGING_AGENT  Brain routing hint — check if still used
 NANOC_BIN               nanolang compiler path — only used in playground
 ```
@@ -185,7 +185,7 @@ NANOC_BIN               nanolang compiler path — only used in playground
 5. Confirm and delete `rcc/crush-server/` if disabled (confirm with Rocky — 630 files)
 
 **Phase 2 — Config consolidation (prerequisite for everything else):**
-6. Implement `rcc.json` config file + `rcc/lib/config.mjs` loader (wq-RCC-setup-001)
+6. Implement `rcc.json` config file + `rcc/lib/config.mjs` loader (wq-CCC-setup-001)
 7. Move all mandatory + high-value env vars to rcc.json with env fallback
 8. Document which `OMGJKH_BOT` / `AGENTFS_URL` / `WORKSPACE_DIR` vars are legacy
 
@@ -195,7 +195,7 @@ NANOC_BIN               nanolang compiler path — only used in playground
 11. Extract `rcc/lib/storage.mjs` — all JSON I/O helpers
 12. Extract remaining route groups one at a time, test after each
 
-**Phase 4 — Delegation (shrinks RCC's surface area):**
+**Phase 4 — Delegation (shrinks CCC's surface area):**
 13. Evaluate delegating Slack notifications to openclaw (removes ~200 lines + credentials)
 14. Audit all LLM calls in api/index.mjs — ensure all go through tokenhub
 15. Reconcile ClawBus: pick one implementation (in-process vs standalone), delete the other

@@ -316,7 +316,7 @@ export async function createIssueFromWQ(wqItem, repo) {
     wqItem.description || wqItem.title,
     '',
     `---`,
-    `*Imported from RCC workqueue item \`${wqItem.id}\`*`,
+    `*Imported from CCC workqueue item \`${wqItem.id}\`*`,
     wqItem.assignee ? `*Assigned to: ${wqItem.assignee}*` : '',
   ].filter(l => l !== undefined).join('\n');
 
@@ -354,7 +354,7 @@ export async function createIssueFromWQ(wqItem, repo) {
   return { ok: true, issue: { number: issue.number, url: issue.html_url, title: issue.title }, wqId: wqItem.id };
 }
 
-// ── Periodic sync (call this on startup in RCC API) ───────────────────────
+// ── Periodic sync (call this on startup in CCC API) ───────────────────────
 let _syncInterval = null;
 
 export function startPeriodicSync(intervalMs = 15 * 60 * 1000) {

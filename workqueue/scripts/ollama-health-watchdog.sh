@@ -3,7 +3,7 @@
 #
 # Checks ollama (qwen2.5-coder:32b) health via a small test prompt.
 # If response time >30s or output malformed, restarts the model.
-# Reports status back to RCC heartbeat payload format.
+# Reports status back to CCC heartbeat payload format.
 #
 # Usage: ollama-health-watchdog.sh [--model <model>] [--timeout <secs>]
 # Exit: 0=ok, 1=degraded (restarted), 2=unreachable

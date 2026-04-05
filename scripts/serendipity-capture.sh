@@ -17,7 +17,7 @@
 # the finding as a workqueue idea item without losing the thread.
 #
 # Adapted from instar (JKHeadley/instar) for the rockyandfriends/OpenClaw
-# agent fleet. Key adaptation: posts to RCC workqueue API instead of writing
+# agent fleet. Key adaptation: posts to CCC workqueue API instead of writing
 # local .instar/state/serendipity/ JSON files.
 #
 # Original: instar/src/templates/scripts/serendipity-capture.sh
@@ -34,19 +34,19 @@ MAX_RATIONALE_LEN=1000
 VALID_CATEGORIES="bug improvement feature pattern refactor security"
 VALID_READINESS="idea-only partially-implemented implementation-complete tested"
 
-# --- RCC config ---
-RCC_URL="${RCC_URL:-https://api.yourmom.photos}"
-RCC_TOKEN="${RCC_AGENT_TOKEN:-}"
+# --- CCC config ---
+CCC_URL="${CCC_URL:-https://api.yourmom.photos}"
+RCC_TOKEN="${CCC_AGENT_TOKEN:-}"
 if [ -z "$RCC_TOKEN" ]; then
   # Try sourcing from ~/.rcc/.env
   if [ -f "$HOME/.rcc/.env" ]; then
     # shellcheck disable=SC1090
     source "$HOME/.rcc/.env" 2>/dev/null || true
-    RCC_TOKEN="${RCC_AGENT_TOKEN:-}"
+    RCC_TOKEN="${CCC_AGENT_TOKEN:-}"
   fi
 fi
 if [ -z "$RCC_TOKEN" ]; then
-  echo "Error: RCC_AGENT_TOKEN not set. Cannot post to workqueue." >&2
+  echo "Error: CCC_AGENT_TOKEN not set. Cannot post to workqueue." >&2
   exit 1
 fi
 
@@ -121,9 +121,9 @@ fi
 SCOUT_KEY="serendipity:$(echo "$TITLE" | python3 -c 'import sys,hashlib; print(hashlib.sha256(sys.stdin.read().strip().encode()).hexdigest()[:12])')"
 
 # --- Export vars for python subprocess ---
-export TITLE DESCRIPTION CATEGORY RATIONALE READINESS SCOUT_KEY RCC_URL RCC_TOKEN AGENT_NAME
+export TITLE DESCRIPTION CATEGORY RATIONALE READINESS SCOUT_KEY CCC_URL RCC_TOKEN AGENT_NAME
 
-# --- Post to RCC workqueue ---
+# --- Post to CCC workqueue ---
 RESPONSE=$(python3 -c "
 import json, urllib.request, urllib.error, os, sys
 
@@ -139,7 +139,7 @@ payload = {
 
 data = json.dumps(payload).encode()
 req = urllib.request.Request(
-    os.environ['RCC_URL'] + '/api/queue',
+    os.environ['CCC_URL'] + '/api/queue',
     data=data,
     headers={
         'Content-Type': 'application/json',
@@ -155,9 +155,9 @@ except urllib.error.HTTPError as e:
     body = json.loads(e.read())
     print(json.dumps({'ok': False, 'error': str(e), 'body': body}), file=sys.stderr)
     sys.exit(1)
-" 2>&1) || { echo "Error: Failed to post to RCC: $RESPONSE" >&2; exit 1; }
+" 2>&1) || { echo "Error: Failed to post to CCC: $RESPONSE" >&2; exit 1; }
 
-export TITLE DESCRIPTION CATEGORY RATIONALE READINESS SCOUT_KEY RCC_URL RCC_TOKEN AGENT_NAME
+export TITLE DESCRIPTION CATEGORY RATIONALE READINESS SCOUT_KEY CCC_URL RCC_TOKEN AGENT_NAME
 
 # --- Update rate limit counter ---
 echo $((EXISTING_COUNT + 1)) > "$RATE_FILE"

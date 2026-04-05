@@ -1,10 +1,10 @@
 [package]
-name = "rcc-server"
+name = "ccc-server"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "rcc-server"
+name = "ccc-server"
 path = "src/main.rs"
 
 [dependencies]

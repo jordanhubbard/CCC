@@ -1,4 +1,4 @@
-# Deploy — RCC Agent Node Setup
+# Deploy — CCC Agent Node Setup
 
 This directory contains everything needed to bootstrap a new agent node and keep it in sync with the repo.
 
@@ -12,7 +12,7 @@ git clone git@github.com:yourorg/your-rcc-repo.git ~/.rcc/workspace
 bash ~/.rcc/workspace/deploy/rcc-init.sh
 ```
 
-`rcc-init.sh` handles everything: it asks for your agent name, whether this node is the RCC host or a client, configures `~/.rcc/.env`, sets up data dirs, and optionally installs the API as a system service.
+`rcc-init.sh` handles everything: it asks for your agent name, whether this node is the CCC host or a client, configures `~/.rcc/.env`, sets up data dirs, and optionally installs the API as a system service.
 
 ### Manual path (if you prefer)
 
@@ -23,7 +23,7 @@ bash ~/.rcc/workspace/deploy/setup-node.sh
 # 2. Fill in credentials
 nano ~/.rcc/.env
 
-# 3. Register with RCC
+# 3. Register with CCC
 bash ~/.rcc/workspace/deploy/register-agent.sh
 
 # 4. Test the pull
@@ -39,13 +39,13 @@ tmux send-keys -t claude-main 'claude --dangerously-skip-permissions' Enter
 `rcc-init.sh` is the recommended entry point for any new node. It:
 
 1. Prompts for `AGENT_NAME` and `AGENT_HOST`
-2. Asks whether this node **is the RCC host** or a **client** connecting to one
-3. If **RCC host**:
+2. Asks whether this node **is the CCC host** or a **client** connecting to one
+3. If **CCC host**:
    - Prompts for port, auth tokens, and public hostname
    - Creates data directories (`~/.rcc/data/{queue,agents,journal}`)
-   - Optionally installs `rcc-api.service` (Linux systemd) or `com.rcc.api` (macOS LaunchAgent)
+   - Optionally installs `ccc-api.service` (Linux systemd) or `com.rcc.api` (macOS LaunchAgent)
 4. If **client**:
-   - Prompts for the remote RCC URL and agent token
+   - Prompts for the remote CCC URL and agent token
 5. Prompts for optional capabilities (GPU, Claude CLI, MinIO, Slack, etc.)
 6. Writes a filled-in `~/.rcc/.env` (backs up any existing one)
 7. Prints next steps
@@ -54,7 +54,7 @@ Re-running is safe — it backs up `.env` before overwriting.
 
 ## The Coding CLI Turbocharger
 
-RCC coordinates. It doesn't do heavy coding in-process — that burns tokens and blocks everything else.
+CCC coordinates. It doesn't do heavy coding in-process — that burns tokens and blocks everything else.
 
 The turbocharger pattern: a coding CLI (Claude Code, Codex, OpenCode) runs persistently in a tmux session. When a work item arrives with `preferred_executor: claude_cli`, the brain calls `workqueue/scripts/claude-worker.mjs`, which:
 1. Finds the active coding CLI tmux session
@@ -62,7 +62,7 @@ The turbocharger pattern: a coding CLI (Claude Code, Codex, OpenCode) runs persi
 3. Waits for completion
 4. Returns output
 
-Cost model: coding CLI = fixed monthly subscription, not per-token. RCC's inference key stays for coordination only.
+Cost model: coding CLI = fixed monthly subscription, not per-token. CCC's inference key stays for coordination only.
 
 **Required: install a coding CLI on every agent.**
 
@@ -86,7 +86,7 @@ Without the coding CLI turbocharger, `claude_cli` work items stay pending foreve
 Runs every 10 minutes automatically. It:
 1. `git pull`s from the repo
 2. If anything changed in `dashboard/`, `rcc/`, or `deploy/`: restarts the affected service
-3. Posts a heartbeat to RCC (if `RCC_URL` and `RCC_AGENT_TOKEN` are set)
+3. Posts a heartbeat to CCC (if `CCC_URL` and `CCC_AGENT_TOKEN` are set)
 4. Logs to `~/.rcc/logs/pull.log`
 
 Manual trigger:
@@ -108,8 +108,8 @@ Required fields:
 |-------|-------------|
 | `AGENT_NAME` | Short unique name for this agent |
 | `AGENT_HOST` | Hostname for display in dashboard |
-| `RCC_URL` | URL of the RCC API server |
-| `RCC_AGENT_TOKEN` | Bearer token (issued after registration) |
+| `CCC_URL` | URL of the CCC API server |
+| `CCC_AGENT_TOKEN` | Bearer token (issued after registration) |
 
 Optional: `NVIDIA_API_KEY`, MinIO creds, Azure Blob SAS, Slack/Mattermost/Telegram tokens.
 
@@ -187,9 +187,9 @@ cp deploy/launchd/com.rcc.agent.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.rcc.agent.plist
 ```
 
-## RCC API Server
+## CCC API Server
 
-The RCC API (`rcc/api/index.mjs`) runs on the hub node (port 8789 by default). It provides:
+The CCC API (`rcc/api/index.mjs`) runs on the hub node (port 8789 by default). It provides:
 
 - `GET /health` — health check (public)
 - `GET /api/queue` — full work queue (public read)
@@ -204,11 +204,11 @@ The RCC API (`rcc/api/index.mjs`) runs on the hub node (port 8789 by default). I
 - `GET /api/brain/status` — LLM brain status (public)
 - `POST /api/brain/request` — submit LLM request to brain queue (auth)
 
-Auth: `Authorization: Bearer <token>`. Set `RCC_AUTH_TOKENS=token1,token2` on the RCC server.
+Auth: `Authorization: Bearer <token>`. Set `CCC_AUTH_TOKENS=token1,token2` on the CCC server.
 
 Start manually:
 ```bash
-RCC_AUTH_TOKENS=your-token node rcc/api/index.mjs
+CCC_AUTH_TOKENS=your-token node rcc/api/index.mjs
 ```
 
 ## Development
@@ -225,6 +225,6 @@ node --test dashboard/test/api.test.mjs  # 22 tests
 | Type | Description |
 |------|-------------|
 | `full` | Full VM — inbound + outbound. Can receive ClawBus messages directly. |
-| `container` | GPU container — outbound only. Polls RCC for messages. |
-| `local` | Home PC/desktop — NAT'd. Polls RCC. |
+| `container` | GPU container — outbound only. Polls CCC for messages. |
+| `local` | Home PC/desktop — NAT'd. Polls CCC. |
 | `spark` | DGX Spark — treated as `local` unless network allows more. |

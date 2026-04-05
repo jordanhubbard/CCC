@@ -19,7 +19,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 AGENT_NAME="${AGENT_NAME:-unknown}"
-RCC_URL="${RCC_URL:-}"
+CCC_URL="${CCC_URL:-}"
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [$AGENT_NAME] $1" >> "$LOG_FILE" 2>&1
@@ -44,7 +44,7 @@ fi
 
 cd "$WORKSPACE"
 
-# ── Runtime symlinks (queue.json — RCC API is authoritative source) ────────
+# ── Runtime symlinks (queue.json — CCC API is authoritative source) ────────
 RCC_QUEUE="$HOME/.rcc/data/queue.json"
 WQ_QUEUE="$WORKSPACE/workqueue/queue.json"
 if [ -f "$RCC_QUEUE" ] && [ ! -L "$WQ_QUEUE" ]; then
@@ -90,9 +90,9 @@ else
 
   # Restart rcc-api if it changed
   if echo "$CHANGED" | grep -q "^rcc/api/"; then
-    log "RCC API changed — restarting rcc-api.service"
-    if command -v systemctl &>/dev/null && systemctl is-active --quiet rcc-api.service 2>/dev/null; then
-      sudo systemctl restart rcc-api.service && log "rcc-api.service restarted" || log "WARNING: restart failed"
+    log "CCC API changed — restarting ccc-api.service"
+    if command -v systemctl &>/dev/null && systemctl is-active --quiet ccc-api.service 2>/dev/null; then
+      sudo systemctl restart ccc-api.service && log "ccc-api.service restarted" || log "WARNING: restart failed"
     fi
   fi
 
@@ -104,9 +104,9 @@ else
   fi
 fi
 
-# ── Sync secrets from RCC ────────────────────────────────────────────────
+# ── Sync secrets from CCC ────────────────────────────────────────────────
 # Picks up any rotated secrets without requiring re-bootstrap
-if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ]; then
+if [ -n "$CCC_URL" ] && [ -n "$CCC_AGENT_TOKEN" ]; then
   SECRETS_SYNC="$WORKSPACE/deploy/secrets-sync.sh"
   if [ -f "$SECRETS_SYNC" ]; then
     if bash "$SECRETS_SYNC" >> "$LOG_FILE" 2>&1; then
@@ -124,11 +124,11 @@ if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ]; then
   fi
 fi
 
-# ── Sync secrets from RCC ─────────────────────────────────────────────────
-# Refreshes ~/.rcc/.env with latest secret values from the RCC secrets store.
-# Never clobbers RCC_AGENT_TOKEN (identity key) or AGENT_NAME/AGENT_HOST.
+# ── Sync secrets from CCC ─────────────────────────────────────────────────
+# Refreshes ~/.rcc/.env with latest secret values from the CCC secrets store.
+# Never clobbers CCC_AGENT_TOKEN (identity key) or AGENT_NAME/AGENT_HOST.
 # Runs on every pull to pick up rotated credentials automatically.
-if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ] && command -v node >/dev/null 2>&1; then
+if [ -n "$CCC_URL" ] && [ -n "$CCC_AGENT_TOKEN" ] && command -v node >/dev/null 2>&1; then
   _env_file="$HOME/.rcc/.env"
   _sync_count=0
   # macOS vs Linux sed -i compatibility
@@ -139,7 +139,7 @@ if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ] && command -v node >/dev/null 
   fi
   _set_env_key() {
     local _key="$1" _val="$2"
-    case "$_key" in RCC_AGENT_TOKEN|RCC_URL|AGENT_NAME|AGENT_HOST) return ;; esac
+    case "$_key" in CCC_AGENT_TOKEN|CCC_URL|AGENT_NAME|AGENT_HOST) return ;; esac
     if grep -q "^${_key}=" "$_env_file" 2>/dev/null; then
       _sed_i "s|^${_key}=.*|${_key}=${_val}|" "$_env_file"
     else
@@ -149,8 +149,8 @@ if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ] && command -v node >/dev/null 
   }
   for _alias in slack mattermost minio milvus nvidia github; do
     _resp=$(curl -sf --max-time 5 \
-      -H "Authorization: Bearer ${RCC_AGENT_TOKEN}" \
-      "${RCC_URL}/api/secrets/${_alias}" 2>/dev/null || true)
+      -H "Authorization: Bearer ${CCC_AGENT_TOKEN}" \
+      "${CCC_URL}/api/secrets/${_alias}" 2>/dev/null || true)
     [ -z "$_resp" ] && continue
     if echo "$_resp" | grep -q '"secrets"'; then
       while IFS='=' read -r _k _v; do
@@ -167,23 +167,23 @@ if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ] && command -v node >/dev/null 
   done
   if [ "$_sync_count" -gt 0 ]; then
     chmod 600 "$_env_file"
-    log "Secrets synced from RCC: ${_sync_count} var(s) updated"
+    log "Secrets synced from CCC: ${_sync_count} var(s) updated"
     # Reload env after sync
     set -a; source "$_env_file"; set +a
   fi
 fi
 
-# ── Post heartbeat to RCC ─────────────────────────────────────────────────
-if [ -n "$RCC_URL" ] && [ -n "$RCC_AGENT_TOKEN" ]; then
+# ── Post heartbeat to CCC ─────────────────────────────────────────────────
+if [ -n "$CCC_URL" ] && [ -n "$CCC_AGENT_TOKEN" ]; then
   HEARTBEAT_PAYLOAD="{\"agent\":\"$AGENT_NAME\",\"host\":\"${AGENT_HOST:-$(hostname)}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"online\",\"pullRev\":\"$AFTER\"}"
   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "$RCC_URL/api/heartbeat/$AGENT_NAME" \
-    -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+    -X POST "$CCC_URL/api/heartbeat/$AGENT_NAME" \
+    -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$HEARTBEAT_PAYLOAD" \
     --max-time 10 2>/dev/null)
   if [ "$HTTP_STATUS" = "200" ]; then
-    log "Heartbeat posted to RCC"
+    log "Heartbeat posted to CCC"
   else
     log "WARNING: Heartbeat POST returned HTTP $HTTP_STATUS"
   fi

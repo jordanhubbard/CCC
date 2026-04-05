@@ -32,10 +32,10 @@ then block for the specified duration before resuming.
 
 ```sh
 # Pause all agents for 10 minutes (deploying a new model)
-RCC_AUTH_TOKEN=... node rcc/scripts/send-quench.mjs all 10 "deploying gemma-4-31B"
+CCC_AUTH_TOKEN=... node rcc/scripts/send-quench.mjs all 10 "deploying gemma-4-31B"
 
 # Pause a specific agent for 5 minutes
-RCC_AUTH_TOKEN=... node rcc/scripts/send-quench.mjs peabody 5 "GPU busy"
+CCC_AUTH_TOKEN=... node rcc/scripts/send-quench.mjs peabody 5 "GPU busy"
 ```
 
 ## Agent Integration

@@ -8,9 +8,9 @@
  *   node model-deploy.mjs --validate google/gemma-4-31B-it  # dry-run validate only
  *
  * Environment:
- *   RCC_AGENT_TOKEN  — RCC API auth token
+ *   CCC_AGENT_TOKEN  — CCC API auth token
  *   HF_TOKEN         — HuggingFace API token
- *   RCC_URL          — RCC base URL (default: http://localhost:8789)
+ *   CCC_URL          — CCC base URL (default: http://localhost:8789)
  */
 
 import { execSync, spawnSync } from 'child_process';
@@ -20,8 +20,8 @@ import { parseArgs } from 'util';
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const RCC_URL = process.env.RCC_URL || 'http://localhost:8789';
-const RCC_TOKEN = process.env.RCC_AGENT_TOKEN || '';
+const CCC_URL = process.env.CCC_URL || 'http://localhost:8789';
+const RCC_TOKEN = process.env.CCC_AGENT_TOKEN || '';
 const HF_TOKEN = process.env.HF_TOKEN || '';
 const LOG_DIR = process.env.HOME + '/.openclaw/workspace/logs';
 // Use ClawFS (JuiceFS shared volume) as model cache if mounted — models stored there are
@@ -58,14 +58,14 @@ function log(msg) {
 function err(msg) { log(`ERROR: ${msg}`); }
 
 async function rccGet(path) {
-  const resp = await fetch(`${RCC_URL}${path}`, {
+  const resp = await fetch(`${CCC_URL}${path}`, {
     headers: { Authorization: `Bearer ${RCC_TOKEN}` }
   });
   return resp.json();
 }
 
 async function rccPost(path, body) {
-  const resp = await fetch(`${RCC_URL}${path}`, {
+  const resp = await fetch(`${CCC_URL}${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${RCC_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -194,7 +194,7 @@ async function reloadAgentModel(agentName, port, newModelId, hfToken) {
   }
   log(`  ${agentName}: current model(s): ${currentModels.join(', ')}`);
 
-  // Send reload command via RCC exec API
+  // Send reload command via CCC exec API
   const execPayload = {
     targets: [agentName],
     mode: 'shell',
@@ -408,7 +408,7 @@ async function deploy(modelId, targetAgents, dryRun = false) {
   log(`  Failed:  ${failed.join(', ') || 'none'}`);
   log(`${'═'.repeat(60)}\n`);
 
-  // Post result to RCC queue item if DEPLOY_ITEM_ID is set
+  // Post result to CCC queue item if DEPLOY_ITEM_ID is set
   if (process.env.DEPLOY_ITEM_ID) {
     const resultText = `Model ${modelId} deployed. Success: [${succeeded.join(',')}] Failed: [${failed.join(',')}]`;
     await rccPost(`/api/item/${process.env.DEPLOY_ITEM_ID}/complete`, {
@@ -453,15 +453,15 @@ Options:
   -h, --help        This help
 
 Environment:
-  RCC_AGENT_TOKEN   RCC API token
+  CCC_AGENT_TOKEN   CCC API token
   HF_TOKEN          HuggingFace API token
-  RCC_URL           RCC URL (default: http://localhost:8789)
+  CCC_URL           CCC URL (default: http://localhost:8789)
 `);
   process.exit(0);
 }
 
 if (!RCC_TOKEN) {
-  console.error('RCC_AGENT_TOKEN not set. source ~/.rcc/.env first.');
+  console.error('CCC_AGENT_TOKEN not set. source ~/.rcc/.env first.');
   process.exit(1);
 }
 

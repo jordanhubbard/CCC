@@ -7,7 +7,7 @@
  *
  * Strategy A (default): Embedding similarity via ollama nomic-embed-text
  *   Embeds title+description, computes cosine similarity against all
- *   pending items fetched from RCC API. No Milvus dependency.
+ *   pending items fetched from CCC API. No Milvus dependency.
  *
  * Strategy B (--milvus): Query rcc_queue_sparky Milvus collection (768-dim)
  *   Faster for large queues, requires items to have been ingested first.
@@ -27,7 +27,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 
 const OLLAMA_BASE_URL  = process.env.OLLAMA_BASE_URL  || 'http://localhost:11434';
 const OLLAMA_MODEL     = 'nomic-embed-text';
-const RCC_URL          = process.env.RCC_URL          || 'http://100.89.199.14:8789';
+const CCC_URL          = process.env.CCC_URL          || 'http://100.89.199.14:8789';
 const RCC_TOKEN        = process.env.RCC_TOKEN        || '<YOUR_RCC_TOKEN>';
 const DEDUP_THRESHOLD  = parseFloat(process.env.DEDUP_THRESHOLD || '0.85');
 const DEDUP_LOG_PATH   = process.env.DEDUP_LOG_PATH   || '/tmp/wq-dedup-skips.jsonl';
@@ -50,11 +50,11 @@ function cosineSim(a, b) {
 }
 
 async function fetchPendingItems() {
-  const resp = await fetch(`${RCC_URL}/api/queue`, {
+  const resp = await fetch(`${CCC_URL}/api/queue`, {
     headers: { 'Authorization': `Bearer ${RCC_TOKEN}` },
     signal: AbortSignal.timeout(10_000),
   });
-  if (!resp.ok) throw new Error(`RCC API ${resp.status}`);
+  if (!resp.ok) throw new Error(`CCC API ${resp.status}`);
   const data = await resp.json();
   return (data.items || []).filter(i =>
     ['pending','in_progress','in-progress','incubating'].includes(i.status)
@@ -97,12 +97,12 @@ async function main() {
     process.exit(2);
   }
 
-  // Fetch all pending items from RCC and embed+compare each
+  // Fetch all pending items from CCC and embed+compare each
   let candidates;
   try {
     candidates = await fetchPendingItems();
   } catch (err) {
-    if (!values.quiet) console.error(`[dedup] RCC fetch failed: ${err.message} — allowing post`);
+    if (!values.quiet) console.error(`[dedup] CCC fetch failed: ${err.message} — allowing post`);
     console.log(JSON.stringify({ dup: false, reason: 'rcc_error', error: err.message }));
     process.exit(2);
   }

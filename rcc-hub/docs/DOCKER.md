@@ -18,7 +18,7 @@ cd rockyandfriends/rcc-hub
 
 # 2. Configure
 cp .env.template .env
-$EDITOR .env   # fill in RCC_PORT, RCC_AUTH_TOKENS, RCC_ADMIN_TOKEN at minimum
+$EDITOR .env   # fill in RCC_PORT, CCC_AUTH_TOKENS, RCC_ADMIN_TOKEN at minimum
 
 # 3. Launch
 docker compose up -d
@@ -46,7 +46,7 @@ The three required variables:
 
 ```dotenv
 RCC_PORT=8789
-RCC_AUTH_TOKENS=your-agent-token-1,your-agent-token-2
+CCC_AUTH_TOKENS=your-agent-token-1,your-agent-token-2
 RCC_ADMIN_TOKEN=your-admin-token
 ```
 

@@ -18,10 +18,10 @@ metadata:
     tags: [CCC, Fleet, Orchestration, ClawBus, Remote-Exec, Heartbeat, Infrastructure]
 prerequisites:
   env:
-    - RCC_URL          # Base URL of CCC API, e.g. http://146.190.134.110:8789
-    - RCC_AGENT_TOKEN  # This node's auth token for the CCC API
+    - CCC_URL          # Base URL of CCC API, e.g. http://146.190.134.110:8789
+    - CCC_AGENT_TOKEN  # This node's auth token for the CCC API
   optional_env:
-    - CLAWBUS_TOKEN    # ClawBus SSE subscription token (may equal RCC_AGENT_TOKEN)
+    - CLAWBUS_TOKEN    # ClawBus SSE subscription token (may equal CCC_AGENT_TOKEN)
     - AGENT_NAME       # This node's registered name (e.g. "rocky", "peabody")
 ---
 
@@ -36,8 +36,8 @@ CCC has two deployment modes. Both use the same API.
 ## Required environment
 
 ```bash
-export RCC_URL=http://146.190.134.110:8789   # or https://api.yourmom.photos
-export RCC_AGENT_TOKEN=claw-xxxxxxxxxxxxxxxx  # from TokenHub or .rcc/.env
+export CCC_URL=http://146.190.134.110:8789   # or https://api.yourmom.photos
+export CCC_AGENT_TOKEN=claw-xxxxxxxxxxxxxxxx  # from TokenHub or .rcc/.env
 export AGENT_NAME=rocky                       # this node's name
 ```
 
@@ -50,8 +50,8 @@ All API calls below use these variables. Inline them or source `~/.rcc/.env`.
 ### Register this node
 
 ```bash
-curl -s -X POST "$RCC_URL/api/agents/register" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -s -X POST "$CCC_URL/api/agents/register" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"$AGENT_NAME\",\"host\":\"$(hostname)\",\"role\":\"agent\"}"
 ```
@@ -59,8 +59,8 @@ curl -s -X POST "$RCC_URL/api/agents/register" \
 ### Post a heartbeat (keep the node online)
 
 ```bash
-curl -s -X POST "$RCC_URL/api/agents/$AGENT_NAME/heartbeat" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -s -X POST "$CCC_URL/api/agents/$AGENT_NAME/heartbeat" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"status\":\"ok\"}"
 ```
@@ -71,10 +71,10 @@ A node is considered **online** if its last heartbeat was < 5 minutes ago. Post 
 
 ```bash
 # All agents + online status
-curl -s "$RCC_URL/api/agents" -H "Authorization: Bearer $RCC_AGENT_TOKEN" | jq '.agents[] | {name, online, lastSeen}'
+curl -s "$CCC_URL/api/agents" -H "Authorization: Bearer $CCC_AGENT_TOKEN" | jq '.agents[] | {name, online, lastSeen}'
 
 # Single agent health
-curl -s "$RCC_URL/api/agents/$AGENT_NAME/health" -H "Authorization: Bearer $RCC_AGENT_TOKEN"
+curl -s "$CCC_URL/api/agents/$AGENT_NAME/health" -H "Authorization: Bearer $CCC_AGENT_TOKEN"
 ```
 
 ---
@@ -86,8 +86,8 @@ Dispatch shell commands to one or more fleet nodes without SSH. Nodes must be ru
 ### Send a command
 
 ```bash
-EXEC_RESP=$(curl -s -X POST "$RCC_URL/api/exec" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+EXEC_RESP=$(curl -s -X POST "$CCC_URL/api/exec" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
     \"targets\": [\"peabody\"],
@@ -106,7 +106,7 @@ echo "Exec ID: $EXEC_ID"
 ```bash
 # Poll until results arrive (typically < 5s if node is live)
 for i in $(seq 1 12); do
-  RESULT=$(curl -s "$RCC_URL/api/exec/$EXEC_ID" -H "Authorization: Bearer $RCC_AGENT_TOKEN")
+  RESULT=$(curl -s "$CCC_URL/api/exec/$EXEC_ID" -H "Authorization: Bearer $CCC_AGENT_TOKEN")
   STATUS=$(echo "$RESULT" | jq -r '.status // "pending"')
   if [ "$STATUS" != "pending" ]; then
     echo "$RESULT" | jq '.results'
@@ -119,8 +119,8 @@ done
 ### Send to all nodes
 
 ```bash
-curl -s -X POST "$RCC_URL/api/exec" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -s -X POST "$CCC_URL/api/exec" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["all"],"mode":"shell","code":"uptime","timeout_ms":10000}'
 ```
@@ -134,8 +134,8 @@ The ClawBus is a Server-Sent Events broadcast bus. All fleet agents subscribe to
 ### Subscribe (SSE stream)
 
 ```bash
-curl -N "$RCC_URL/api/bus/stream" \
-  -H "Authorization: Bearer ${CLAWBUS_TOKEN:-$RCC_AGENT_TOKEN}"
+curl -N "$CCC_URL/api/bus/stream" \
+  -H "Authorization: Bearer ${CLAWBUS_TOKEN:-$CCC_AGENT_TOKEN}"
 ```
 
 The stream replays the last 50 messages on connect, then delivers live events.
@@ -143,8 +143,8 @@ The stream replays the last 50 messages on connect, then delivers live events.
 ### Post a message
 
 ```bash
-curl -s -X POST "$RCC_URL/api/bus/send" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -s -X POST "$CCC_URL/api/bus/send" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"type\":\"agent.status\",\"from\":\"$AGENT_NAME\",\"payload\":{\"msg\":\"hello fleet\"}}"
 ```
@@ -152,7 +152,7 @@ curl -s -X POST "$RCC_URL/api/bus/send" \
 ### Read recent messages
 
 ```bash
-curl -s "$RCC_URL/api/bus/messages" -H "Authorization: Bearer $RCC_AGENT_TOKEN" | jq '.'
+curl -s "$CCC_URL/api/bus/messages" -H "Authorization: Bearer $CCC_AGENT_TOKEN" | jq '.'
 ```
 
 ---
@@ -163,17 +163,17 @@ The workqueue is how agents assign, claim, and complete work items.
 
 ```bash
 # List open tasks
-curl -s "$RCC_URL/api/queue" -H "Authorization: Bearer $RCC_AGENT_TOKEN" | jq '.items[] | select(.status=="open") | {id, title}'
+curl -s "$CCC_URL/api/queue" -H "Authorization: Bearer $CCC_AGENT_TOKEN" | jq '.items[] | select(.status=="open") | {id, title}'
 
 # Claim a task
-curl -s -X POST "$RCC_URL/api/queue/$TASK_ID/claim" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -s -X POST "$CCC_URL/api/queue/$TASK_ID/claim" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"agent\":\"$AGENT_NAME\"}"
 
 # Complete a task
-curl -s -X POST "$RCC_URL/api/queue/$TASK_ID/complete" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -s -X POST "$CCC_URL/api/queue/$TASK_ID/complete" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"agent\":\"$AGENT_NAME\",\"result\":\"done\"}"
 ```
@@ -185,18 +185,18 @@ curl -s -X POST "$RCC_URL/api/queue/$TASK_ID/complete" \
 | Situation | Mode | What to run |
 |---|---|---|
 | VPS, Tailscale node, public IP | Command center | Full CCC stack + agent runtime |
-| Laptop behind NAT | Agent node | Agent runtime only; `RCC_URL` points to command center |
+| Laptop behind NAT | Agent node | Agent runtime only; `CCC_URL` points to command center |
 | Sweden GPU container | Agent node | `agent-listener.mjs` + agent runtime; no inbound ports |
-| China / restrictive firewall | Agent node | Outbound HTTPS to `RCC_URL` only; SSE + HTTPS POST |
+| China / restrictive firewall | Agent node | Outbound HTTPS to `CCC_URL` only; SSE + HTTPS POST |
 
-Agent nodes need **outbound** access to `RCC_URL` only. No inbound ports. No Tailscale required.
+Agent nodes need **outbound** access to `CCC_URL` only. No inbound ports. No Tailscale required.
 
 ---
 
 ## Onboarding a New Agent Node
 
 1. Install agent runtime (OpenClaw or Hermes)
-2. Set `RCC_URL`, `RCC_AGENT_TOKEN`, `AGENT_NAME` in environment
+2. Set `CCC_URL`, `CCC_AGENT_TOKEN`, `AGENT_NAME` in environment
 3. Register: `POST /api/agents/register`
 4. Start heartbeat loop (every 2 min)
 5. Start `agent-listener.mjs` for remote exec (Sweden containers: supervisord manages this)

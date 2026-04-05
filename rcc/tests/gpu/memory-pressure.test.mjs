@@ -50,7 +50,7 @@ async function ollamaEmbed(text) {
 function generateTestStrings(n) {
   const templates = [
     'Agent Natasha processes GPU workloads on the DGX Spark.',
-    'The RCC work queue distributes tasks across the agent fleet.',
+    'The CCC work queue distributes tasks across the agent fleet.',
     'Milvus stores 768-dimensional vectors for semantic search.',
     'nomic-embed-text runs on the GB10 Blackwell GPU via ollama.',
     'Rocky manages the API server on do-host1 in DigitalOcean.',

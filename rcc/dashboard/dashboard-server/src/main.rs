@@ -271,7 +271,7 @@ async fn sc_stream(State(state): State<Arc<AppState>>) -> Response<Body> {
 
 // ClawChat removed 2026-04-02 — Mattermost is the chat server
 
-// --- /s3/* handlers (MinIO S3 proxy via RCC) ---
+// --- /s3/* handlers (MinIO S3 proxy via CCC) ---
 async fn s3_get(
     State(state): State<Arc<AppState>>,
     uri: axum::http::Uri,
@@ -304,7 +304,7 @@ async fn s3_delete(
 async fn health(State(state): State<Arc<AppState>>) -> Response<Body> {
     let uptime_secs = state.start_time.elapsed().as_secs();
 
-    // Check RCC connectivity (non-blocking, short timeout)
+    // Check CCC connectivity (non-blocking, short timeout)
     let rcc_ok = state
         .client
         .get(format!("{}/health", state.rcc_url))
@@ -428,18 +428,18 @@ async fn main() {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(8790);
 
-    let rcc_url = std::env::var("RCC_URL")
+    let rcc_url = std::env::var("CCC_URL")
         .unwrap_or_else(|_| "http://localhost:8789".to_string());
     let sc_url = std::env::var("SC_URL")
         .unwrap_or_else(|_| "http://localhost:8793".to_string());
-    let agent_token = std::env::var("RCC_AGENT_TOKEN").unwrap_or_default();
+    let agent_token = std::env::var("CCC_AGENT_TOKEN").unwrap_or_default();
     let operator = std::env::var("OPERATOR_HANDLE").unwrap_or_else(|_| "jkh".to_string());
     let dist = std::env::var("DASHBOARD_DIST").unwrap_or_else(|_| "dist".to_string());
 
     let state = build_state(rcc_url.clone(), sc_url.clone(), agent_token);
     let app = build_app(state, &dist);
 
-    tracing::info!(port, rcc_url, sc_url, operator, "RCC Dashboard v2 starting");
+    tracing::info!(port, rcc_url, sc_url, operator, "CCC Dashboard v2 starting");
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .expect("Failed to bind");
@@ -454,7 +454,7 @@ mod tests {
     use httpmock::prelude::*;
     use serde_json::{json, Value};
 
-    /// Spin up a mock RCC + SC upstream and a TestServer wrapping our app.
+    /// Spin up a mock CCC + SC upstream and a TestServer wrapping our app.
     fn make_server(mock_rcc: &MockServer, mock_sc: &MockServer, token: &str) -> TestServer {
         let state = build_state(
             mock_rcc.base_url(),

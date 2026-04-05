@@ -1,4 +1,4 @@
-# RCC Dashboard v2 — Design Specification
+# CCC Dashboard v2 — Design Specification
 
 **Status:** Design complete — implementation in progress  
 **Authors:** Rocky 🐿️, Natasha 🕵️, Bullwinkle 🫎  
@@ -229,7 +229,7 @@ Table: channel name, type, configured endpoints, status, last activity
 Table of registered agents with capabilities (gpu, claude_cli, inference_key), token status, last seen.
 
 **Auth Tokens**
-List of configured RCC auth tokens (masked). Rotate button (jkh only, sends to Telegram).
+List of configured CCC auth tokens (masked). Rotate button (jkh only, sends to Telegram).
 
 ---
 
@@ -243,13 +243,13 @@ jkh's framing: "a distributed brain." This is a visualization of the entire syst
 
 | Node | Type | What it represents |
 |---|---|---|
-| Rocky (do-host1) | Agent | Primary always-on node, RCC API host |
+| Rocky (do-host1) | Agent | Primary always-on node, CCC API host |
 | Bullwinkle (puck) | Agent | Mac node, Claude Code runner |
 | Natasha (sparky) | Agent | GPU node, render + inference |
 | Boris (l40-sweden) | Agent | x86 GPU, Omniverse headless |
-| RCC API | Service | Port 8789 — work queue, heartbeats, projects |
+| CCC API | Service | Port 8789 — work queue, heartbeats, projects |
 | WQ Dashboard | Service | Port 8788 — this UI |
-| RCC Brain | Service | LLM request queue + retry engine |
+| CCC Brain | Service | LLM request queue + retry engine |
 | Milvus | Service | Vector search (port 19530) |
 | MinIO | Service | Object storage (port 9000) |
 | SearXNG | Service | Search (port 8888) |
@@ -262,7 +262,7 @@ jkh's framing: "a distributed brain." This is a visualization of the entire syst
 | ClawBus | Internal bus | JSONL log + fan-out |
 
 **Edges (connections):**
-- Solid line = persistent connection (agent ↔ RCC API heartbeat)
+- Solid line = persistent connection (agent ↔ CCC API heartbeat)
 - Dashed line = on-demand call (agent → inference gateway when processing)
 - Animated dots flowing along edges = live traffic (when ClawBus or heartbeat activity detected)
 - Edge label: protocol (HTTP/REST, Mattermost DM, Slack Socket Mode, etc.)
@@ -270,14 +270,14 @@ jkh's framing: "a distributed brain." This is a visualization of the entire syst
 **Live indicators:**
 - Each node has a pulse animation if it's been active in the last 5 minutes
 - Heartbeat age shown on agent nodes
-- RCC API shows: uptime, queue depth, brain status
+- CCC API shows: uptime, queue depth, brain status
 - Milvus: collection count, last index operation
 - MinIO: bucket count (if mc is available)
 
 **Traffic flow visualization:**
 - When a ClawBus message fires, animate a particle along the path: sender → ClawBus → recipient
-- When a heartbeat arrives, flash the agent→RCC API edge
-- When a brain request fires, animate: RCC Brain → NVIDIA Gateway → RCC Brain
+- When a heartbeat arrives, flash the agent→CCC API edge
+- When a brain request fires, animate: CCC Brain → NVIDIA Gateway → CCC Brain
 - Traffic log panel at bottom: last 20 events with timestamp, type, from→to
 
 ### Implementation Notes
@@ -301,7 +301,7 @@ Services get **their own nodes** only when they are shared infrastructure called
 - SearXNG (do-host1, port 8888) — called by all agents
 
 Everything else renders as **service chips** on their host machine node:
-- Rocky chips: RCC API (:8789), WQ Dashboard (:8788), RCC Brain, ClawBus hub, Tailscale proxy
+- Rocky chips: CCC API (:8789), WQ Dashboard (:8788), CCC Brain, ClawBus hub, Tailscale proxy
 - Bullwinkle chips: OpenClaw gateway (:18789, reachability-checked), ClawBus push endpoint (:8788), launchd crons (heartbeat-rcc.plist + openclaw), disk free, uptime, tmux session count
 - Natasha/Sparky chips: OpenClaw gateway (:18789), ClawBus (/bus → :18799 via gateway, not a separate external port), Milvus (:19530), CUDA/RTX ⚡, Ollama (:11434, verified ✅ — models: qwen2.5-coder:32b, qwen3-coder:latest)
 - Boris chips: OpenClaw gateway, L40 GPU ⚡, Omniverse headless
@@ -313,21 +313,21 @@ Rationale: machine-first topology tells you *where to SSH* for debugging. Shared
 ### Layout (rough sketch)
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  🧠 Distributed Brain — RCC Network                    [live ●] │
+│  🧠 Distributed Brain — CCC Network                    [live ●] │
 │                                                                  │
-│   [Telegram]←──────────────────────────[Rocky]──────[RCC API]   │
+│   [Telegram]←──────────────────────────[Rocky]──────[CCC API]   │
 │                                          │  │         │    │     │
 │   [Slack omgjkh]←───[ClawBus]───────┤  └──[Brain]┘  [MinIO]│
 │   [Slack offtera]                        │              [SearXNG]│
 │                                   [Bullwinkle]   [Milvus]       │
 │   [NVIDIA Gateway]←──────────────────┤  │                       │
 │                                  [Natasha] [Boris]               │
-│   [GitHub]←──[RCC Scout]──────────────────────────────────────── │
+│   [GitHub]←──[CCC Scout]──────────────────────────────────────── │
 │                                                                  │
 │  ── Traffic Log ──────────────────────────────────────────────── │
-│  10:41:03 heartbeat  rocky → RCC API                            │
+│  10:41:03 heartbeat  rocky → CCC API                            │
 │  10:40:58 bus_msg    natasha → squirrelbus → rocky (lesson)     │
-│  10:40:31 brain_req  RCC Brain → NVIDIA Gateway (sonnet)        │
+│  10:40:31 brain_req  CCC Brain → NVIDIA Gateway (sonnet)        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -408,7 +408,7 @@ Bullwinkle's column scope: crons, providers, session health, Google Workspace co
 - Active tmux sessions (e.g. claude-puck worker) — show count
 
 **Calendar scope clarification (Bullwinkle):**
-RCC calendar = agent events only (cron schedules, planned work windows, maintenance blocks).
+CCC calendar = agent events only (cron schedules, planned work windows, maintenance blocks).
 NOT a mirror of jkh's personal Google Calendar (jkh uses `gog` for that — no duplication needed).
 The two calendars are separate concerns.
 

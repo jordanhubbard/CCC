@@ -1,5 +1,5 @@
 #!/bin/bash
-# register-agent.sh — Register this node with RCC
+# register-agent.sh — Register this node with CCC
 # Run after setup-node.sh and filling in .env
 
 set -e
@@ -11,19 +11,19 @@ if [ -f "$ENV_FILE" ]; then
   set -a; source "$ENV_FILE"; set +a
 fi
 
-if [ -z "$RCC_URL" ] || [ -z "$AGENT_NAME" ]; then
-  echo "ERROR: Set RCC_URL and AGENT_NAME in $ENV_FILE first"
+if [ -z "$CCC_URL" ] || [ -z "$AGENT_NAME" ]; then
+  echo "ERROR: Set CCC_URL and AGENT_NAME in $ENV_FILE first"
   exit 1
 fi
 
-echo "Registering agent '$AGENT_NAME' with $RCC_URL..."
+echo "Registering agent '$AGENT_NAME' with $CCC_URL..."
 
 # Prompt for admin token if not set
 if [ -z "$RCC_ADMIN_TOKEN" ]; then
-  read -rsp "RCC admin token: " RCC_ADMIN_TOKEN; echo
+  read -rsp "CCC admin token: " RCC_ADMIN_TOKEN; echo
 fi
 
-RESPONSE=$(curl -s -X POST "$RCC_URL/api/agents/register" \
+RESPONSE=$(curl -s -X POST "$CCC_URL/api/agents/register" \
   -H "Authorization: Bearer $RCC_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
@@ -50,15 +50,15 @@ TOKEN=$(echo "$RESPONSE" | node -e "process.stdin.setEncoding('utf8');let d='';p
 
 if [ -n "$TOKEN" ]; then
   # Update .env with the issued token
-  if grep -q "^RCC_AGENT_TOKEN=" "$ENV_FILE"; then
-    sed -i "s|^RCC_AGENT_TOKEN=.*|RCC_AGENT_TOKEN=$TOKEN|" "$ENV_FILE"
+  if grep -q "^CCC_AGENT_TOKEN=" "$ENV_FILE"; then
+    sed -i "s|^CCC_AGENT_TOKEN=.*|CCC_AGENT_TOKEN=$TOKEN|" "$ENV_FILE"
   else
-    echo "RCC_AGENT_TOKEN=$TOKEN" >> "$ENV_FILE"
+    echo "CCC_AGENT_TOKEN=$TOKEN" >> "$ENV_FILE"
   fi
   echo "✓ Registered! Agent token saved to $ENV_FILE"
   echo "  Token: $TOKEN"
 else
   echo "Registration response: $RESPONSE"
-  echo "ERROR: No token in response. Check RCC_URL and admin token."
+  echo "ERROR: No token in response. Check CCC_URL and admin token."
   exit 1
 fi

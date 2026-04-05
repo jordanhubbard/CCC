@@ -1,17 +1,17 @@
-# Getting Started with RCC
+# Getting Started with CCC
 
 > **Which path is yours?**
-> - **Running your own RCC server** (hosting the coordination hub for your agents) → [Operator path](#operator-path)
+> - **Running your own CCC server** (hosting the coordination hub for your agents) → [Operator path](#operator-path)
 >   - [Native install](#option-a-native-install) — deploy directly on a server you control
 >   - [Docker install](#option-b-docker-install) — `docker compose up` on any Docker-capable host
-> - **Adding an agent to an existing RCC deployment** → [Agent deployer path](#agent-deployer-path)
-> - **Hacking on RCC itself** (modifying the codebase) → [Developer path](#developer-path)
+> - **Adding an agent to an existing CCC deployment** → [Agent deployer path](#agent-deployer-path)
+> - **Hacking on CCC itself** (modifying the codebase) → [Developer path](#developer-path)
 
 ---
 
 ## Operator Path
 
-You want to run your own RCC instance on a server or VM you control.
+You want to run your own CCC instance on a server or VM you control.
 
 ### Prerequisites
 
@@ -39,9 +39,9 @@ make init-rcc
 
 This interactive wizard will ask you:
 
-- **Agent name** — a short name for your RCC host (e.g. `hub`, `homeserver`)
-- **Role** — whether this machine IS the RCC host (yes, for the first one) or a client
-- **RCC port** — defaults to `8789`
+- **Agent name** — a short name for your CCC host (e.g. `hub`, `homeserver`)
+- **Role** — whether this machine IS the CCC host (yes, for the first one) or a client
+- **CCC port** — defaults to `8789`
 - **Auth tokens** — generate with `openssl rand -hex 32` (you'll share these with agent nodes)
 - **Capabilities** — does this node have a GPU? A Claude Code session?
 - **Optional integrations** — Slack, Telegram, MinIO (all skippable)
@@ -57,7 +57,7 @@ It writes `~/.rcc/.env` with your answers. That file is never committed to git.
 >
 > > by editing `~/.rcc/.env` and restarting.
 
-#### Step 3: Start RCC
+#### Step 3: Start CCC
 
 ```bash
 make docker-up
@@ -75,26 +75,26 @@ Open `http://your-server-ip:8788` for the full dashboard.
 If you forked this repo in Step 1, register it as your first project:
 ```bash
 curl -X POST http://localhost:8789/api/projects \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"rockyandfriends","repo":"https://github.com/YOUR_USERNAME/rockyandfriends"}'
 ```
 
 #### Step 5: Add agents
 
-Once your RCC hub is running, add agents (other machines) using the [Agent deployer path](#agent-deployer-path) below. Each agent gets a token you generate:
+Once your CCC hub is running, add agents (other machines) using the [Agent deployer path](#agent-deployer-path) below. Each agent gets a token you generate:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Share that token + your RCC URL with the new agent and have them run `make init-rcc`.
+Share that token + your CCC URL with the new agent and have them run `make init-rcc`.
 
 ---
 
 ### Option B: Docker Install
 
-The fastest path from "I have a server" to "RCC is running."
+The fastest path from "I have a server" to "CCC is running."
 
 #### Prerequisites
 
@@ -146,7 +146,7 @@ make docker-build   # rebuild the image locally
 
 ## Agent Deployer Path
 
-Someone is already running an RCC hub and gave you a URL + token. You want to plug a new machine (GPU box, Mac mini, VPS, container) into their fleet.
+Someone is already running an CCC hub and gave you a URL + token. You want to plug a new machine (GPU box, Mac mini, VPS, container) into their fleet.
 
 ### One-command bootstrap
 
@@ -162,7 +162,7 @@ curl -sSL https://raw.githubusercontent.com/YOUR_OPERATORS_FORK/rockyandfriends/
 
 This will:
 - Install OpenClaw
-- Configure the agent with your RCC hub credentials
+- Configure the agent with your CCC hub credentials
 - Seed the workspace with your operator's config
 - Start the agent daemon
 
@@ -180,7 +180,7 @@ If you prefer to set things up yourself:
    ```bash
    make init-rcc
    # Choose "2) Client" when asked for your role
-   # Paste the RCC URL and your agent token when prompted
+   # Paste the CCC URL and your agent token when prompted
    ```
 
 3. Register this agent with the hub:
@@ -190,16 +190,16 @@ If you prefer to set things up yourself:
 
 4. Verify the connection:
    ```bash
-   curl $RCC_URL/health
+   curl $CCC_URL/health
    ```
 
-Your agent will now appear in the RCC dashboard.
+Your agent will now appear in the CCC dashboard.
 
 ---
 
 ## Developer Path
 
-You want to modify RCC itself — add features, fix bugs, extend the protocol.
+You want to modify CCC itself — add features, fix bugs, extend the protocol.
 
 ### Setup
 
@@ -242,8 +242,8 @@ Key variables:
 |----------|---------|
 | `AGENT_NAME` | Short name shown in dashboard and logs |
 | `AGENT_HOST` | Human-readable hostname |
-| `RCC_URL` | URL of the RCC API hub |
-| `RCC_AGENT_TOKEN` | Bearer token for this agent |
+| `CCC_URL` | URL of the CCC API hub |
+| `CCC_AGENT_TOKEN` | Bearer token for this agent |
 | `AGENT_HAS_GPU` | `true`/`false` — used for work routing |
 | `AGENT_CLAUDE_CLI` | `true` if this node has a Claude Code tmux session |
 | `TOKENHUB_URL` | (Optional) Tokenhub inference aggregator URL |
@@ -254,21 +254,21 @@ Key variables:
 ## Frequently Asked Questions
 
 **Q: Do I need Docker?**  
-No. RCC runs natively on any machine with Node.js 18+. Docker is an *option* — see [Docker install](#option-b-docker-install) — but not required. Use whichever path fits your setup.
+No. CCC runs natively on any machine with Node.js 18+. Docker is an *option* — see [Docker install](#option-b-docker-install) — but not required. Use whichever path fits your setup.
 
 **Q: Can I use this without Slack or Telegram?**  
 Yes. Connect Mattermost via the dashboard settings.
 
 **Q: What if my agents can't reach each other directly (firewalls, NAT)?**  
-Use the reverse SSH tunnel pattern. Each agent connects *out* to the RCC hub and forwards a local port. Rocky proxies everything through `localhost:<port>`. See `rcc/docs/remote-exec.md` for the full architecture.
+Use the reverse SSH tunnel pattern. Each agent connects *out* to the CCC hub and forwards a local port. Rocky proxies everything through `localhost:<port>`. See `rcc/docs/remote-exec.md` for the full architecture.
 
 **Q: My agent is ephemeral (container, spot instance). How do I handle that?**  
-Agents are expected to appear and disappear. The RCC hub tracks heartbeats and marks agents offline after a configurable timeout. Work items marked for an offline agent stay pending until a capable agent comes back. No manual intervention needed.
+Agents are expected to appear and disappear. The CCC hub tracks heartbeats and marks agents offline after a configurable timeout. Work items marked for an offline agent stay pending until a capable agent comes back. No manual intervention needed.
 
 **Q: How do I add a new project to track?**  
 ```bash
-curl -X POST $RCC_URL/api/projects \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -X POST $CCC_URL/api/projects \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"myproject","repo":"https://github.com/yourname/myproject"}'
 ```

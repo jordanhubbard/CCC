@@ -88,9 +88,9 @@ function spawnDeployScript(job) {
   const agents = job.targetAgents.join(',');
   const env = {
     ...process.env,
-    RCC_AGENT_TOKEN: process.env.RCC_AGENT_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0] || '',
+    CCC_AGENT_TOKEN: process.env.CCC_AGENT_TOKEN || process.env.CCC_AUTH_TOKENS?.split(',')[0] || '',
     HF_TOKEN: process.env.HF_TOKEN || '',
-    RCC_URL: process.env.RCC_URL || 'http://localhost:8789',
+    CCC_URL: process.env.CCC_URL || 'http://localhost:8789',
     DEPLOY_JOB_ID: job.id,
   };
 

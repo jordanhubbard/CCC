@@ -45,8 +45,8 @@ $SSH "cat > ~/.openclaw/openclaw.json" << JSONEOF
   },
   "env": {
     "vars": {
-      "RCC_URL": "https://api.yourmom.photos",
-      "RCC_AGENT_TOKEN": "${RCC_TOKEN}"
+      "CCC_URL": "https://api.yourmom.photos",
+      "CCC_AGENT_TOKEN": "${RCC_TOKEN}"
     }
   },
   "ui": {
@@ -147,7 +147,7 @@ $SSH "cat > ~/.openclaw/workspace/IDENTITY.md" << IDEOF
 
 - **Name:** ${AGENT_DISPLAY}
 - **Agent:** ${AGENT_NAME}
-- **RCC:** https://api.yourmom.photos
+- **CCC:** https://api.yourmom.photos
 IDEOF
 
 # SOUL.md
@@ -167,11 +167,11 @@ $SSH "cat > ~/.openclaw/workspace/HEARTBEAT.md" << HBEOF
 # HEARTBEAT.md
 
 ## Each heartbeat:
-1. POST heartbeat to RCC:
+1. POST heartbeat to CCC:
    \`curl -s -X POST https://api.yourmom.photos/api/heartbeat/${AGENT_NAME} -H "Content-Type: application/json" -H "Authorization: Bearer ${RCC_TOKEN}" -d "{\"status\":\"online\",\"host\":\"${AGENT_NAME}\",\"ts\":\"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"\`
 2. POST heartbeat to SquirrelChat:
    \`curl -s -X POST https://chat.yourmom.photos/api/agents/${AGENT_NAME}/heartbeat -H "Content-Type: application/json" -d "{\"status\":\"online\",\"host\":\"${AGENT_NAME}\"}" \`
-3. Check RCC health: \`curl -s https://api.yourmom.photos/health\`
+3. Check CCC health: \`curl -s https://api.yourmom.photos/health\`
 4. Check queue: \`curl -s https://api.yourmom.photos/api/queue -H "Authorization: Bearer ${RCC_TOKEN}"\`
 5. Claim and work any pending items assigned to ${AGENT_NAME} or all
 HBEOF
@@ -191,7 +191,7 @@ $SSH "cat > ~/.openclaw/workspace/TOOLS.md" << TOOLSEOF
 - Tunnel port: ${TUNNEL_PORT} → Rocky (do-host1 localhost:${TUNNEL_PORT})
 - Model: NVIDIA-Nemotron-3-Super-120B-A12B-FP8
 
-## RCC
+## CCC
 - URL: https://api.yourmom.photos
 - Agent token: ${RCC_TOKEN}
 TOOLSEOF

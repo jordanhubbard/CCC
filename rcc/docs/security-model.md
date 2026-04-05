@@ -1,4 +1,4 @@
-# RCC Security Model
+# CCC Security Model
 
 Claw Command Center uses a layered token hierarchy to keep secrets
 centralized, distribute only what each agent needs, and enable rotation
@@ -18,7 +18,7 @@ without re-provisioning.
                              │ issues
                              ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     RCC_BOOTSTRAP_TOKEN                             │
+│                     CCC_BOOTSTRAP_TOKEN                             │
 │                                                                     │
 │  • Short-lived (default TTL: 1 hour)                                │
 │  • Single-use (consumed on first GET /api/bootstrap?token=...)      │
@@ -30,13 +30,13 @@ without re-provisioning.
                              │ exchanged for
                              ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      RCC_AGENT_TOKEN                                │
+│                      CCC_AGENT_TOKEN                                │
 │                                                                     │
 │  • Long-lived per-agent bearer token                                │
 │  • Returned in the bootstrap response (once bootstrap token is used)│
 │  • Written to ~/.rcc/.env on the agent machine (chmod 600)          │
-│  • Used for all subsequent API calls to RCC                         │
-│  • Stored in RCC's agents.json (persists across RCC restarts)       │
+│  • Used for all subsequent API calls to CCC                         │
+│  • Stored in CCC's agents.json (persists across CCC restarts)       │
 │  • Authenticates: heartbeat, queue ops, secrets fetch, lessons      │
 │  • Rotation: issue a new bootstrap token, re-run bootstrap.sh       │
 └────────────────────────────┬────────────────────────────────────────┘
@@ -76,17 +76,17 @@ without re-provisioning.
 
 | Token              | Holder        | Lifetime     | Single-use | Grants                          |
 |--------------------|---------------|--------------|------------|----------------------------------|
-| RCC_ADMIN_TOKEN    | jkh / RCC srv | Permanent    | No         | Full API access + write secrets  |
-| RCC_BOOTSTRAP_TOKEN| Provisioner   | Short (1h)   | Yes        | One-time agent provisioning      |
-| RCC_AGENT_TOKEN    | Each agent    | Long-lived   | No         | Queue/heartbeat/secrets (read)   |
+| RCC_ADMIN_TOKEN    | jkh / CCC srv | Permanent    | No         | Full API access + write secrets  |
+| CCC_BOOTSTRAP_TOKEN| Provisioner   | Short (1h)   | Yes        | One-time agent provisioning      |
+| CCC_AGENT_TOKEN    | Each agent    | Long-lived   | No         | Queue/heartbeat/secrets (read)   |
 
 ---
 
 ## Secrets at Rest
 
 - `~/.rcc/.env` — agent machine, chmod 600, never committed to git
-- `rcc/data/secrets.json` — RCC server, chmod 600, gitignored
-- `rcc/data/github-key.json` — RCC server, chmod 600, gitignored
+- `rcc/data/secrets.json` — CCC server, chmod 600, gitignored
+- `rcc/data/github-key.json` — CCC server, chmod 600, gitignored
 - `rcc/api/agents.json` — contains per-agent tokens, excluded from git
 
 Secrets must **never** appear in:
@@ -113,7 +113,7 @@ Secrets must **never** appear in:
     2. Clones workspace
     3. Calls GET /api/bootstrap?token=rcc-bootstrap-boris-abc12345
        ← agentToken, deployKey, rccUrl (bootstrap token is now consumed)
-    4. Writes ~/.rcc/.env with RCC_AGENT_TOKEN=<agentToken>
+    4. Writes ~/.rcc/.env with CCC_AGENT_TOKEN=<agentToken>
     5. Fetches all named secret bundles using agentToken
     6. Appends service credentials to ~/.rcc/.env
     7. Starts OpenClaw gateway
@@ -127,7 +127,7 @@ Secrets must **never** appear in:
 To rotate a service credential (e.g. Slack bot token):
 
 ```bash
-# On RCC server (jkh, with admin token):
+# On CCC server (jkh, with admin token):
 curl -X POST http://localhost:8789/api/secrets/slack \
   -H "Authorization: Bearer $RCC_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -139,7 +139,7 @@ automatically pick up the new values from `GET /api/secrets/slack` and
 refresh their `~/.rcc/.env`. Services are reloaded if relevant files changed.
 
 To rotate an agent token, issue a new bootstrap token and re-run bootstrap.sh
-(or manually update `~/.rcc/.env` and notify RCC via `/api/agents/:name`).
+(or manually update `~/.rcc/.env` and notify CCC via `/api/agents/:name`).
 
 ---
 
@@ -148,7 +148,7 @@ To rotate an agent token, issue a new bootstrap token and re-run bootstrap.sh
 - Store secrets in SOUL.md, TOOLS.md, MEMORY.md, or any committed file
 - Pass tokens as command-line arguments (visible in `ps aux`)
 - Log token values (even partial)
-- Distribute their RCC_AGENT_TOKEN to other agents
+- Distribute their CCC_AGENT_TOKEN to other agents
 - Write to `/api/secrets` (write is admin-only)
 
 See `DIRECTIVES.md` § D-001 for the full directive.

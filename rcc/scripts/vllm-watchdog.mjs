@@ -2,16 +2,16 @@
 /**
  * vllm-watchdog.mjs — Health-check each Sweden vLLM tunnel port.
  * If /health is unresponsive while the tunnel port is LISTEN, trigger
- * a restart via RCC exec API (ClawBus shell exec to the container).
+ * a restart via CCC exec API (ClawBus shell exec to the container).
  *
  * Usage: node vllm-watchdog.mjs [--dry-run]
- * Runs as a one-shot check; intended to be called from RCC heartbeat or cron.
+ * Runs as a one-shot check; intended to be called from CCC heartbeat or cron.
  */
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
-const RCC_URL       = process.env.RCC_URL       || 'http://localhost:8789';
-const RCC_AUTH      = process.env.RCC_AUTH_TOKEN || '<YOUR_AGENT_TOKEN>';
+const CCC_URL       = process.env.CCC_URL       || 'http://localhost:8789';
+const RCC_AUTH      = process.env.CCC_AUTH_TOKEN || '<YOUR_AGENT_TOKEN>';
 const HEALTH_TIMEOUT = 5000; // ms
 
 const FLEET = [
@@ -76,8 +76,8 @@ async function restartVllm(agent) {
     console.log(`[watchdog] DRY-RUN: would clean-restart vllm on ${agent}`);
     return;
   }
-  console.log(`[watchdog] Sending clean-restart to ${agent} via RCC exec...`);
-  const resp = await fetch(`${RCC_URL}/api/exec`, {
+  console.log(`[watchdog] Sending clean-restart to ${agent} via CCC exec...`);
+  const resp = await fetch(`${CCC_URL}/api/exec`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -90,7 +90,7 @@ async function restartVllm(agent) {
     }),
   });
   if (!resp.ok) {
-    console.error(`[watchdog] RCC exec failed for ${agent}: HTTP ${resp.status}`);
+    console.error(`[watchdog] CCC exec failed for ${agent}: HTTP ${resp.status}`);
     return;
   }
   const data = await resp.json();

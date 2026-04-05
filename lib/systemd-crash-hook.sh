@@ -13,7 +13,7 @@ MC="mc"
 MINIO_ALIAS="${MINIO_ALIAS:-local}"
 QUEUE_PATH="${OPENCLAW_WORKSPACE:-~/.openclaw/workspace}/workqueue/queue.json"
 DASHBOARD_URL="http://localhost:8788/api/crash-report"
-AUTH_TOKEN="${RCC_AGENT_TOKEN:-}"
+AUTH_TOKEN="${CCC_AGENT_TOKEN:-}"
 LOG_DIR="/tmp"
 
 # systemd sets these env vars for ExecStopPost:

@@ -21,8 +21,8 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const PORT     = parseInt(process.env.HB_LOCAL_PORT   || '8790', 10);
-const RCC_URL  = process.env.RCC_URL                  || 'http://146.190.134.110:8789';
-const RCC_TOKEN= process.env.RCC_AUTH_TOKEN           || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const CCC_URL  = process.env.CCC_URL                  || 'http://146.190.134.110:8789';
+const RCC_TOKEN= process.env.CCC_AUTH_TOKEN           || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const DB_PATH  = process.env.HB_DB_PATH               || join(__dir, 'heartbeats.db');
 
 // ── SQLite (better-sqlite3 if available, else JSON file fallback) ─────────────
@@ -119,7 +119,7 @@ async function checkRcc() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 3000);
-    const r = await fetch(`${RCC_URL}/health`, { signal: ctrl.signal });
+    const r = await fetch(`${CCC_URL}/health`, { signal: ctrl.signal });
     clearTimeout(t);
     rccReachable = r.ok;
   } catch {
@@ -135,7 +135,7 @@ async function replayToRcc() {
   const pending = getUnreplayed();
   for (const hb of pending) {
     try {
-      const r = await fetch(`${RCC_URL}/api/heartbeat/${encodeURIComponent(hb.agent)}`, {
+      const r = await fetch(`${CCC_URL}/api/heartbeat/${encodeURIComponent(hb.agent)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -217,7 +217,7 @@ const server = http.createServer(async (req, res) => {
 
     // Use sendHeartbeat for store-and-forward: buffers to SQLite when offline,
     // replays buffered rows when CCC is reachable again.
-    sendHeartbeat(RCC_URL, agent, host, status).then(online => {
+    sendHeartbeat(CCC_URL, agent, host, status).then(online => {
       if (online) markReplayed(agent, ts);
     }).catch(() => {});
 
@@ -234,5 +234,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[hb-local] listening on :${PORT}`);
-  console.log(`[hb-local] CCC=${RCC_URL}`);
+  console.log(`[hb-local] CCC=${CCC_URL}`);
 });

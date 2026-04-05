@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # natasha-heartbeat.sh — Enhanced heartbeat for Natasha on sparky
 #
-# Posts heartbeat to RCC with GPU telemetry (vRAM, temp, power) and
+# Posts heartbeat to CCC with GPU telemetry (vRAM, temp, power) and
 # ollama model status. Called by cron or workqueue processor.
 #
 # Usage: natasha-heartbeat.sh
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-RCC_URL="${RCC_URL:-https://rcc.yourmom.photos}"
+CCC_URL="${CCC_URL:-https://rcc.yourmom.photos}"
 RCC_TOKEN="${RCC_TOKEN:-wq-07ebee759ffbbf31b2d265651a117f16661d2e13}"
 AGENT_NAME="natasha"
 HOST="sparky"
@@ -87,7 +87,7 @@ ENDJSON
 
 # --- POST heartbeat ---
 HTTP_CODE=$(curl -s -o /tmp/natasha-hb-response.json -w "%{http_code}" \
-  -X POST "${RCC_URL}/api/heartbeat/${AGENT_NAME}" \
+  -X POST "${CCC_URL}/api/heartbeat/${AGENT_NAME}" \
   -H "Authorization: Bearer ${RCC_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" \

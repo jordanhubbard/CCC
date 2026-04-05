@@ -1,8 +1,8 @@
 /**
- * RCC integration tests — live server at http://146.190.134.110:8789
+ * CCC integration tests — live server at http://146.190.134.110:8789
  * Run: node --test rcc/tests/integration.test.mjs
  *
- * Tests the full bootstrap flow end-to-end against the live RCC instance.
+ * Tests the full bootstrap flow end-to-end against the live CCC instance.
  * Step 1: POST /api/bootstrap/token → get bootstrap token (admin required)
  * Step 2: GET /api/bootstrap?token=<bootstrapToken> (NO auth header) → agentToken
  * Step 3: POST /api/heartbeat/test-agent-natasha with new agentToken

@@ -1,5 +1,5 @@
-// Test 1: RCC unreachable → verify SQLite write
-// Test 2: RCC returns → verify replay + mark replayed
+// Test 1: CCC unreachable → verify SQLite write
+// Test 2: CCC returns → verify replay + mark replayed
 // Test 3: Verify pruning at 100 rows
 
 import assert from 'node:assert';

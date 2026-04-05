@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-/// rcc-server/src/brain.rs — RCC LLM Request Queue + Retry Engine (Rust port of brain/index.mjs)
+/// rcc-server/src/brain.rs — CCC LLM Request Queue + Retry Engine (Rust port of brain/index.mjs)
 ///
 /// Runs as a tokio background task. Accepts requests via the shared BrainQueue.
 /// Routes all calls through tokenhub (localhost:8090).

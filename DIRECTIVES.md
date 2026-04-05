@@ -7,23 +7,23 @@ Directives are authoritative: they override convenience, habit, and inference.
 
 ## D-001 — Secrets Management
 
-**Agents must not store secrets locally beyond what RCC provides.**
+**Agents must not store secrets locally beyond what CCC provides.**
 
-The Claw Command Center (RCC) is the sole source of truth for all shared
+The Claw Command Center (CCC) is the sole source of truth for all shared
 credentials (API keys, tokens, signing secrets, storage credentials).
 
 ### Rules
 
 1. **Do not hardcode secrets** in code, SOUL.md, TOOLS.md, or any committed file.
 
-2. **Do not store secrets in config files** unless they were placed there by RCC
+2. **Do not store secrets in config files** unless they were placed there by CCC
    (bootstrap.sh, migrate.sh, or agent-pull.sh).
 
-3. **If a secret is needed and absent from `~/.rcc/.env`**, fetch it from RCC:
+3. **If a secret is needed and absent from `~/.rcc/.env`**, fetch it from CCC:
 
    ```bash
-   curl -sf -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
-     "$RCC_URL/api/secrets/<key>"
+   curl -sf -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
+     "$CCC_URL/api/secrets/<key>"
    ```
 
    Named bundles (return multiple related env vars at once):
@@ -38,17 +38,17 @@ credentials (API keys, tokens, signing secrets, storage credentials).
    ~10 minutes). After rotation, the new values propagate to all agents within
    one pull cycle.
 
-5. **RCC_AGENT_TOKEN itself** is the one identity key agents hold locally.
+5. **CCC_AGENT_TOKEN itself** is the one identity key agents hold locally.
    It is written once at bootstrap and never overwritten by the secrets sync.
-   It authenticates the agent to RCC for all subsequent requests.
+   It authenticates the agent to CCC for all subsequent requests.
 
 ### Token Hierarchy (summary)
 
 ```
-RCC_ADMIN_TOKEN      ← jkh only; never leaves the RCC server
-RCC_BOOTSTRAP_TOKEN  ← short-lived, single-use; passed at provisioning time
-RCC_AGENT_TOKEN      ← long-lived per-agent; returned at bootstrap, kept in ~/.rcc/.env
-All other secrets    ← fetched from GET /api/secrets/:key using RCC_AGENT_TOKEN
+RCC_ADMIN_TOKEN      ← jkh only; never leaves the CCC server
+CCC_BOOTSTRAP_TOKEN  ← short-lived, single-use; passed at provisioning time
+CCC_AGENT_TOKEN      ← long-lived per-agent; returned at bootstrap, kept in ~/.rcc/.env
+All other secrets    ← fetched from GET /api/secrets/:key using CCC_AGENT_TOKEN
 ```
 
 See `rcc/docs/security-model.md` for the full model.
@@ -59,13 +59,13 @@ See `rcc/docs/security-model.md` for the full model.
 
 Agents must not send emails, post to social media, or take any action that
 leaves the controlled infrastructure without explicit instruction from jkh.
-Internal RCC/ClawBus/Slack/Mattermost comms are fine.
+Internal CCC/ClawBus/Slack/Mattermost comms are fine.
 
 ---
 
 ## D-003 — Heartbeat Discipline
 
-Agents must post a heartbeat to `POST $RCC_URL/api/heartbeat/$AGENT_NAME` at
+Agents must post a heartbeat to `POST $CCC_URL/api/heartbeat/$AGENT_NAME` at
 least once every 10 minutes. Loss of heartbeat triggers an offline alert.
 `agent-pull.sh` (cron) handles this automatically.
 
@@ -73,10 +73,10 @@ least once every 10 minutes. Loss of heartbeat triggers an offline alert.
 
 ## D-004 — Work Queue First
 
-Before starting unsolicited work, check the RCC work queue:
+Before starting unsolicited work, check the CCC work queue:
 
 ```bash
-curl -sf -H "Authorization: Bearer $RCC_AGENT_TOKEN" "$RCC_URL/api/queue"
+curl -sf -H "Authorization: Bearer $CCC_AGENT_TOKEN" "$CCC_URL/api/queue"
 ```
 
 Claim items before working. Update status to `in-progress` on claim, then
@@ -84,4 +84,4 @@ Claim items before working. Update status to `in-progress` on claim, then
 
 ---
 
-*Last updated: 2026-03-27 by Rocky (wq-RCC-secrets-design-001)*
+*Last updated: 2026-03-27 by Rocky (wq-CCC-secrets-design-001)*

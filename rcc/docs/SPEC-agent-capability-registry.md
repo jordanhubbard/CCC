@@ -49,7 +49,7 @@ Each agent publishes a structured manifest describing its capabilities. Any agen
 ## Storage
 
 - **MinIO:** `agents/shared/capabilities-{agent}.json` — agent writes its own
-- **RCC API (optional):** `GET /api/agents/:id/capabilities` — Rocky serves as aggregator
+- **CCC API (optional):** `GET /api/agents/:id/capabilities` — Rocky serves as aggregator
 - **Cache:** Agents refresh their manifest on startup and every 6 hours
 
 ## Implementation Plan

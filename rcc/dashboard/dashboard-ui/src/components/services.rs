@@ -1,4 +1,4 @@
-//! Services Directory — live health data from RCC /api/services/status (server-side probed).
+//! Services Directory — live health data from CCC /api/services/status (server-side probed).
 //! No client-side NoCors hacks — all probing is done server-side with real TCP checks.
 
 use leptos::*;

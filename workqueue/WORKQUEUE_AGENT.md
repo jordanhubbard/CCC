@@ -22,12 +22,12 @@ You are the workqueue processor for **Rocky**. You run periodically via cron.
 
 ## Callback API (preferred over local queue writes)
 
-Use these RCC API endpoints instead of writing queue.json directly. They are authoritative and push real-time state to all agents.
+Use these CCC API endpoints instead of writing queue.json directly. They are authoritative and push real-time state to all agents.
 
 ### Claim before starting
 ```bash
 POST http://localhost:8789/api/item/<id>/claim
-Authorization: Bearer $RCC_AGENT_TOKEN
+Authorization: Bearer $CCC_AGENT_TOKEN
 {"agent":"rocky","note":"Starting task"}
 ```
 Returns 409 if already claimed by someone else (non-stale). Respect the conflict — back off.
@@ -35,7 +35,7 @@ Returns 409 if already claimed by someone else (non-stale). Respect the conflict
 ### Keepalive every 30min for long tasks
 ```bash
 POST http://localhost:8789/api/item/<id>/keepalive
-Authorization: Bearer $RCC_AGENT_TOKEN
+Authorization: Bearer $CCC_AGENT_TOKEN
 {"agent":"rocky","note":"Still working: 60% done"}
 ```
 Resets the stale TTL clock. If you forget this, the stale-reset will re-queue your item.
@@ -43,14 +43,14 @@ Resets the stale TTL clock. If you forget this, the stale-reset will re-queue yo
 ### Complete when done
 ```bash
 POST http://localhost:8789/api/item/<id>/complete
-Authorization: Bearer $RCC_AGENT_TOKEN
+Authorization: Bearer $CCC_AGENT_TOKEN
 {"agent":"rocky","result":"Summary of what was done","resolution":"Details..."}
 ```
 
 ### Fail on error (resets to pending for retry)
 ```bash
 POST http://localhost:8789/api/item/<id>/fail
-Authorization: Bearer $RCC_AGENT_TOKEN
+Authorization: Bearer $CCC_AGENT_TOKEN
 {"agent":"rocky","reason":"What went wrong"}
 ```
 Automatically moves to `blocked` status if `maxAttempts` is exceeded.
@@ -58,7 +58,7 @@ Automatically moves to `blocked` status if `maxAttempts` is exceeded.
 ### Comment (progress note, no status change)
 ```bash
 POST http://localhost:8789/api/item/<id>/comment
-Authorization: Bearer $RCC_AGENT_TOKEN
+Authorization: Bearer $CCC_AGENT_TOKEN
 {"text":"Progress update: step 1 of 3 done","author":"rocky"}
 ```
 
@@ -80,7 +80,7 @@ If no keepalive within TTL, server auto-resets to pending on `POST /api/queue/ex
 ## Processing Rules (continued)
 
 - If the item already has a different `claimedBy` with a newer `claimedAt`, **back off** — someone else has it
-- Increment `attempts` tracked by RCC on each /claim call
+- Increment `attempts` tracked by CCC on each /claim call
 - If the task requires tools you don't have access to, set `status = "deferred"` with a note via /comment, then /fail
 - Move completed/failed items to the `completed` array (handled server-side)
 
@@ -165,7 +165,7 @@ Agents: when you pick up an item that was unblocked via comment, read the latest
 
 ## Idea Incubator — Promotion Gate Rules (2026-03-24)
 
-Ideas with `priority: "idea"` now automatically get `status: "incubating"` in RCC. They live in
+Ideas with `priority: "idea"` now automatically get `status: "incubating"` in CCC. They live in
 the Idea Incubator section of the project dashboard until promoted to real work.
 
 ### Creating ideas

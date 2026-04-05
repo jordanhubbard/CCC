@@ -1,4 +1,4 @@
-# CoherenceGate Adoption — Rocky/RCC Design Doc
+# CoherenceGate Adoption — Rocky/CCC Design Doc
 
 **Source:** [JKHeadley/instar](https://github.com/JKHeadley/instar/blob/main/src/core/CoherenceGate.ts)  
 **Status:** Design complete — implementation deferred to wq-INSTAR-*-12 (hot-patch cycle)  
@@ -48,7 +48,7 @@ The two reviewers most likely to catch real bugs in our context:
 
 ### Phase 1 (lightweight, no TypeScript port needed)
 
-Implement a simplified JS version as a RCC PostToolUse hook or outbound message wrapper:
+Implement a simplified JS version as a CCC PostToolUse hook or outbound message wrapper:
 
 ```js
 // rcc/guardrails/coherence-gate.mjs
@@ -124,5 +124,5 @@ The script reads the tool result, checks for settling patterns, logs if found.
 ## Notes
 
 - settling-detection is the highest-ROI reviewer for our use case
-- The canary corpus idea is excellent — seed with known-bad patterns from RCC incident history
+- The canary corpus idea is excellent — seed with known-bad patterns from CCC incident history
 - DSAR-compliant deletion in audit log: good to have, lower priority

@@ -68,7 +68,7 @@ app.get('/failover-status', (_req, res) => {
                  : 'auto',
     crushBin:      CRUSH_BIN,
     claudeBin:     process.env.CLAUDE_BIN || 'claude',
-    rccUrl:        process.env.RCC_URL || 'http://localhost:8789',
+    rccUrl:        process.env.CCC_URL || 'http://localhost:8789',
     ts:            new Date().toISOString(),
   });
 });

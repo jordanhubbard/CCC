@@ -135,7 +135,7 @@ fn resolve_str(env_key: &str, json_val: Option<String>, default: &str) -> String
 pub fn load() -> ResolvedConfig {
     let j = load_json_config();
 
-    let data_dir = resolve_str("RCC_DATA_DIR", j.data_dir.clone(), "./data");
+    let data_dir = resolve_str("CCC_DATA_DIR", j.data_dir.clone(), "./data");
 
     let queue_path = resolve_str(
         "QUEUE_PATH",
@@ -169,7 +169,7 @@ pub fn load() -> ResolvedConfig {
         .unwrap_or(8789);
 
     // Auth tokens: env wins, then JSON array, then empty (open dev mode)
-    let auth_tokens: std::collections::HashSet<String> = if let Some(raw) = evar("RCC_AUTH_TOKENS")
+    let auth_tokens: std::collections::HashSet<String> = if let Some(raw) = evar("CCC_AUTH_TOKENS")
     {
         raw.split(',')
             .map(|s| s.trim().to_string())

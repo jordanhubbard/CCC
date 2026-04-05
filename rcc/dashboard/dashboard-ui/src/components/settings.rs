@@ -145,7 +145,7 @@ pub fn Settings() -> impl IntoView {
                                     <span class="config-val">{cfg.minio_bucket}</span>
                                 </div>
                                 <div class="config-row">
-                                    <span class="config-key">"RCC port"</span>
+                                    <span class="config-key">"CCC port"</span>
                                     <span class="config-val">{cfg.rcc_port.to_string()}</span>
                                 </div>
                                 <div class="config-row">

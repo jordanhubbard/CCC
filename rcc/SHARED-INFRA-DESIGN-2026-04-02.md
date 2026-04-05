@@ -16,7 +16,7 @@ _Rocky · 2026-04-02_
 | Vector DB | Milvus on do-host1, used only by Rocky + partial Natasha | Sweden containers write nothing. Most agents don't embed anything. |
 | Filesystem | Local per-agent disk | Classic "file lives on Natasha's machine" problem. |
 | Object store | MinIO on do-host1, has `agents/{name}/` buckets | Bucket structure exists but nobody reads from it systematically. |
-| Task system | RCC queue.json on do-host1 | Already shared ✅ — this is the one thing that works. |
+| Task system | CCC queue.json on do-host1 | Already shared ✅ — this is the one thing that works. |
 | Bus | ClawBus (SSE/JSONL on do-host1) | Already shared ✅ |
 
 The task system and bus are already coherent. The problem is memory, knowledge, and files.
@@ -39,7 +39,7 @@ Every agent reads/writes:
   │    rcc_lessons     ← fleet-wide lessons learned            │
   │    rcc_queue       ← work item semantic dedup               │
   ├─────────────────────────────────────────────────────────────┤
-  │  Task Queue (RCC queue.json → Dolt → /api/queue)           │
+  │  Task Queue (CCC queue.json → Dolt → /api/queue)           │
   │    Already shared ✅                                        │
   ├─────────────────────────────────────────────────────────────┤
   │  ClawBus (SSE pub/sub on do-host1)                      │
@@ -91,7 +91,7 @@ Add an `clawfs` skill / config to OpenClaw that wraps S3 read/write:
 
 For file writes that conflict (two agents writing `shared/MEMORY.md` simultaneously):
 - Prefer **append-only writes** with agent-stamped blocks
-- RCC reconciles on a schedule (last-write-wins by ts for non-append fields)
+- CCC reconciles on a schedule (last-write-wins by ts for non-append fields)
 - Files that are truly collaborative (MEMORY.md) use a append-log format, periodically compacted by Rocky
 
 ### 3d. Transparent mount for OpenClaw workspace
@@ -121,11 +121,11 @@ The problem: only Rocky and Natasha (partial) write to them. Sweden containers w
 
 When any agent writes a memory entry (daily note, lesson, conversation), it should:
 1. Write to local file (fast, local)
-2. Call RCC `/api/memory/ingest` (async, non-blocking) with the text + metadata
-3. RCC embeds via tokenhub → upserts to Milvus `rcc_memory`
+2. Call CCC `/api/memory/ingest` (async, non-blocking) with the text + metadata
+3. CCC embeds via tokenhub → upserts to Milvus `rcc_memory`
 
 When any agent needs context:
-1. Call RCC `/api/memory/recall?q=...&agent=...` 
+1. Call CCC `/api/memory/recall?q=...&agent=...` 
 2. Returns semantically similar memories from **all agents** (scoped by relevance, not by agent)
 3. Agent uses this context alongside its local MEMORY.md
 
@@ -161,9 +161,9 @@ Agent writes MEMORY.md
   ↓
 clawfs-sync mirrors to s3://agents/{agent}/memory/2026-04-02.md
   ↓
-RCC ingest trigger (webhook on S3 event OR periodic scan)
+CCC ingest trigger (webhook on S3 event OR periodic scan)
   ↓
-RCC embeds content via tokenhub (text-embedding-3-large)
+CCC embeds content via tokenhub (text-embedding-3-large)
   ↓
 Upserts to Milvus rcc_memory (scope=private for daily notes, scope=fleet for lessons)
   ↓
@@ -197,8 +197,8 @@ We don't need strong consistency. We need:
 
 The natural convergence window:
 - Filesystem (S3 sync): 60s
-- Vector memory (ingest on write): <30s via async RCC call
-- Task queue: already real-time via RCC
+- Vector memory (ingest on write): <30s via async CCC call
+- Task queue: already real-time via CCC
 
 This is fine for AI agent workloads. An agent can work with knowledge that's 60 seconds stale.
 
@@ -217,28 +217,28 @@ This is fine for AI agent workloads. An agent can work with knowledge that's 60 
 
 ### Phase 1 — ClawFS (S3 sync, 2 weeks)
 
-**wq-AGENTFS-001**: RCC `/api/fs/*` endpoint suite
+**wq-AGENTFS-001**: CCC `/api/fs/*` endpoint suite
 - `GET /api/fs/read?path=shared/MEMORY.md`
 - `POST /api/fs/write` (path, content, agent, scope)
 - `GET /api/fs/list?prefix=shared/`
 - `DELETE /api/fs/delete?path=...`
 - Backed by MinIO S3 (do-host1, bucket `agents`)
-- Auth: bearer token (same as rest of RCC)
+- Auth: bearer token (same as rest of CCC)
 
 **wq-AGENTFS-002**: `clawfs-sync` daemon for each agent
 - Lightweight: watches `~/.openclaw/workspace/memory/` + `~/.openclaw/workspace/shared/`
 - On write: uploads to S3 immediately (debounced 5s)
 - On startup: downloads agent's S3 files to local workspace
 - Runs as systemd unit or openclaw plugin
-- Config: `AGENTFS_BUCKET`, `MINIO_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` (from RCC secrets)
+- Config: `AGENTFS_BUCKET`, `MINIO_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` (from CCC secrets)
 
 **wq-AGENTFS-003**: deploy clawfs-sync to all agents via bootstrap
 - Add to `deploy/bootstrap.sh`: pull `clawfs-sync` binary, start as systemd unit
-- Add MINIO creds to RCC secrets → distributed via `secrets-sync.sh`
+- Add MINIO creds to CCC secrets → distributed via `secrets-sync.sh`
 
 ### Phase 2 — Fleet Memory (vector ingest, 1 week)
 
-**wq-VECMEM-001**: RCC `/api/memory/ingest` → Milvus pipeline (Rust, SOA-007)
+**wq-VECMEM-001**: CCC `/api/memory/ingest` → Milvus pipeline (Rust, SOA-007)
 - Receives text + metadata from any agent
 - Embeds via tokenhub `/v1/embeddings`
 - Upserts to `rcc_memory` (content-addressed ID, scope field)
@@ -276,7 +276,7 @@ This is fine for AI agent workloads. An agent can work with knowledge that's 60 
 | "Natasha wrote a file I need" | All non-private files live in S3, available to all agents |
 | "Rocky doesn't know what Boris is working on" | Boris writes heartbeat + task updates to `shared/heartbeats/boris.json` |
 | "I forgot what we discussed last week" | Vector recall from `rcc_memory` surfaces it from any agent's notes |
-| "Sweden containers can't reach Natasha's files" | S3 over HTTP via RCC proxy — no direct agent-to-agent TCP needed |
+| "Sweden containers can't reach Natasha's files" | S3 over HTTP via CCC proxy — no direct agent-to-agent TCP needed |
 | "Two agents wrote the same lesson" | Milvus dedup by content-addressed ID (hash of text); near-duplicates surface as the same embedding |
 | "I need all agents to know about this architecture decision" | Write to `shared/MEMORY.md` with `scope=fleet` → embedded and available to all |
 
@@ -287,15 +287,15 @@ This is fine for AI agent workloads. An agent can work with knowledge that's 60 
 - **No FUSE mount** — too fragile for agents with flaky network (Sweden containers). S3 HTTP API only.
 - **No strong consistency** — 60s eventual coherence is fine. Don't pay distributed transaction overhead.
 - **No per-agent Milvus instances** — one central Milvus, all agents are just clients. Simpler, fewer failure modes.
-- **No vector embedding at agent runtime** — always delegate to RCC → tokenhub. Agents don't need local GPU for memory ops.
-- **No filesystem ACL complexity** — `private` is enforced by convention and RCC auth, not by Milvus/MinIO permissions. Agents are trusted.
+- **No vector embedding at agent runtime** — always delegate to CCC → tokenhub. Agents don't need local GPU for memory ops.
+- **No filesystem ACL complexity** — `private` is enforced by convention and CCC auth, not by Milvus/MinIO permissions. Agents are trusted.
 - **ClawFS is not a general-purpose distributed filesystem** — it's a document store for agent knowledge and working files. Large binary files go to `artifacts/`, not `memory/`.
 
 ---
 
 ## 9. Open Questions for jkh
 
-1. **MinIO replication**: currently single-node on do-host1. Should we add a replica on sparky? Or is do-host1 availability acceptable (it's already the RCC host)?
+1. **MinIO replication**: currently single-node on do-host1. Should we add a replica on sparky? Or is do-host1 availability acceptable (it's already the CCC host)?
 2. **Sweden containers → MinIO**: they can reach do-host1 via the reverse SSH tunnel. MinIO at `http://127.0.0.1:9000` via tunnel, or public at `http://146.190.134.110:9000`? Need a decision before deploying clawfs-sync to Boris/Peabody etc.
 3. **Shared MEMORY.md vs per-agent**: should the fleet `shared/MEMORY.md` replace or supplement per-agent `MEMORY.md`? My recommendation: supplement — per-agent MEMORY.md stays for personal context, fleet MEMORY.md is for architecture/project knowledge.
 4. **clawfs-sync language**: Rust (fits the migration) or Go (simpler one-binary deploy like tokenhub)? I'd go Rust for consistency with the migration.

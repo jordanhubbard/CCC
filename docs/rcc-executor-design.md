@@ -1,4 +1,4 @@
-# RCC Task Executor Design: Claude Agent SDK vs CLI `--print`
+# CCC Task Executor Design: Claude Agent SDK vs CLI `--print`
 
 **Author:** Peabody (horde-dgxc)  
 **Date:** 2026-04-02  
@@ -8,7 +8,7 @@
 
 ## Summary
 
-RCC currently dispatches coding tasks via `claude --print --permission-mode bypassPermissions` (subprocess). This document evaluates the `@anthropic-ai/claude-code` SDK as an upgrade path, covers Codex and Cursor CLI as first-class executors, and proposes a unified `RccExecutor` interface that routes to the right backend per agent/task config.
+CCC currently dispatches coding tasks via `claude --print --permission-mode bypassPermissions` (subprocess). This document evaluates the `@anthropic-ai/claude-code` SDK as an upgrade path, covers Codex and Cursor CLI as first-class executors, and proposes a unified `RccExecutor` interface that routes to the right backend per agent/task config.
 
 **Bottom line:** CLI and SDK are complementary, not competing. Enterprise SSO/billing flows require the CLI; structured output and streaming require the SDK. The right architecture supports both, with routing decided at task-claim time.
 
@@ -24,7 +24,7 @@ Claude CLI (--print) → opencode/ollama → opencode/Boris vLLM
 
 This works but has limitations:
 - Output is unstructured stdout — cost/token metadata is lost
-- No streaming to RCC; caller blocks until subprocess exits
+- No streaming to CCC; caller blocks until subprocess exits
 - Session IDs not captured — no resumability
 - Throttle detection is grep-based (fragile)
 - No Codex or Cursor CLI integration
@@ -46,13 +46,13 @@ The SDK uses the **same auth as the CLI** — it reads `~/.claude/credentials` (
 
 - Enterprise SSO, OAuth, and per-user billing flow through `claude login`
 - Org-level billing tracking, Codex/Cursor credentials, and seat-based usage all depend on this
-- **Any RCC node that handles org-billed tasks must keep the CLI credential store active**
+- **Any CCC node that handles org-billed tasks must keep the CLI credential store active**
 - SDK calls will fail on nodes without a valid `claude login` session
 
 ### When to prefer SDK
 | Scenario | Prefer |
 |---|---|
-| Structured JSON result needed by RCC brain | SDK |
+| Structured JSON result needed by CCC brain | SDK |
 | Cost/token accounting per task | SDK |
 | Streaming progress to Mattermost | SDK |
 | Session resume for long tasks | SDK |
@@ -96,7 +96,7 @@ This routes Codex at the local Nemotron endpoint — free inference, no external
 
 ### Schema extension to work items
 
-Add `preferred_executor` field (already present in RCC schema) with enum:
+Add `preferred_executor` field (already present in CCC schema) with enum:
 
 ```typescript
 type ExecutorType =
@@ -221,7 +221,7 @@ export async function runCodex(item, { baseUrl = null } = {}) {
 | `cursor_cli` | `~/.cursor/session` | ✅ Cursor Business | ⚠️ Experimental |
 | `opencode` | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | Depends | ✅ Yes |
 
-**Key constraint:** Claude SDK and CLI both require a pre-authenticated `claude login` session on the executing node. RCC nodes that handle org-billed tasks must maintain this session (consider `claude login --refresh-token` in agent startup scripts).
+**Key constraint:** Claude SDK and CLI both require a pre-authenticated `claude login` session on the executing node. CCC nodes that handle org-billed tasks must maintain this session (consider `claude login --refresh-token` in agent startup scripts).
 
 ---
 
@@ -233,7 +233,7 @@ export async function runCodex(item, { baseUrl = null } = {}) {
    - `has_gpu: true` on agent → prefer `codex_vllm` (free local inference)  
    - `claude login` session present → prefer `claude_sdk`  
    - Neither → `opencode` → ollama fallback
-4. **Cost reporting** — SDK `cost` metadata → post to `/api/item/:id/complete` as `cost` field; store in RCC journal for billing dashboards
+4. **Cost reporting** — SDK `cost` metadata → post to `/api/item/:id/complete` as `cost` field; store in CCC journal for billing dashboards
 5. **Session resume** — store `sessionId` from SDK responses; expose `POST /api/item/:id/resume` to continue stalled tasks
 
 ---

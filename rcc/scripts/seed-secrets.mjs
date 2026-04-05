@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * seed-secrets.mjs — Seed the RCC secrets store from the live ~/.rcc/.env
+ * seed-secrets.mjs — Seed the CCC secrets store from the live ~/.rcc/.env
  *
  * Reads secrets that agents need but shouldn't store locally, and POSTs them
- * to the RCC API's secrets store via admin auth.
+ * to the CCC API's secrets store via admin auth.
  *
  * Usage:
  *   node rcc/scripts/seed-secrets.mjs [--dry-run]
  *
- * Requires: RCC_URL and RCC_ADMIN_TOKEN (or RCC_AUTH_TOKENS first token) in ~/.rcc/.env
+ * Requires: CCC_URL and RCC_ADMIN_TOKEN (or CCC_AUTH_TOKENS first token) in ~/.rcc/.env
  */
 
 import { readFile } from 'fs/promises';
@@ -40,12 +40,12 @@ if (!existsSync(envPath)) {
 }
 const env = parseEnv(await readFile(envPath, 'utf8'));
 
-const RCC_URL = env.RCC_URL || 'http://localhost:8789';
-// Admin token: RCC_ADMIN_TOKEN if set; otherwise fallback to first token in RCC_AUTH_TOKENS
-const ADMIN_TOKEN = env.RCC_ADMIN_TOKEN || (env.RCC_AUTH_TOKENS || '').split(',')[0]?.trim();
+const CCC_URL = env.CCC_URL || 'http://localhost:8789';
+// Admin token: RCC_ADMIN_TOKEN if set; otherwise fallback to first token in CCC_AUTH_TOKENS
+const ADMIN_TOKEN = env.RCC_ADMIN_TOKEN || (env.CCC_AUTH_TOKENS || '').split(',')[0]?.trim();
 
 if (!ADMIN_TOKEN) {
-  console.error('No admin token found (RCC_ADMIN_TOKEN or RCC_AUTH_TOKENS)');
+  console.error('No admin token found (RCC_ADMIN_TOKEN or CCC_AUTH_TOKENS)');
   process.exit(1);
 }
 
@@ -111,7 +111,7 @@ for (const [key, value] of Object.entries(SECRETS_MAP)) {
   }
 
   try {
-    const res = await fetch(`${RCC_URL}/api/secrets/${key}`, {
+    const res = await fetch(`${CCC_URL}/api/secrets/${key}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${ADMIN_TOKEN}`,

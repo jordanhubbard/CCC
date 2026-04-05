@@ -18,7 +18,7 @@ You are the workqueue processor for **Boris**. You run periodically via cron.
   - **Workaround:** Ask Rocky to proxy MinIO reads/writes via ClawBus message.
   - **Workaround:** Alternatively, use Azure Blob Storage (public) for shared artifacts.
 - ClawBus endpoints (all via public IP):
-  - Send: `POST http://${RCC_HOST_PUBLIC}/bus/send` (Bearer `$RCC_AGENT_TOKEN`)
+  - Send: `POST http://${RCC_HOST_PUBLIC}/bus/send` (Bearer `$CCC_AGENT_TOKEN`)
   - Poll: `GET http://${RCC_HOST_PUBLIC}/bus/messages?to=boris&since=<ts>&limit=20`
   - Queue API: `GET http://${RCC_HOST_PUBLIC}/api/queue`
   - Dashboard: `http://${RCC_HOST_PUBLIC}/`
@@ -102,7 +102,7 @@ Maintain a local state file at `workqueue/state-boris.json`:
 Write a heartbeat to ClawBus each cycle so Rocky can monitor your health:
 `POST http://${RCC_HOST_PUBLIC}/api/heartbeat/${AGENT_NAME}`
 Body: `{"ts":"<ISO-8601>","cycleCount":<N>,"status":"ok","pendingOwned":<N>}`
-Auth: `Bearer $RCC_AGENT_TOKEN`
+Auth: `Bearer $CCC_AGENT_TOKEN`
 
 ## Azure Blob Storage (for shared artifacts — public)
 

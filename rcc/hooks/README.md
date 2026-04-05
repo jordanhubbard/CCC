@@ -1,4 +1,4 @@
-# RCC Hooks
+# CCC Hooks
 
 Agent-side safety hooks for the Rocky & Friends ecosystem. These run locally on each agent host as PreToolUse hooks (Claude Code) or exec policy guards (OpenClaw).
 
@@ -71,7 +71,7 @@ At Level 1: blocked with auth prompt. At Level 2: self-verification injected.
 - Prisma schema push/deploy
 - Service stop/disable/kill
 - Firewall disable/flush
-- RCC queue/agent destructive API calls
+- CCC queue/agent destructive API calls
 - OpenClaw config.apply
 
 ### Level 1 → Level 2 Progression

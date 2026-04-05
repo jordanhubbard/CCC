@@ -1,5 +1,5 @@
 /**
- * rcc/brain — RCC LLM Request Queue + Retry Engine
+ * rcc/brain — CCC LLM Request Queue + Retry Engine
  *
  * The autonomous nervous system of Claw Command Center.
  * Never gives up. Always making progress, even if slowly.

@@ -17,9 +17,9 @@ Write it into your workspace `IDENTITY.md` and `TOOLS.md`.
 
 ---
 
-## Step 2 — RCC Heartbeat (MANDATORY — this is what makes you show "online" on the dashboard)
+## Step 2 — CCC Heartbeat (MANDATORY — this is what makes you show "online" on the dashboard)
 
-POST to Rocky's RCC API every heartbeat cycle:
+POST to Rocky's CCC API every heartbeat cycle:
 
 ```
 POST https://rcc.yourmom.photos/api/heartbeat/<your-agent-name>
@@ -111,7 +111,7 @@ Store your agent-specific state under `agents/<your-name>/`.
 
 The onboarding only sticks if the heartbeat routine is durable. Your `HEARTBEAT.md` (in your workspace root) must include:
 
-1. **RCC heartbeat POST** (Step 2) — every cycle
+1. **CCC heartbeat POST** (Step 2) — every cycle
 2. **MinIO heartbeat PUT** (Step 6) — every cycle
 3. **Workqueue scan** (Step 4) — every cycle
 
@@ -122,7 +122,7 @@ If HEARTBEAT.md doesn't exist or doesn't cover these, **create/update it now**.
 ## Verification
 
 After completing all steps, confirm:
-- [ ] Your name appears on the RCC dashboard: https://dashboard.yourmom.photos/
+- [ ] Your name appears on the CCC dashboard: https://dashboard.yourmom.photos/
 - [ ] `GET /api/heartbeat/<your-name>` returns non-null data
 - [ ] SquirrelBus shows your `online` message: `GET /bus/messages?limit=20`
 - [ ] You can push to rockyandfriends: `git push --dry-run`
@@ -132,7 +132,7 @@ After completing all steps, confirm:
 
 ## For Boris and Agent RTX specifically
 
-**Known gap as of 2026-03-27:** Both are on SquirrelBus but NOT posting RCC heartbeats. The fix is purely Step 2 + Step 7 — add the heartbeat POST to HEARTBEAT.md and run it.
+**Known gap as of 2026-03-27:** Both are on SquirrelBus but NOT posting CCC heartbeats. The fix is purely Step 2 + Step 7 — add the heartbeat POST to HEARTBEAT.md and run it.
 
 Boris gateway: outbound-capable, Sweden datacenter, dual L40  
 Agent RTX gateway: outbound-only (horde-dgxc), `jordanh-rtx`, 4x L40

@@ -38,7 +38,7 @@ See `.env.template` for all available options. Only three are required:
 | Variable | Description |
 |---|---|
 | `RCC_PORT` | Port to listen on (default: 8789) |
-| `RCC_AUTH_TOKENS` | Comma-separated agent Bearer tokens |
+| `CCC_AUTH_TOKENS` | Comma-separated agent Bearer tokens |
 | `RCC_ADMIN_TOKEN` | Admin token (higher privilege) |
 
 Everything else is optional and enables additional features (Milvus dedup, Slack, ClawBus, etc.).

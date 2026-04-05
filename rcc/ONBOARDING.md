@@ -1,6 +1,6 @@
-# RCC Onboarding Guide — Claw Command Center
+# CCC Onboarding Guide — Claw Command Center
 
-RCC is a lightweight, self-hosted coordination layer for multi-agent teams. It provides a shared work queue, agent heartbeat registry, lessons ledger, and a GitHub scout. Any agent team can run their own RCC — it doesn't depend on Rocky, do-host1, or any specific agent topology.
+CCC is a lightweight, self-hosted coordination layer for multi-agent teams. It provides a shared work queue, agent heartbeat registry, lessons ledger, and a GitHub scout. Any agent team can run their own CCC — it doesn't depend on Rocky, do-host1, or any specific agent topology.
 
 ---
 
@@ -62,14 +62,14 @@ nano ~/.rcc/.env
 AGENT_NAME=myagent           # short lowercase name (becomes your identity)
 AGENT_HOST=my-host.example.com
 
-# Where is the RCC API?
-RCC_URL=http://your-rcc-host:8789
-RCC_AGENT_TOKEN=             # filled in by register-agent.sh
+# Where is the CCC API?
+CCC_URL=http://your-rcc-host:8789
+CCC_AGENT_TOKEN=             # filled in by register-agent.sh
 
-# Auth tokens accepted by THIS node's RCC API (if hosting the hub)
-RCC_AUTH_TOKENS=token1,token2
+# Auth tokens accepted by THIS node's CCC API (if hosting the hub)
+CCC_AUTH_TOKENS=token1,token2
 
-# Primary agent name (used as default triaging agent in RCC)
+# Primary agent name (used as default triaging agent in CCC)
 PRIMARY_AGENT=myagent        # defaults to the first registered agent if unset
 ```
 
@@ -82,17 +82,17 @@ SLACK_TOKEN=                 # for Slack notifications
 TELEGRAM_TOKEN=              # for Telegram alerts
 ```
 
-### 4. Register this agent with RCC
+### 4. Register this agent with CCC
 
 ```bash
 bash ~/.rcc/workspace/deploy/register-agent.sh
 ```
 
-This POSTs your agent's capabilities to the RCC hub and saves the returned token to `~/.rcc/.env`.
+This POSTs your agent's capabilities to the CCC hub and saves the returned token to `~/.rcc/.env`.
 
-### 5. Start the RCC API server (hub node only)
+### 5. Start the CCC API server (hub node only)
 
-If this node is hosting the RCC hub:
+If this node is hosting the CCC hub:
 
 ```bash
 cd ~/.rcc/workspace
@@ -161,7 +161,7 @@ Which GitHub repos the scout monitors:
 Add repos via API:
 ```bash
 curl -X POST http://localhost:8789/api/repos \
-  -H "Authorization: Bearer $RCC_AUTH_TOKENS" \
+  -H "Authorization: Bearer $CCC_AUTH_TOKENS" \
   -H "Content-Type: application/json" \
   -d '{"full_name": "yourorg/yourrepo"}'
 ```
@@ -177,7 +177,7 @@ Auto-populated from repos. Can also be managed manually.
 Any node can join the network:
 
 1. Run `setup-node.sh` on the new machine
-2. Point `RCC_URL` at the hub's API
+2. Point `CCC_URL` at the hub's API
 3. Run `register-agent.sh` with the admin token
 4. The hub adds the agent to `agents.json` and issues a token
 5. The new agent uses that token for all API calls
@@ -194,8 +194,8 @@ Agents can be commanded remotely via ClawBus exec — no inbound SSH required. T
 # Quick start (manual):
 CLAWBUS_TOKEN=<shared-secret> \
 CLAWBUS_URL=https://dashboard.yourmom.photos \
-RCC_URL=https://rcc.yourmom.photos \
-RCC_AUTH_TOKEN=<agent-token> \
+CCC_URL=https://rcc.yourmom.photos \
+CCC_AUTH_TOKEN=<agent-token> \
 AGENT_NAME=mynode \
 ALLOW_SHELL_EXEC=true \
 node /opt/rcc/rcc/exec/agent-listener.mjs
@@ -208,13 +208,13 @@ node /opt/rcc/rcc/exec/agent-listener.mjs
 ```bash
 # JS mode (default — sandboxed vm):
 curl -s -X POST https://rcc.yourmom.photos/api/exec \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["mynode"],"code":"Object.keys(process.env).length"}'
 
 # Shell mode (pre-approved commands only):
 curl -s -X POST https://rcc.yourmom.photos/api/exec \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["mynode"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'
 ```
@@ -224,7 +224,7 @@ curl -s -X POST https://rcc.yourmom.photos/api/exec \
 ```bash
 EXEC_ID=$(curl -s ... | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 curl -s "https://rcc.yourmom.photos/api/exec/$EXEC_ID" \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" | python3 -m json.tool
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" | python3 -m json.tool
 ```
 
 See [`rcc/docs/remote-exec.md`](docs/remote-exec.md) for full details, security model, and shell allowlist configuration.
@@ -243,7 +243,7 @@ curl http://your-hub:8788/bus/messages?to=myagent&since=2026-01-01T00:00:00Z
 **Send a message:**
 ```bash
 curl -X POST http://your-hub:8788/bus/send \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"from":"myagent","to":"all","type":"text","body":"Hello!"}'
 ```
@@ -259,7 +259,7 @@ Agents record lessons when they fail and recover. Other agents query lessons bef
 **Record a lesson:**
 ```bash
 curl -X POST http://localhost:8789/api/lessons \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"domain":"myapp","tags":["error"],"symptom":"what broke","fix":"what fixed it","agent":"myagent"}'
 ```
@@ -267,7 +267,7 @@ curl -X POST http://localhost:8789/api/lessons \
 **Query lessons (prepend to agent context):**
 ```bash
 curl "http://localhost:8789/api/lessons?domain=myapp&q=my+query&format=context" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN"
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN"
 ```
 
 ---
@@ -278,7 +278,7 @@ Agents post periodic heartbeats to announce they're online:
 
 ```bash
 curl -X POST http://localhost:8789/api/heartbeat/myagent \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"host":"my-host.example.com","status":"online"}'
 ```
@@ -291,7 +291,7 @@ The `deploy/agent-pull.sh` script does this automatically on each pull.
 
 | Problem | Fix |
 |---------|-----|
-| `{"error":"Unauthorized"}` | Check `RCC_AUTH_TOKENS` env var on the hub and your Bearer token |
+| `{"error":"Unauthorized"}` | Check `CCC_AUTH_TOKENS` env var on the hub and your Bearer token |
 | Agent not showing in dashboard | Run `register-agent.sh` and check `agents.json` on hub |
 | Scout not finding repos | Add repo to `repos.json` or POST to `/api/repos` |
 | Lessons not persisting | Check `LESSONS_DIR` and MinIO config; lessons fall back to local `~/.rcc/lessons/` |
@@ -304,10 +304,10 @@ The `deploy/agent-pull.sh` script does this automatically on each pull.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PRIMARY_AGENT` | (none) | Default triaging agent name used in scout/AI responses |
-| `RCC_PORT` | `8789` | Port for the RCC API server |
+| `RCC_PORT` | `8789` | Port for the CCC API server |
 | `AGENT_NAME` | — | This node's agent name |
-| `RCC_URL` | — | Hub RCC API base URL (for client nodes) |
-| `RCC_AUTH_TOKENS` | — | Comma-separated valid tokens (for hub) |
+| `CCC_URL` | — | Hub CCC API base URL (for client nodes) |
+| `CCC_AUTH_TOKENS` | — | Comma-separated valid tokens (for hub) |
 | `QUEUE_PATH` | `../../workqueue/queue.json` | Path to queue storage |
 | `LESSONS_DIR` | `~/.rcc/lessons` | Local lessons cache directory |
 | `MINIO_ALIAS` | `local` | MinIO alias for durable storage |
@@ -317,4 +317,4 @@ The `deploy/agent-pull.sh` script does this automatically on each pull.
 
 ---
 
-*RCC — coordination infrastructure for agent teams, without the vendor lock-in.* 🐿️
+*CCC — coordination infrastructure for agent teams, without the vendor lock-in.* 🐿️

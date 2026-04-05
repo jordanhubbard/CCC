@@ -14,7 +14,7 @@
  *
  * Environment:
  *   SQUIRRELBUS_URL  — bus URL (default: http://localhost:8788)
- *   RCC_AUTH_TOKEN   — bearer token for auth (required)
+ *   CCC_AUTH_TOKEN   — bearer token for auth (required)
  *   AGENT_NAME       — sender identity (default: 'cli')
  */
 
@@ -36,7 +36,7 @@ Examples:
 
 Environment:
   SQUIRRELBUS_URL   bus URL (default: http://localhost:8788)
-  RCC_AUTH_TOKEN    bearer token (required)
+  CCC_AUTH_TOKEN    bearer token (required)
   AGENT_NAME        sender name (default: cli)
 `);
   process.exit(0);

@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
-# bootstrap.sh — One-command agent bootstrap from RCC
+# bootstrap.sh — One-command agent bootstrap from CCC
 # Installs OpenClaw, seeds workspace, configures agent identity, starts daemon.
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/deploy/bootstrap.sh | \
 #     bash -s -- --rcc=http://146.190.134.110:8789 --token=<bootstrap-token> --agent=boris
 #
-# NOTE: Port 8789 is the OpenClaw gateway (RCC API). Port 8788 is the workqueue dashboard.
+# NOTE: Port 8789 is the OpenClaw gateway (CCC API). Port 8788 is the workqueue dashboard.
 # Use 8789 for --rcc. If you have a pre-known agent token, pass --agent-token=<token> to skip
 # the bootstrap API call (useful if the API is down or the token is already known).
 #
 # All secrets (NVIDIA key, Mattermost token, etc.) are fetched automatically
-# from RCC via the bootstrap token. No --nvidia-key or channel tokens needed.
+# from CCC via the bootstrap token. No --nvidia-key or channel tokens needed.
 set -euo pipefail
 
-RCC=""
+CCC=""
 TOKEN=""
 AGENT=""
 AGENT_TOKEN_OVERRIDE=""
-# These may be overridden by CLI args, but RCC secrets take precedence if not provided
+# These may be overridden by CLI args, but CCC secrets take precedence if not provided
 NVIDIA_KEY=""
 TELEGRAM_TOKEN=""
 MATTERMOST_TOKEN=""
 
 for arg in "$@"; do
   case "$arg" in
-    --rcc=*)               RCC="${arg#--rcc=}"               ;;
+    --rcc=*)               CCC="${arg#--rcc=}"               ;;
     --token=*)             TOKEN="${arg#--token=}"             ;;
     --agent=*)             AGENT="${arg#--agent=}"             ;;
     --agent-token=*)       AGENT_TOKEN_OVERRIDE="${arg#--agent-token=}" ;;
@@ -35,7 +35,7 @@ for arg in "$@"; do
   esac
 done
 
-if [[ -z "$RCC" || -z "$AGENT" ]]; then
+if [[ -z "$CCC" || -z "$AGENT" ]]; then
   echo "Usage: bootstrap.sh --rcc=<url> --token=<bootstrap-token> --agent=<name> [--agent-token=<token>]" >&2
   echo "  --token is required unless --agent-token is provided directly." >&2
   exit 1
@@ -54,7 +54,7 @@ warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 error()   { echo -e "${RED}✗${NC} $1"; exit 1; }
 
 echo ""
-echo "🐻 RCC Agent Bootstrap: ${AGENT}"
+echo "🐻 CCC Agent Bootstrap: ${AGENT}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -107,22 +107,22 @@ else
   success "OpenClaw installed"
 fi
 
-# ── 3. Clone / update RCC workspace ──────────────────────────────────────
-RCC_WORKSPACE="$HOME/.rcc/workspace"
-info "Setting up RCC workspace at $RCC_WORKSPACE..."
-if [[ -d "$RCC_WORKSPACE/.git" ]]; then
+# ── 3. Clone / update CCC workspace ──────────────────────────────────────
+CCC_WORKSPACE="$HOME/.rcc/workspace"
+info "Setting up CCC workspace at $CCC_WORKSPACE..."
+if [[ -d "$CCC_WORKSPACE/.git" ]]; then
   warn "Already cloned — pulling latest"
-  git -C "$RCC_WORKSPACE" pull --ff-only
+  git -C "$CCC_WORKSPACE" pull --ff-only
 else
-  git clone "${RCC_REPO:-https://github.com/jordanhubbard/rockyandfriends.git}" "$RCC_WORKSPACE"
+  git clone "${RCC_REPO:-https://github.com/jordanhubbard/rockyandfriends.git}" "$CCC_WORKSPACE"
 fi
-success "RCC workspace ready"
+success "CCC workspace ready"
 
 # ── 4. Call bootstrap API ─────────────────────────────────────────────────
 BOOTSTRAP_JSON=""
 REPO_URL=""
 AGENT_TOKEN=""
-RCC_URL="${RCC}"  # default to the --rcc URL; may be overridden by API response
+CCC_URL="${CCC}"  # default to the --rcc URL; may be overridden by API response
 DEPLOY_KEY=""
 
 if [[ -n "$AGENT_TOKEN_OVERRIDE" ]]; then
@@ -132,7 +132,7 @@ if [[ -n "$AGENT_TOKEN_OVERRIDE" ]]; then
   success "Agent token set from --agent-token"
 else
   info "Consuming bootstrap token..."
-  BOOTSTRAP_RESP=$(curl -sf "${RCC}/api/bootstrap?token=${TOKEN}" 2>&1) || true
+  BOOTSTRAP_RESP=$(curl -sf "${CCC}/api/bootstrap?token=${TOKEN}" 2>&1) || true
   # Verify it looks like JSON (not an error page or empty)
   if echo "$BOOTSTRAP_RESP" | grep -q '"ok":true'; then
     BOOTSTRAP_JSON="$BOOTSTRAP_RESP"
@@ -141,7 +141,7 @@ else
   if [[ -z "$BOOTSTRAP_JSON" ]]; then
     # If we have a previous .env with a working token, offer to use it
     if [[ -n "$ENV_BACKUP" ]]; then
-      PREV_TOKEN=$(grep '^RCC_AGENT_TOKEN=' "$ENV_BACKUP" 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
+      PREV_TOKEN=$(grep '^CCC_AGENT_TOKEN=' "$ENV_BACKUP" 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
       if [[ -n "$PREV_TOKEN" ]]; then
         warn "Bootstrap API failed — re-using previous agent token from .env backup"
         warn "To use a fresh token, re-run with a valid --token or --agent-token"
@@ -149,7 +149,7 @@ else
       fi
     fi
     if [[ -z "$AGENT_TOKEN" ]]; then
-      error "Bootstrap API call failed or returned invalid response.\nResponse: ${BOOTSTRAP_RESP:-<empty>}\nCheck that RCC is reachable at ${RCC} (port 8788) and the token is valid/unexpired.\nAlternatively, pass --agent-token=<known-token> to skip the API call."
+      error "Bootstrap API call failed or returned invalid response.\nResponse: ${BOOTSTRAP_RESP:-<empty>}\nCheck that CCC is reachable at ${CCC} (port 8788) and the token is valid/unexpired.\nAlternatively, pass --agent-token=<known-token> to skip the API call."
     fi
   else
     # Parse core fields using node (handles nested JSON safely)
@@ -157,7 +157,7 @@ else
 
     REPO_URL=$(_parse   ".repoUrl")
     AGENT_TOKEN=$(_parse ".agentToken")
-    RCC_URL=$(_parse    ".rccUrl")
+    CCC_URL=$(_parse    ".rccUrl")
     DEPLOY_KEY=$(_parse  ".deployKey")
 
     if [[ -z "$AGENT_TOKEN" ]]; then
@@ -170,7 +170,7 @@ fi
 # ── 4b. Extract secrets from bootstrap response ───────────────────────────
 # The bootstrap API returns the full secrets bundle. Extract what we need now
 # so openclaw.json can be written correctly in step 7. CLI args take precedence
-# if explicitly provided (for testing/overrides); otherwise use RCC secrets.
+# if explicitly provided (for testing/overrides); otherwise use CCC secrets.
 info "Extracting secrets from bootstrap response..."
 _secret() { node -e "
   try {
@@ -188,11 +188,11 @@ _secret() { node -e "
 [[ -z "$MATTERMOST_TOKEN"  ]] && MATTERMOST_TOKEN=$(_secret  "MATTERMOST_TOKEN"   "mattermost_token")
 [[ -z "$TELEGRAM_TOKEN"    ]] && TELEGRAM_TOKEN=$(_secret    "TELEGRAM_BOT_TOKEN" "telegram_token")
 
-# Fetch per-agent Slack tokens from RCC (stored as <agent>_slack bundle)
+# Fetch per-agent Slack tokens from CCC (stored as <agent>_slack bundle)
 SLACK_BOT_TOKEN=""
 SLACK_APP_TOKEN=""
 if [[ -n "$AGENT" ]]; then
-  SLACK_BUNDLE=$(curl -sf "${RCC_URL}/api/secrets/${AGENT}_slack" \
+  SLACK_BUNDLE=$(curl -sf "${CCC_URL}/api/secrets/${AGENT}_slack" \
     -H "Authorization: Bearer ${AGENT_TOKEN}" 2>/dev/null || echo "")
   if [[ -n "$SLACK_BUNDLE" ]]; then
     SLACK_BOT_TOKEN=$(echo "$SLACK_BUNDLE" | node -e "process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const p=JSON.parse(d);console.log(p.secrets?.SLACK_BOT_TOKEN||'')}catch(e){}}" 2>/dev/null || echo "")
@@ -200,15 +200,15 @@ if [[ -n "$AGENT" ]]; then
   fi
 fi
 if [[ -n "$SLACK_BOT_TOKEN" ]]; then
-  success "Slack tokens obtained from RCC secrets (${AGENT}_slack)"
+  success "Slack tokens obtained from CCC secrets (${AGENT}_slack)"
 else
-  warn "No Slack tokens found in RCC for agent '${AGENT}' — Slack channel will be disabled"
+  warn "No Slack tokens found in CCC for agent '${AGENT}' — Slack channel will be disabled"
 fi
 
 if [[ -n "$NVIDIA_KEY" ]]; then
-  success "NVIDIA API key obtained from RCC secrets"
+  success "NVIDIA API key obtained from CCC secrets"
 else
-  warn "No NVIDIA_API_KEY in RCC secrets — will use anthropic direct (set ANTHROPIC_API_KEY in env)"
+  warn "No NVIDIA_API_KEY in CCC secrets — will use anthropic direct (set ANTHROPIC_API_KEY in env)"
 fi
 
 # ── 5. Deploy key + SSH config ────────────────────────────────────────────
@@ -228,8 +228,8 @@ SSHEOF
     chmod 600 "$SSH_CONF"
   fi
   if [[ -n "$REPO_URL" ]]; then
-    git -C "$RCC_WORKSPACE" remote set-url origin "$REPO_URL"
-    git -C "$RCC_WORKSPACE" fetch origin || warn "git fetch failed — deploy key may not have read access yet"
+    git -C "$CCC_WORKSPACE" remote set-url origin "$REPO_URL"
+    git -C "$CCC_WORKSPACE" fetch origin || warn "git fetch failed — deploy key may not have read access yet"
   fi
   success "Deploy key installed"
 fi
@@ -240,13 +240,13 @@ info "Seeding OpenClaw workspace at $OC_WORKSPACE..."
 mkdir -p "$OC_WORKSPACE/memory/people" "$OC_WORKSPACE/skills"
 
 # Copy shared files from repo
-SHARED_DIR="$RCC_WORKSPACE/openclaw/shared"
+SHARED_DIR="$CCC_WORKSPACE/openclaw/shared"
 if [[ -d "$SHARED_DIR" ]]; then
   cp "$SHARED_DIR/AGENTS.md" "$OC_WORKSPACE/AGENTS.md" 2>/dev/null || true
 fi
 
 # Copy agent soul if it exists; otherwise stub it
-SOUL_SRC="$RCC_WORKSPACE/openclaw/souls/${AGENT}.md"
+SOUL_SRC="$CCC_WORKSPACE/openclaw/souls/${AGENT}.md"
 if [[ -f "$SOUL_SRC" ]]; then
   cp "$SOUL_SRC" "$OC_WORKSPACE/SOUL.md"
   success "Soul loaded from repo: openclaw/souls/${AGENT}.md"
@@ -268,7 +268,7 @@ cat > "$OC_WORKSPACE/IDENTITY.md" <<IDEOF
 
 - **Name:** ${AGENT^}
 - **Agent:** ${AGENT}
-- **RCC:** ${RCC_URL}
+- **CCC:** ${CCC_URL}
 IDEOF
 
 # Bootstrap MEMORY.md if not present
@@ -277,14 +277,14 @@ IDEOF
 
 ## Identity
 - My name is ${AGENT^}. I am a member of the Rocky & Friends agent crew.
-- RCC hub: ${RCC_URL}
+- CCC hub: ${CCC_URL}
 MEMEOF
 
 # Bootstrap HEARTBEAT.md
 [[ -f "$OC_WORKSPACE/HEARTBEAT.md" ]] || cat > "$OC_WORKSPACE/HEARTBEAT.md" <<HBEOF
 # HEARTBEAT.md
 
-# Standard heartbeat. Check queue and RCC health each beat.
+# Standard heartbeat. Check queue and CCC health each beat.
 HBEOF
 
 success "OpenClaw workspace seeded"
@@ -356,7 +356,7 @@ MODEOF
 else
   MODEL_PROVIDER_JSON='{}'
   DEFAULT_MODEL="anthropic/claude-sonnet-4-6"
-  warn "No NVIDIA_API_KEY in secrets or args — defaulting to anthropic direct. Set ANTHROPIC_API_KEY in env or add nvidia/api_key to RCC secrets."
+  warn "No NVIDIA_API_KEY in secrets or args — defaulting to anthropic direct. Set ANTHROPIC_API_KEY in env or add nvidia/api_key to CCC secrets."
 fi
 
 cat > "$OC_CONFIG" <<OCEOF
@@ -402,13 +402,13 @@ info "Writing ~/.rcc/.env..."
 mkdir -p "$HOME/.rcc"
 ENV_FILE="$HOME/.rcc/.env"
 touch "$ENV_FILE"
-for key in AGENT_NAME RCC_AGENT_TOKEN RCC_URL AGENT_HOST NVIDIA_API_KEY NVIDIA_API_BASE; do
+for key in AGENT_NAME CCC_AGENT_TOKEN CCC_URL AGENT_HOST NVIDIA_API_KEY NVIDIA_API_BASE; do
   sed -i "/^${key}=/d" "$ENV_FILE" 2>/dev/null || true
 done
 cat >> "$ENV_FILE" <<ENVEOF
 AGENT_NAME=${AGENT}
-RCC_AGENT_TOKEN=${AGENT_TOKEN}
-RCC_URL=${RCC_URL}
+CCC_AGENT_TOKEN=${AGENT_TOKEN}
+CCC_URL=${CCC_URL}
 AGENT_HOST=$(hostname)
 NVIDIA_API_BASE=https://inference-api.nvidia.com/v1
 NVIDIA_API_KEY=${NVIDIA_KEY}
@@ -421,7 +421,7 @@ chmod 600 "$ENV_FILE"
 # ── 8 smoke test: verify critical vars are non-empty ─────────────────────
 _env_val() { grep "^${1}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' || true; }
 _SMOKE_OK=true
-for _VAR in AGENT_NAME RCC_AGENT_TOKEN RCC_URL; do
+for _VAR in AGENT_NAME CCC_AGENT_TOKEN CCC_URL; do
   _VAL=$(_env_val "$_VAR")
   if [[ -z "$_VAL" ]]; then
     warn "SMOKE TEST FAIL: ${_VAR} is empty in .env — bootstrap may be incomplete"
@@ -444,7 +444,7 @@ node -e "
     const fs = require('fs');
     const d = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
     const s = d.secrets || {};
-    const SKIP = new Set(['RCC_AGENT_TOKEN','RCC_URL','AGENT_NAME','AGENT_HOST']);
+    const SKIP = new Set(['CCC_AGENT_TOKEN','CCC_URL','AGENT_NAME','AGENT_HOST']);
     const env = fs.existsSync('$ENV_FILE') ? fs.readFileSync('$ENV_FILE', 'utf8') : '';
     const lines = env.split('\n');
     const written = [];
@@ -549,7 +549,7 @@ fi
 # ── 9e. Install agentfs-sync ──────────────────────────────────────────────
 AGENTFS_BIN="/usr/local/bin/agentfs-sync"
 AGENTFS_SVC="/etc/systemd/system/agentfs-sync.service"
-AGENTFS_SVC_SRC="$RCC_WORKSPACE/rcc/agentfs-sync/agentfs-sync.service"
+AGENTFS_SVC_SRC="$CCC_WORKSPACE/rcc/agentfs-sync/agentfs-sync.service"
 
 if [[ ! -f "$AGENTFS_BIN" ]]; then
   info "Downloading agentfs-sync from MinIO..."
@@ -580,7 +580,7 @@ fi
 
 # ── 9f. Install openclaw-register service ────────────────────────────────
 REGISTER_SVC="/etc/systemd/system/openclaw-register.service"
-REGISTER_SVC_SRC="$RCC_WORKSPACE/rcc/scripts/openclaw-register.service"
+REGISTER_SVC_SRC="$CCC_WORKSPACE/rcc/scripts/openclaw-register.service"
 
 if [[ -f "$REGISTER_SVC_SRC" ]]; then
   info "Installing openclaw-register systemd service..."
@@ -640,8 +640,8 @@ HWEOF
 
 info "Hardware: ${GPU_COUNT}x ${GPU_MODEL:-none} (${GPU_VRAM_GB}GB VRAM), ${CPU_CORES}x CPU, ${RAM_GB}GB RAM"
 
-info "Posting heartbeat + hardware fingerprint to RCC..."
-curl -s -X POST "${RCC_URL}/api/heartbeat/${AGENT}" \
+info "Posting heartbeat + hardware fingerprint to CCC..."
+curl -s -X POST "${CCC_URL}/api/heartbeat/${AGENT}" \
   -H "Authorization: Bearer ${AGENT_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "{
@@ -652,8 +652,8 @@ curl -s -X POST "${RCC_URL}/api/heartbeat/${AGENT}" \
     \"hardware\":${HW_JSON}
   }" > /dev/null || warn "Heartbeat post failed (non-fatal)"
 
-# Also PATCH agent record with real hardware data so RCC dashboard is accurate
-curl -s -X PATCH "${RCC_URL}/api/agents/${AGENT}" \
+# Also PATCH agent record with real hardware data so CCC dashboard is accurate
+curl -s -X PATCH "${CCC_URL}/api/agents/${AGENT}" \
   -H "Authorization: Bearer ${AGENT_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "{
@@ -682,12 +682,12 @@ echo -e "${GREEN}✅ Bootstrap complete!${NC} ${AGENT^} is alive."
 echo ""
 echo "  OpenClaw workspace:  ${OC_WORKSPACE}"
 echo "  OpenClaw config:     ${OC_CONFIG}"
-echo "  RCC workspace:       ${RCC_WORKSPACE}"
-echo "  RCC env:             ${HOME}/.rcc/.env"
+echo "  CCC workspace:       ${CCC_WORKSPACE}"
+echo "  CCC env:             ${HOME}/.rcc/.env"
 echo ""
 if [[ -z "$TELEGRAM_TOKEN" && -z "$MATTERMOST_TOKEN" ]]; then
   echo -e "${YELLOW}  ⚠ No messaging channels configured.${NC}"
-  echo "    Add TELEGRAM_BOT_TOKEN or MATTERMOST_TOKEN to RCC secrets and re-bootstrap,"
+  echo "    Add TELEGRAM_BOT_TOKEN or MATTERMOST_TOKEN to CCC secrets and re-bootstrap,"
   echo "    OR edit openclaw.json and run: openclaw gateway restart"
   echo ""
 fi

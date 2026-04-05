@@ -31,7 +31,7 @@ const MINIO_ALIAS   = process.env.MINIO_ALIAS || 'local';
 const MINIO_BUCKET  = process.env.MINIO_BUCKET  || 'agents';
 const AGENT_NAME    = process.env.AGENT_NAME    || 'unknown';
 const BUS_API       = process.env.BUS_API       || 'http://localhost:8788';
-const BUS_TOKEN     = process.env.BUS_TOKEN     || process.env.RCC_AUTH_TOKENS?.split(',')[0] || '';
+const BUS_TOKEN     = process.env.BUS_TOKEN     || process.env.CCC_AUTH_TOKENS?.split(',')[0] || '';
 const MC_PATH       = process.env.MC_PATH       || 'mc';
 
 // ── Helpers ────────────────────────────────────────────────────────────────

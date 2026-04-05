@@ -1,5 +1,5 @@
 #!/bin/bash
-# dangerous-command-guard.sh — PreToolUse safety hook for RCC agents
+# dangerous-command-guard.sh — PreToolUse safety hook for CCC agents
 #
 # Adapted from instar's "Security Through Identity" model
 # (https://github.com/JKHeadley/instar — dangerous-command-guard.sh)
@@ -140,7 +140,7 @@ RISKY_PATTERNS=(
   # Credential/secret operations
   "curl.*secrets.*DELETE"
   "curl.*-X DELETE.*api/"
-  # RCC-specific: queue wipe, agent decommission
+  # CCC-specific: queue wipe, agent decommission
   "api/queue.*DELETE"
   "api/agents.*decommission"
   # OpenClaw config changes

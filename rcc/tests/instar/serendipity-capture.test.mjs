@@ -2,9 +2,9 @@
  * Tests for scripts/serendipity-capture.sh (instar item wq-INSTAR-*-07)
  *
  * Tests validation logic (field requirements, category/readiness enums,
- * length limits, secret scanning, rate limiting) without hitting live RCC.
+ * length limits, secret scanning, rate limiting) without hitting live CCC.
  *
- * For integration test (actual RCC post), see rcc/tests/integration.test.mjs.
+ * For integration test (actual CCC post), see rcc/tests/integration.test.mjs.
  */
 
 import { test, describe, before, after } from 'node:test';
@@ -19,12 +19,12 @@ import { join } from 'node:path';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const SCRIPT = resolve(__dirname, '../../../scripts/serendipity-capture.sh');
 
-// Required env — use a fake token to avoid hitting live RCC, but we need a valid URL
-// Tests that would POST to RCC are skipped here; we test validation only.
+// Required env — use a fake token to avoid hitting live CCC, but we need a valid URL
+// Tests that would POST to CCC are skipped here; we test validation only.
 const BASE_ENV = {
   ...process.env,
-  RCC_AGENT_TOKEN: 'test-fake-token-for-validation-only',
-  RCC_URL: 'http://127.0.0.1:19999', // non-listening port → connection refused → fast fail
+  CCC_AGENT_TOKEN: 'test-fake-token-for-validation-only',
+  CCC_URL: 'http://127.0.0.1:19999', // non-listening port → connection refused → fast fail
   AGENT_NAME: 'test-natasha',
   CLAUDE_SESSION_ID: `test-session-${Date.now()}`,
 };
@@ -90,7 +90,7 @@ describe('serendipity-capture.sh — category enum validation', () => {
     const valid = ['bug', 'improvement', 'feature', 'pattern', 'refactor', 'security'];
     for (const cat of valid) {
       const r = run([...validArgs().map((v, i, a) => a[i-1] === '--category' ? cat : v)]);
-      // Will fail at RCC post (connection refused) but should NOT fail at category validation
+      // Will fail at CCC post (connection refused) but should NOT fail at category validation
       // Category validation exits 1 with "must be one of" — connection error exits 1 too
       // but won't have the category error message
       if (r.exitCode !== 0) {
@@ -183,7 +183,7 @@ describe('serendipity-capture.sh — rate limiting', () => {
     writeFileSync(rateFile, '4');
 
     const r = run(validArgs(), { CLAUDE_SESSION_ID: sessionId });
-    // Should NOT fail with rate limit error (may fail at RCC connection, which is fine)
+    // Should NOT fail with rate limit error (may fail at CCC connection, which is fine)
     assert.ok(!r.stderr.includes('Rate limit'),
       `Should not hit rate limit at count=4: ${r.stderr}`);
 

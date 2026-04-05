@@ -110,7 +110,7 @@ sparky-ollama health → GET http://sparky.tail407856.ts.net:11434/api/tags
 
 ### 5. Cost Telemetry
 
-Emit per-request cost events to RCC:
+Emit per-request cost events to CCC:
 
 ```
 POST /api/telemetry/inference
@@ -145,9 +145,9 @@ Individual agents can override routing in their session config:
 }
 ```
 
-### 7. RCC Agent Registry Integration
+### 7. CCC Agent Registry Integration
 
-The RCC `/api/agents` endpoint already tracks agent capabilities. Extend it:
+The CCC `/api/agents` endpoint already tracks agent capabilities. Extend it:
 
 ```json
 {
@@ -174,9 +174,9 @@ known agents — zero manual config for new agents that register local endpoints
 - Add health check loop
 - Emit cost telemetry events
 
-**Phase 3 — RCC integration:**
+**Phase 3 — CCC integration:**
 - Extend `/api/agents` schema with `localInferenceUrl` + `localModels`
-- Gateway auto-discovers local providers from RCC registry on startup
+- Gateway auto-discovers local providers from CCC registry on startup
 
 ---
 

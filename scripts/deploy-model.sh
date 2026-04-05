@@ -11,7 +11,7 @@
 #   minio-path      Full MinIO object path (default: agents/models/<model-dir-name>)
 #
 # Pre-requisites: model must already be uploaded to MinIO at minio-path
-# Run ON the container (via HORDE SSH from sparky/puck, or RCC exec if listener is alive)
+# Run ON the container (via HORDE SSH from sparky/puck, or CCC exec if listener is alive)
 #
 # Examples:
 #   deploy-model.sh gemma-4-31B-it-FP8_BLOCK gemma

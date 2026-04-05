@@ -299,7 +299,7 @@ The **SQLite catalog** is the canonical source of truth for all port allocations
 ```
 /home/jkh/.rcc/port-registry.json
 ```
-(Rocky's RCC config directory on do-host1 — not jkh's home root where it'd get lost in the noise.)
+(Rocky's CCC config directory on do-host1 — not jkh's home root where it'd get lost in the noise.)
 
 This file is **derived** — auto-regenerated from the catalog on any port change. Its purpose is debugging convenience (`cat` a JSON file vs. running SQL at 2am). Never edit it directly.
 
@@ -433,7 +433,7 @@ For `service` type, the tunnel is the critical path:
 ## Implementation Phases
 
 ### Phase 1: Artifact Publishing + Catalog (1-2 days)
-- Unified `POST /api/publish` endpoint in RCC API
+- Unified `POST /api/publish` endpoint in CCC API
 - Upload to Azure Blob (public) or MinIO (fleet/private)
 - Publish catalog (SQLite, exposed via API)
 - Dashboard "Published" tab (read-only list)
@@ -487,7 +487,7 @@ For `service` type, the tunnel is the critical path:
 - Added auto-poll fallback: Rocky polls pending ports every 5s as safety net alongside explicit `PUT /ready` (Bullwinkle/Natasha compromise)
 - `live_at` default: 500ms conservative ceiling, with measurement table as future enhancement (Rocky/Natasha compromise)
 - `NEVER_FORCE_RELOAD` must be a code-level constant, not just documentation (Rocky)
-- Port registry path changed from `/home/jkh/` to `~/.rcc/` (Rocky — RCC is the actual config dir on do-host1)
+- Port registry path changed from `/home/jkh/` to `~/.rcc/` (Rocky — CCC is the actual config dir on do-host1)
 
 ### v3 (2026-04-04)
 - Added `pending` and `verifying` states to publication lifecycle (Natasha)

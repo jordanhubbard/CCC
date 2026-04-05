@@ -13,7 +13,7 @@
  *
  * Env vars:
  *   RCC_API             default: https://api.yourmom.photos
- *   RCC_AUTH_TOKEN      default: rcc-agent-natasha-eeynvasslp8mna9bipx
+ *   CCC_AUTH_TOKEN      default: rcc-agent-natasha-eeynvasslp8mna9bipx
  *   MM_URL              default: https://chat.yourmom.photos
  *   MM_TOKEN            required (Mattermost bot token)
  *   JKH_MM_USERNAME     default: jkh
@@ -22,7 +22,7 @@
  */
 
 const RCC_API         = process.env.RCC_API         || 'https://api.yourmom.photos';
-const RCC_AUTH        = process.env.RCC_AUTH_TOKEN   || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
+const RCC_AUTH        = process.env.CCC_AUTH_TOKEN   || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
 const MM_URL          = process.env.MM_URL           || 'https://chat.yourmom.photos';
 const MM_TOKEN        = process.env.MM_TOKEN         || process.env.MATTERMOST_TOKEN || '';
 const JKH_USERNAME    = process.env.JKH_MM_USERNAME  || 'jkh';

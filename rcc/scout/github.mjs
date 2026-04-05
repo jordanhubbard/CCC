@@ -9,7 +9,7 @@
  * - TODO/FIXME/HACK comments in code (sampled)
  * - Missing tests, docs, README sections
  *
- * Creates RCC work items for anything not already queued.
+ * Creates CCC work items for anything not already queued.
  * Deduplicates by repo+type+ref (never creates duplicates).
  */
 
@@ -261,7 +261,7 @@ async function analyzeRepo(repo, existingItems) {
  * Scan a list of repos and return new work items not already in the queue.
  *
  * @param {string[]} repos - list of "owner/repo" strings
- * @param {object[]} existingItems - current RCC queue items (for dedup)
+ * @param {object[]} existingItems - current CCC queue items (for dedup)
  * @returns {object[]} new work items to create
  */
 export async function scout(repos, existingItems = []) {

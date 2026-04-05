@@ -1,5 +1,5 @@
 /**
- * RCC API unit tests — local test server
+ * CCC API unit tests — local test server
  * Run: node --test rcc/tests/api.test.mjs
  *
  * Spins up an isolated in-process server on a random port.
@@ -33,7 +33,7 @@ process.env.CAPABILITIES_PATH    = TEST_CAPS;
 process.env.CONVERSATIONS_PATH   = TEST_CONVS;
 process.env.USERS_PATH           = TEST_USERS;
 process.env.PROJECTS_PATH        = TEST_PROJS;
-process.env.RCC_AUTH_TOKENS      = `${ADMIN_TOKEN},${AGENT_TOKEN}`;
+process.env.CCC_AUTH_TOKENS      = `${ADMIN_TOKEN},${AGENT_TOKEN}`;
 process.env.RCC_ADMIN_TOKEN      = ADMIN_TOKEN;
 process.env.BRAIN_STATE_PATH     = join(tmpdir(), `rcc-api-brain-${Date.now()}.json`);
 
@@ -276,7 +276,7 @@ describe('Queue', () => {
 // ── Secrets (not implemented) ────────────────────────────────────────────────
 
 describe('Secrets — endpoint existence', () => {
-  // /api/secrets is NOT implemented in this version of the RCC API.
+  // /api/secrets is NOT implemented in this version of the CCC API.
   // Authenticated requests → 404 (not found, falls through to 404 handler)
   // Unauthenticated requests → 401 (auth guard fires before 404)
   // See BUGS.md: "Bug: /api/secrets endpoint not implemented"

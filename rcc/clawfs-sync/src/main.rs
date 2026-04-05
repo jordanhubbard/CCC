@@ -114,7 +114,7 @@ async fn upload_file(path: &Path, key: &str, backend: &Backend, agent_name: &str
                     Err(e) => error!("rcc upload {} failed: {}", key, e),
                 }
             }
-            Err(_) => warn!("skipping binary file {} (RCC API is text-only)", path.display()),
+            Err(_) => warn!("skipping binary file {} (CCC API is text-only)", path.display()),
         },
     }
 }
@@ -302,7 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Backend ───────────────────────────────────────────────────────────────
     let backend: Arc<Backend> = if let Some(ref url) = rcc_endpoint {
-        info!("backend: RCC API at {}", url);
+        info!("backend: CCC API at {}", url);
         Arc::new(Backend::Rcc {
             http: Arc::new(reqwest::Client::new()),
             endpoint: url.clone(),

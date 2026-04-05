@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * openclaw-register.mjs — Register this agent in RCC and send periodic heartbeats.
+ * openclaw-register.mjs — Register this agent in CCC and send periodic heartbeats.
  *
  * On startup: POST /api/agents/register with name, host, capabilities, version, vllm_port.
  * Then loops every 60s: POST /api/agents/:name/heartbeat
@@ -12,8 +12,8 @@
  * Environment:
  *   AGENT_NAME      — agent name (default: "rocky")
  *   AGENT_HOST      — agent hostname (default: os.hostname())
- *   RCC_URL         — RCC base URL (default: http://localhost:8789)
- *   RCC_AUTH_TOKEN  — optional auth token
+ *   CCC_URL         — CCC base URL (default: http://localhost:8789)
+ *   CCC_AUTH_TOKEN  — optional auth token
  *   VLLM_PORT       — if set, included in registration
  *   AGENT_VERSION   — optional version string
  *   SLACK_ID        — optional Slack member ID
@@ -23,8 +23,8 @@ import os from 'os';
 
 const AGENT_NAME    = process.env.AGENT_NAME    || 'rocky';
 const AGENT_HOST    = process.env.AGENT_HOST    || os.hostname();
-const RCC_URL       = (process.env.RCC_URL      || 'http://localhost:8789').replace(/\/$/, '');
-const AUTH_TOKEN    = process.env.RCC_AUTH_TOKEN || process.env.RCC_AGENT_TOKEN || '';
+const CCC_URL       = (process.env.CCC_URL      || 'http://localhost:8789').replace(/\/$/, '');
+const AUTH_TOKEN    = process.env.CCC_AUTH_TOKEN || process.env.CCC_AGENT_TOKEN || '';
 const VLLM_PORT     = process.env.VLLM_PORT ? parseInt(process.env.VLLM_PORT, 10) : undefined;
 const AGENT_VERSION = process.env.AGENT_VERSION || undefined;
 const SLACK_ID      = process.env.SLACK_ID      || undefined;
@@ -53,7 +53,7 @@ async function register() {
   if (AGENT_VERSION) payload.version   = AGENT_VERSION;
   if (SLACK_ID)      payload.slack_id  = SLACK_ID;
 
-  const res = await fetch(`${RCC_URL}/api/agents/register`, {
+  const res = await fetch(`${CCC_URL}/api/agents/register`, {
     method:  'POST',
     headers: authHeaders(),
     body:    JSON.stringify(payload),
@@ -70,7 +70,7 @@ async function register() {
 }
 
 async function heartbeat() {
-  const res = await fetch(`${RCC_URL}/api/agents/${encodeURIComponent(AGENT_NAME)}/heartbeat`, {
+  const res = await fetch(`${CCC_URL}/api/agents/${encodeURIComponent(AGENT_NAME)}/heartbeat`, {
     method:  'POST',
     headers: authHeaders(),
     body:    JSON.stringify({ host: AGENT_HOST }),

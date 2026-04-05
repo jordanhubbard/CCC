@@ -37,7 +37,7 @@ while routing bulk inference to fixed-cost providers?"**
 - Needs: A way to advertise itself on the bus and be reachable
 - Produces: `/v1/chat/completions`, `/v1/models` — OpenAI-compatible API
 
-### 3. RCC Central Command
+### 3. CCC Central Command
 - Running on: do-host1 (146.190.134.110)
 - Has: Public IP, port management, ClawBus, work queue, UI
 - Does: Coordinates consumers ↔ providers, human ↔ agent interface
@@ -51,7 +51,7 @@ while routing bulk inference to fixed-cost providers?"**
 
 When a token provider comes online:
 1. SSH reverse tunnel to do-host1 (as `tunnel` user) — already working
-2. POST to RCC: `PUT /api/providers/:id` with:
+2. POST to CCC: `PUT /api/providers/:id` with:
    ```json
    {
      "id": "boris-nemotron",
@@ -63,8 +63,8 @@ When a token provider comes online:
      "status": "online"
    }
    ```
-3. RCC binds a stable local port (e.g. `127.0.0.1:19000`) and proxies to tunnel port
-4. RCC publishes to ClawBus: `provider.online` event
+3. CCC binds a stable local port (e.g. `127.0.0.1:19000`) and proxies to tunnel port
+4. CCC publishes to ClawBus: `provider.online` event
 5. Consumers see new provider, can update their routing config
 
 ### B. Consumer Bootstrap (Solving the Chicken/Egg)
@@ -102,14 +102,14 @@ A canned setup script / playbook that:
 1. Installs vLLM + CUDA deps
 2. Downloads / mounts the model
 3. Generates an SSH keypair (`boris-tunnel` pattern)
-4. Asks RCC for a tunnel slot: `POST /api/tunnel/request`
-5. RCC adds the pubkey to `tunnel`'s authorized_keys automatically
-6. Starts vLLM + an RCC heartbeat agent
+4. Asks CCC for a tunnel slot: `POST /api/tunnel/request`
+5. CCC adds the pubkey to `tunnel`'s authorized_keys automatically
+6. Starts vLLM + an CCC heartbeat agent
 7. Provider is live on the bus
 
 This is the "as many Borises as you like" path.
 
-### D. RCC Provider Registry (new endpoints needed)
+### D. CCC Provider Registry (new endpoints needed)
 
 ```
 GET  /api/providers          → list all registered providers + status
@@ -123,19 +123,19 @@ GET  /api/tunnel/pubkey      → get the pubkey to authorize (for manual install
 
 ## Implementation Phases
 
-### Phase 1: Provider Registry in RCC (do now)
-- Add `providers` table/store to RCC
+### Phase 1: Provider Registry in CCC (do now)
+- Add `providers` table/store to CCC
 - Add `/api/providers` CRUD endpoints
 - Boris's tunnel auto-registers on connect (or manual POST for now)
 
-### Phase 2: RCC Tunnel Automation
+### Phase 2: CCC Tunnel Automation
 - `POST /api/tunnel/request` endpoint
 - Accepts a pubkey, adds it to `tunnel`'s authorized_keys automatically
 - Returns assigned port
 - No more manual `useradd` dance
 
 ### Phase 3: Consumer Routing in OpenClaw Gateway
-- Gateway reads provider list from RCC
+- Gateway reads provider list from CCC
 - Routes based on `strategy: prefer_local` / `fallback` config
 - Transparent to agent — same OpenAI API calls, different backend
 
@@ -152,16 +152,16 @@ GET  /api/tunnel/pubkey      → get the pubkey to authorize (for manual install
 2. **Load balancing**: Multiple Borises → round-robin? Least-loaded?
 3. **Model capability routing**: Some tasks need Claude's reasoning; bulk Q&A can
    use Nemotron. Who decides? Static config or dynamic?
-4. **Provider health monitoring**: vLLM crashes → RCC should detect + notify + 
+4. **Provider health monitoring**: vLLM crashes → CCC should detect + notify + 
    fall back consumers to Tier 0.
 
 ---
 
 ## Work Queue Tasks (to create)
 
-- [ ] RCC: Add provider registry endpoints
-- [ ] RCC: Add tunnel automation endpoint  
-- [ ] RCC: Dashboard provider status widget
+- [ ] CCC: Add provider registry endpoints
+- [ ] CCC: Add tunnel automation endpoint  
+- [ ] CCC: Dashboard provider status widget
 - [ ] OpenClaw: Gateway routing config support
 - [ ] Boris installer: canned vLLM setup script
 - [ ] Document: Provider onboarding guide

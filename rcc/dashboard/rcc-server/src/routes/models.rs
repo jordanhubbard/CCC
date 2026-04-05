@@ -137,8 +137,8 @@ async fn trigger_deploy(
 
     // Spawn the orchestration script in background
     let env_token = state.secrets.read().await
-        .get("RCC_AGENT_TOKEN").cloned()
-        .map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_else(|| std::env::var("RCC_AGENT_TOKEN").unwrap_or_default());
+        .get("CCC_AGENT_TOKEN").cloned()
+        .map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_else(|| std::env::var("CCC_AGENT_TOKEN").unwrap_or_default());
     let hf_token = state.secrets.read().await
         .get("HF_TOKEN").cloned()
         .map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_else(|| std::env::var("HF_TOKEN").unwrap_or_default());
@@ -159,10 +159,10 @@ async fn trigger_deploy(
 
         let mut cmd = tokio::process::Command::new("node");
         cmd.args(&args)
-            .env("RCC_AGENT_TOKEN", &env_token)
+            .env("CCC_AGENT_TOKEN", &env_token)
             .env("HF_TOKEN", &hf_token)
             .env("DEPLOY_ITEM_ID", "")
-            .env("RCC_URL", std::env::var("RCC_URL").unwrap_or_else(|_| "http://localhost:8789".to_string()))
+            .env("CCC_URL", std::env::var("CCC_URL").unwrap_or_else(|_| "http://localhost:8789".to_string()))
             .stdout(stdio)
             .stderr(std::process::Stdio::null());
 

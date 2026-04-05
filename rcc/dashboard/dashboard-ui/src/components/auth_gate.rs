@@ -2,7 +2,7 @@
 ///
 /// Wraps the entire app: unauthenticated users see a login form,
 /// authenticated users see the dashboard. Token validated against
-/// the RCC API (`/api/health` with Bearer auth).
+/// the CCC API (`/api/health` with Bearer auth).
 ///
 /// Credentials stored in localStorage for persistence across reloads.
 /// Password-manager friendly (standard username/password fields).
@@ -206,7 +206,7 @@ fn LoginForm(
                         {move || if submitting.get() { "Validating..." } else { "Sign In" }}
                     </button>
                 </form>
-                <p class="auth-hint">"Use your RCC agent token or admin token."</p>
+                <p class="auth-hint">"Use your CCC agent token or admin token."</p>
             </div>
         </div>
     }

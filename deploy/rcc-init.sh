@@ -1,5 +1,5 @@
 #!/bin/bash
-# rcc-init.sh — Interactive RCC onboarding
+# rcc-init.sh — Interactive CCC onboarding
 # Prompts for agent identity and role, then writes a filled-in ~/.rcc/.env
 # Safe to re-run: backs up any existing .env before overwriting.
 #
@@ -46,10 +46,10 @@ prompt() {
 # ── Banner ─────────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e " ${BOLD}RCC Agent Onboarding${NC}  (rcc-init.sh)"
+echo -e " ${BOLD}CCC Agent Onboarding${NC}  (rcc-init.sh)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "This script configures a new RCC agent node."
+echo "This script configures a new CCC agent node."
 echo "It will write ~/.rcc/.env from your answers."
 echo ""
 
@@ -83,16 +83,16 @@ done
 prompt AGENT_HOST "Human-readable hostname for dashboard display" "$(hostname)"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 2 — RCC Role
+# STEP 2 — CCC Role
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}Step 2: RCC Role${NC}"
+echo -e "${BOLD}Step 2: CCC Role${NC}"
 echo ""
-echo "Is this node the RCC host (runs the central API server),"
-echo "or a client node that connects to an existing RCC host?"
+echo "Is this node the CCC host (runs the central API server),"
+echo "or a client node that connects to an existing CCC host?"
 echo ""
-echo "  1) RCC host  — this machine will run the API on port 8789"
-echo "  2) Client    — this machine connects to a remote RCC host"
+echo "  1) CCC host  — this machine will run the API on port 8789"
+echo "  2) Client    — this machine connects to a remote CCC host"
 echo ""
 ask "Enter 1 or 2 [2]: "
 read -r ROLE_CHOICE
@@ -104,39 +104,39 @@ if [ "$ROLE_CHOICE" = "1" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 — RCC Connection
+# STEP 3 — CCC Connection
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}Step 3: RCC Connection${NC}"
+echo -e "${BOLD}Step 3: CCC Connection${NC}"
 echo ""
 
 if $IS_RCC_HOST; then
-  info "This node IS the RCC host."
-  prompt RCC_PORT "RCC API port" "8789"
-  RCC_URL="http://localhost:${RCC_PORT}"
+  info "This node IS the CCC host."
+  prompt RCC_PORT "CCC API port" "8789"
+  CCC_URL="http://localhost:${RCC_PORT}"
   echo ""
-  echo "  You will need to set RCC_AUTH_TOKENS to a comma-separated list"
+  echo "  You will need to set CCC_AUTH_TOKENS to a comma-separated list"
   echo "  of bearer tokens. Generate them with: openssl rand -hex 32"
   echo ""
-  prompt RCC_AUTH_TOKENS "RCC auth tokens (comma-separated, or press enter to set later)" ""
+  prompt CCC_AUTH_TOKENS "CCC auth tokens (comma-separated, or press enter to set later)" ""
   RCC_HOST_PUBLIC=""
   prompt RCC_HOST_PUBLIC "Public hostname or IP for other agents to reach this host (optional)" ""
 else
-  info "This node is a CLIENT — connecting to an existing RCC host."
+  info "This node is a CLIENT — connecting to an existing CCC host."
   echo ""
-  prompt RCC_HOST_INPUT "RCC host URL (e.g. https://rcc.example.com or http://10.0.0.1:8789)" ""
+  prompt RCC_HOST_INPUT "CCC host URL (e.g. https://rcc.example.com or http://10.0.0.1:8789)" ""
   while [ -z "$RCC_HOST_INPUT" ]; do
-    warn "RCC URL cannot be empty for a client node."
-    prompt RCC_HOST_INPUT "RCC host URL" ""
+    warn "CCC URL cannot be empty for a client node."
+    prompt RCC_HOST_INPUT "CCC host URL" ""
   done
-  RCC_URL="$RCC_HOST_INPUT"
+  CCC_URL="$RCC_HOST_INPUT"
   RCC_PORT=""
-  RCC_AUTH_TOKENS=""
+  CCC_AUTH_TOKENS=""
   RCC_HOST_PUBLIC=""
 fi
 
 echo ""
-prompt RCC_AGENT_TOKEN "Bearer token for this agent (issued by RCC admin, or leave blank to set later)" ""
+prompt CCC_AGENT_TOKEN "Bearer token for this agent (issued by CCC admin, or leave blank to set later)" ""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 4 — Capabilities
@@ -176,7 +176,7 @@ echo -e "${BOLD}Step 5: Communication Channels${NC}"
 echo ""
 echo "  Select which channels to enable (comma-separated, or press enter for SquirrelChat only):"
 echo ""
-echo "    squirrelchat  — Self-hosted chat (ships with RCC, always available)"
+echo "    squirrelchat  — Self-hosted chat (ships with CCC, always available)"
 echo "    slack          — Slack workspace integration"
 echo "    mattermost     — Mattermost server integration"
 echo "    telegram       — Telegram bot integration"
@@ -217,7 +217,7 @@ fi
 if [ "$CHANNEL_SELECTION" = "squirrelchat" ] || [ -z "$CHANNEL_SELECTION" ]; then
   echo ""
   success "SquirrelChat will be your default communication channel."
-  echo "  It starts automatically with the RCC stack — no external accounts needed."
+  echo "  It starts automatically with the CCC stack — no external accounts needed."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -240,13 +240,13 @@ echo ""
 info "Writing $ENV_FILE ..."
 
 cat > "$ENV_FILE" << EOF
-# RCC Agent Node — Environment Configuration
+# CCC Agent Node — Environment Configuration
 # Generated by rcc-init.sh on $(date -u '+%Y-%m-%dT%H:%M:%SZ')
 # NEVER commit this file to git.
 
-# ── RCC Connection ─────────────────────────────────────────────────────────
-RCC_URL=${RCC_URL}
-RCC_AGENT_TOKEN=${RCC_AGENT_TOKEN}
+# ── CCC Connection ─────────────────────────────────────────────────────────
+CCC_URL=${CCC_URL}
+CCC_AGENT_TOKEN=${CCC_AGENT_TOKEN}
 
 # ── Agent Identity ─────────────────────────────────────────────────────────
 AGENT_NAME=${AGENT_NAME}
@@ -286,13 +286,13 @@ MATTERMOST_TOKEN=${MATTERMOST_TOKEN}
 TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
 EOF
 
-# Append RCC host config if this is the hub
+# Append CCC host config if this is the hub
 if $IS_RCC_HOST; then
   cat >> "$ENV_FILE" << EOF
 
-# ── RCC API Server (this node IS the hub) ──────────────────────────────────
+# ── CCC API Server (this node IS the hub) ──────────────────────────────────
 RCC_PORT=${RCC_PORT}
-RCC_AUTH_TOKENS=${RCC_AUTH_TOKENS}
+CCC_AUTH_TOKENS=${CCC_AUTH_TOKENS}
 WQ_API_TOKEN=
 DEFAULT_TRIAGING_AGENT=${AGENT_NAME}
 EOF
@@ -326,26 +326,26 @@ if $IS_RCC_HOST && [ -n "$RCC_HOST_PUBLIC" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RCC HOST: set up data dirs + optional service
+# CCC HOST: set up data dirs + optional service
 # ═══════════════════════════════════════════════════════════════════════════
 if $IS_RCC_HOST; then
   echo ""
-  info "Setting up RCC host data directories..."
+  info "Setting up CCC host data directories..."
   DATA_DIR="$RCC_DIR/data"
   mkdir -p "$DATA_DIR/queue" "$DATA_DIR/agents" "$DATA_DIR/journal"
   success "Data dirs created: $DATA_DIR/{queue,agents,journal}"
 
-  # Offer to install systemd service for the RCC API
+  # Offer to install systemd service for the CCC API
   if [[ "$(uname)" == "Linux" ]] && command -v systemctl &>/dev/null; then
     echo ""
-    ask "Install rcc-api.service (systemd) to auto-start the API? (y/n) [y]: "
+    ask "Install ccc-api.service (systemd) to auto-start the API? (y/n) [y]: "
     read -r INSTALL_SERVICE
     INSTALL_SERVICE="${INSTALL_SERVICE:-y}"
     if [ "$INSTALL_SERVICE" = "y" ]; then
-      SERVICE_FILE="/etc/systemd/system/rcc-api.service"
-      cat > /tmp/rcc-api.service << SVCEOF
+      SERVICE_FILE="/etc/systemd/system/ccc-api.service"
+      cat > /tmp/ccc-api.service << SVCEOF
 [Unit]
-Description=RCC API Server
+Description=CCC API Server
 After=network.target
 
 [Service]
@@ -360,15 +360,15 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-      if sudo cp /tmp/rcc-api.service "$SERVICE_FILE" && \
+      if sudo cp /tmp/ccc-api.service "$SERVICE_FILE" && \
          sudo systemctl daemon-reload && \
          sudo systemctl enable rcc-api && \
          sudo systemctl start rcc-api; then
-        success "rcc-api.service installed and started"
+        success "ccc-api.service installed and started"
       else
         warn "Could not install systemd service — start manually: node rcc/api/index.mjs"
       fi
-      rm -f /tmp/rcc-api.service
+      rm -f /tmp/ccc-api.service
     fi
   elif [[ "$(uname)" == "Darwin" ]]; then
     echo ""
@@ -421,13 +421,13 @@ echo "  Workspace: $WORKSPACE_DIR"
 echo ""
 
 if $IS_RCC_HOST; then
-  echo "  This node is the RCC HOST."
+  echo "  This node is the CCC HOST."
   echo ""
   echo "  Next steps:"
   echo "  1. Start the API (if not auto-started):"
   echo "       node $WORKSPACE_DIR/rcc/api/index.mjs"
   echo ""
-  echo "  2. Distribute your RCC_URL to client agents:"
+  echo "  2. Distribute your CCC_URL to client agents:"
   if [ -n "$RCC_HOST_PUBLIC" ]; then
     echo "       http://${RCC_HOST_PUBLIC}:${RCC_PORT}"
   else
@@ -439,10 +439,10 @@ if $IS_RCC_HOST; then
   echo ""
   echo "  4. Each client runs: bash deploy/rcc-init.sh"
 else
-  echo "  This node is a CLIENT pointing at: ${RCC_URL}"
+  echo "  This node is a CLIENT pointing at: ${CCC_URL}"
   echo ""
   echo "  Next steps:"
-  echo "  1. Verify connection:  curl ${RCC_URL}/health"
+  echo "  1. Verify connection:  curl ${CCC_URL}/health"
   echo "  2. Register this agent:"
   echo "       bash $WORKSPACE_DIR/deploy/register-agent.sh"
 fi

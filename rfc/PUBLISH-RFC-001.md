@@ -432,7 +432,7 @@ For `service` type, the tunnel is the critical path:
 ## Implementation Phases
 
 ### Phase 1: Artifact Publishing + Catalog (1-2 days)
-- Unified `POST /api/publish` endpoint in RCC API
+- Unified `POST /api/publish` endpoint in CCC API
 - Upload to Azure Blob (public) or MinIO (fleet/private)
 - Publish catalog (SQLite, exposed via API)
 - Dashboard "Published" tab (read-only list)

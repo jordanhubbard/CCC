@@ -15,7 +15,7 @@
  *
  * Env vars:
  *   RCC_API             default: https://api.yourmom.photos
- *   RCC_AUTH_TOKEN      default: rcc-agent-natasha-eeynvasslp8mna9bipx
+ *   CCC_AUTH_TOKEN      default: rcc-agent-natasha-eeynvasslp8mna9bipx
  *   SLACK_BOT_TOKEN     required (Slack bot token)
  *   JKH_SLACK_USER      default: UDYR7H4SC
  *   GPU_METRICS_FILE    default: ~/.openclaw/workspace/telemetry/gpu-metrics.jsonl
@@ -29,7 +29,7 @@ import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 
 const RCC_API     = process.env.RCC_API         || 'https://api.yourmom.photos';
-const RCC_AUTH    = process.env.RCC_AUTH_TOKEN   || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
+const RCC_AUTH    = process.env.CCC_AUTH_TOKEN   || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
 const SLACK_TOKEN = process.env.SLACK_BOT_TOKEN  || '';
 const JKH_USER    = process.env.JKH_SLACK_USER   || 'UDYR7H4SC';
 const DRY_RUN     = process.env.DRY_RUN === '1';
@@ -42,7 +42,7 @@ async function fetchRCC(path) {
   const res = await fetch(`${RCC_API}${path}`, {
     headers: { Authorization: `Bearer ${RCC_AUTH}` },
   });
-  if (!res.ok) throw new Error(`RCC ${path} → ${res.status}`);
+  if (!res.ok) throw new Error(`CCC ${path} → ${res.status}`);
   return res.json();
 }
 

@@ -1,4 +1,4 @@
-# RCC API Bug Report
+# CCC API Bug Report
 
 Generated while writing the test suite on 2026-03-27.
 Tests: api.test.mjs, integration.test.mjs, ui.test.mjs
@@ -60,7 +60,7 @@ Tests: api.test.mjs, integration.test.mjs, ui.test.mjs
 
 - **Route:** POST /api/bootstrap/token
 - **Expected:** Our token `<YOUR_RCC_TOKEN>` (listed as the agent/admin token) should work for admin-only endpoints
-- **Actual:** `RCC_ADMIN_TOKEN` on the live server defaults to `process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0]`. If the live server's `RCC_AUTH_TOKENS` has a different first token than ours, our token will fail admin checks with 401.
+- **Actual:** `RCC_ADMIN_TOKEN` on the live server defaults to `process.env.RCC_ADMIN_TOKEN || process.env.CCC_AUTH_TOKENS?.split(',')[0]`. If the live server's `CCC_AUTH_TOKENS` has a different first token than ours, our token will fail admin checks with 401.
 - **Severity:** low (depends on live server config)
 - **Status:** open — verified by integration.test.mjs step 1; logs "SKIP" if 401 is returned
 
@@ -111,6 +111,6 @@ Tests: api.test.mjs, integration.test.mjs, ui.test.mjs
 
 - **Route:** GET http://146.190.134.110:8788/
 - **Expected:** 200 text/html
-- **Actual:** The dashboard at :8788 is a separate service (not served by the RCC API at :8789). If that process is down, ui.test.mjs will skip gracefully. The API at :8789 serves /projects as HTML but does not serve a full dashboard UI at its root.
+- **Actual:** The dashboard at :8788 is a separate service (not served by the CCC API at :8789). If that process is down, ui.test.mjs will skip gracefully. The API at :8789 serves /projects as HTML but does not serve a full dashboard UI at its root.
 - **Severity:** low (deployment concern, not an API bug)
 - **Status:** open — ui.test.mjs handles this gracefully with a skip + log

@@ -9,7 +9,7 @@
  *
  *   const client = new PeerLLMClient({
  *     rccUrl:   'http://do-host1:8789',
- *     rccToken: process.env.RCC_AGENT_TOKEN,
+ *     rccToken: process.env.CCC_AGENT_TOKEN,
  *   });
  *
  *   // Chat
@@ -41,8 +41,8 @@ export class PeerLLMClient {
    * @param {number} [opts.timeoutMs] — Per-request timeout (default 60s)
    */
   constructor({ rccUrl, rccToken, timeoutMs = 60_000 } = {}) {
-    this.rccUrl   = (rccUrl   || process.env.RCC_URL    || 'http://localhost:8789').replace(/\/$/, '');
-    this.rccToken = rccToken  || process.env.RCC_AGENT_TOKEN || '';
+    this.rccUrl   = (rccUrl   || process.env.CCC_URL    || 'http://localhost:8789').replace(/\/$/, '');
+    this.rccToken = rccToken  || process.env.CCC_AGENT_TOKEN || '';
     this.timeoutMs = timeoutMs;
     // TokenHub fallback — used when no peer endpoint is available in the fleet registry
     this._tokenhubUrl = (process.env.TOKENHUB_URL || '').replace(/\/$/, '');

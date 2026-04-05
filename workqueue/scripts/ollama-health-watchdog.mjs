@@ -4,14 +4,14 @@
  *
  * Checks ollama model health every 15 minutes (or on-demand).
  * If a model is slow (>30s) or produces garbled output, attempts restart.
- * Surfaces ollama_status in RCC heartbeat payload.
+ * Surfaces ollama_status in CCC heartbeat payload.
  *
  * Usage:
  *   node ollama-health-watchdog.mjs [--once] [--model qwen2.5-coder:32b]
  *
  * Environment:
  *   OLLAMA_BASE_URL  default: http://localhost:11434
- *   RCC_URL          default: http://100.89.199.14:8789
+ *   CCC_URL          default: http://100.89.199.14:8789
  *   RCC_TOKEN        default: wq-5dcad756f6d3e345c00b5cb3dfcbdedb
  *   HEALTH_INTERVAL  default: 900000 (15 min in ms)
  *   HEALTH_TIMEOUT   default: 30000 (30s in ms)
@@ -23,7 +23,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
 const OLLAMA_BASE_URL  = process.env.OLLAMA_BASE_URL  || 'http://localhost:11434';
-const RCC_URL          = process.env.RCC_URL          || 'http://100.89.199.14:8789';
+const CCC_URL          = process.env.CCC_URL          || 'http://100.89.199.14:8789';
 const RCC_TOKEN        = process.env.RCC_TOKEN        || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const HEALTH_INTERVAL  = parseInt(process.env.HEALTH_INTERVAL  || '900000', 10);
 const HEALTH_TIMEOUT   = parseInt(process.env.HEALTH_TIMEOUT   || '30000', 10);
@@ -174,11 +174,11 @@ async function restartModel(modelName) {
   }
 }
 
-// ── RCC heartbeat with ollama status ──────────────────────────────────────────
+// ── CCC heartbeat with ollama status ──────────────────────────────────────────
 
 async function reportToRCC(status, detail) {
   try {
-    await fetch(`${RCC_URL}/api/heartbeat/natasha`, {
+    await fetch(`${CCC_URL}/api/heartbeat/natasha`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${RCC_TOKEN}`,

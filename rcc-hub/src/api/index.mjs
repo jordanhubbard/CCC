@@ -5,7 +5,7 @@
  * Agents talk to this instead of maintaining local queue copies.
  *
  * Port: RCC_PORT env var (default 8789)
- * Auth: Bearer token — must be in RCC_AUTH_TOKENS (comma-separated)
+ * Auth: Bearer token — must be in CCC_AUTH_TOKENS (comma-separated)
  */
 
 import { createServer } from 'http';
@@ -33,8 +33,8 @@ const CAPABILITIES_PATH  = process.env.CAPABILITIES_PATH  || './data/agent-capab
 const REPOS_PATH      = process.env.REPOS_PATH    || './repos.json';
 const PROJECTS_PATH   = process.env.PROJECTS_PATH || './projects.json';
 const RCC_PUBLIC_URL  = process.env.RCC_PUBLIC_URL || 'http://localhost:8789';
-const AUTH_TOKENS  = new Set((process.env.RCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
-const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.RCC_AUTH_TOKENS?.split(',')[0];
+const AUTH_TOKENS  = new Set((process.env.CCC_AUTH_TOKENS || '').split(',').map(t => t.trim()).filter(Boolean));
+const RCC_ADMIN_TOKEN = process.env.RCC_ADMIN_TOKEN || process.env.CCC_AUTH_TOKENS?.split(',')[0];
 const START_TIME   = Date.now();
 const CALENDAR_PATH   = process.env.CALENDAR_PATH   || './data/calendar.json';
 const REQUESTS_PATH   = process.env.REQUESTS_PATH   || './data/requests.json';
@@ -2326,7 +2326,7 @@ SSHCFG
       }
 
       // Build env block from secrets
-      const envLines = [`RCC_AGENT_TOKEN=${agentToken}`, `RCC_URL=${RCC_PUBLIC_URL}`, `AGENT_NAME=${entry.agent}`, `AGENT_ROLE=${roleHint}`];
+      const envLines = [`CCC_AGENT_TOKEN=${agentToken}`, `CCC_URL=${RCC_PUBLIC_URL}`, `AGENT_NAME=${entry.agent}`, `AGENT_ROLE=${roleHint}`];
       const skipKeys = new Set(['deployKey', 'repoUrl']);
       for (const [k, v] of Object.entries(secrets)) {
         if (!skipKeys.has(k) && v && typeof v !== 'object') {
@@ -2347,14 +2347,14 @@ set -euo pipefail
 
 AGENT_NAME="${entry.agent}"
 ROLE_HINT="${roleHint}"
-RCC_URL="${RCC_PUBLIC_URL}"
+CCC_URL="${RCC_PUBLIC_URL}"
 RCC_HOST="${rccHost}"
 REPO_URL="${repoUrl}"
 WORKSPACE="\$HOME/Src/CCC"
 
 echo ""
 echo "🐿️  CCC Agent Onboard — \$AGENT_NAME"
-echo "    CCC: \$RCC_URL"
+echo "    CCC: \$CCC_URL"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2574,7 +2574,7 @@ autostart=true
 autorestart=true
 startsecs=5
 startretries=999
-environment=HOME="\$(echo \$HOME)",RCC_AGENT_TOKEN="\$RCC_AGENT_TOKEN"
+environment=HOME="\$(echo \$HOME)",CCC_AGENT_TOKEN="\$CCC_AGENT_TOKEN"
 stdout_logfile=\$HOME/.rcc/logs/openclaw-gateway.log
 stderr_logfile=\$HOME/.rcc/logs/openclaw-gateway.log
 OCEOF
@@ -2602,8 +2602,8 @@ if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
   VLLM_PORT=8080
 fi
 
-REG_RESP=\$(curl -sf -X POST "\$RCC_URL/api/agents/register" \\
-  -H "Authorization: Bearer \$RCC_AGENT_TOKEN" \\
+REG_RESP=\$(curl -sf -X POST "\$CCC_URL/api/agents/register" \\
+  -H "Authorization: Bearer \$CCC_AGENT_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d "{
     \\"name\\": \\"\$AGENT_NAME\\",
@@ -2627,9 +2627,9 @@ REG_RESP=\$(curl -sf -X POST "\$RCC_URL/api/agents/register" \\
 
 # Update token from response if a new one was issued
 NEW_TOKEN=\$(echo "\$REG_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('token',''))" 2>/dev/null || true)
-if [ -n "\$NEW_TOKEN" ] && [ "\$NEW_TOKEN" != "\$RCC_AGENT_TOKEN" ]; then
-  sed -i "s|^RCC_AGENT_TOKEN=.*|RCC_AGENT_TOKEN=\$NEW_TOKEN|" ~/.rcc/.env
-  RCC_AGENT_TOKEN="\$NEW_TOKEN"
+if [ -n "\$NEW_TOKEN" ] && [ "\$NEW_TOKEN" != "\$CCC_AGENT_TOKEN" ]; then
+  sed -i "s|^CCC_AGENT_TOKEN=.*|CCC_AGENT_TOKEN=\$NEW_TOKEN|" ~/.rcc/.env
+  CCC_AGENT_TOKEN="\$NEW_TOKEN"
   echo "  → Updated token in ~/.rcc/.env"
 fi
 echo ""
@@ -2676,7 +2676,7 @@ if [ -f "\$VLLM_MODEL_DIR/config.json" ]; then
   echo "  ✅ Model already present — skipping download"
 else
   echo "  → Querying CCC for model seeders..."
-  PEERS_JSON=\$(curl -sf "\$RCC_URL/api/agents" 2>/dev/null || echo '[]')
+  PEERS_JSON=\$(curl -sf "\$CCC_URL/api/agents" 2>/dev/null || echo '[]')
   SEEDER_HOSTS=\$(echo "\$PEERS_JSON" | python3 -c "
 import json,sys,os,re
 agents=json.load(sys.stdin)
@@ -2782,8 +2782,8 @@ fi
 
 echo "→ Registering tunnel key with CCC..."
 TUNNEL_PUBKEY=\$(cat "\${TUNNEL_KEY}.pub")
-TUNNEL_RESP=\$(curl -sf -X POST "\${RCC_URL}/api/tunnel/request" \\
-  -H "Authorization: Bearer \${RCC_AGENT_TOKEN}" \\
+TUNNEL_RESP=\$(curl -sf -X POST "\${CCC_URL}/api/tunnel/request" \\
+  -H "Authorization: Bearer \${CCC_AGENT_TOKEN}" \\
   -H "Content-Type: application/json" \\
   -d "{\\"pubkey\\":\\"\${TUNNEL_PUBKEY}\\",\\"agent\\":\\"\${AGENT_NAME}\\",\\"label\\":\\"\${AGENT_NAME}-vllm-tunnel\\"}" 2>/dev/null)
 TUNNEL_PORT=\$(echo "\$TUNNEL_RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('port',18082))" 2>/dev/null || echo "18082")
@@ -2997,8 +2997,8 @@ fi  # end PHASE 9
 # ═══════════════════════════════════════════════════════════════════════════════
 echo "→ Posting heartbeat..."
 sleep 2
-curl -s -X POST "\$RCC_URL/api/heartbeat/\$AGENT_NAME" \\
-  -H "Authorization: Bearer \$RCC_AGENT_TOKEN" \\
+curl -s -X POST "\$CCC_URL/api/heartbeat/\$AGENT_NAME" \\
+  -H "Authorization: Bearer \$CCC_AGENT_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d "{\\"agent\\":\\"\$AGENT_NAME\\",\\"role\\":\\"\$AGENT_ROLE\\",\\"host\\":\\"\$AGENT_HOSTNAME\\",\\"status\\":\\"online\\",\\"pullRev\\":\\"\$PULL_REV\\"}" | grep -q '"ok":true' && echo "  ✅ Heartbeat posted" || echo "  ⚠️  Heartbeat failed"
 echo ""
@@ -3082,7 +3082,7 @@ echo "└───────────────────────�
 VERIFY_OK=true
 
 # Check registration
-REG_CHECK=\$(curl -sf "\$RCC_URL/api/agents" 2>/dev/null | python3 -c "
+REG_CHECK=\$(curl -sf "\$CCC_URL/api/agents" 2>/dev/null | python3 -c "
 import json,sys,os
 agents=json.load(sys.stdin)
 me=os.environ.get('AGENT_NAME','')
@@ -3113,8 +3113,8 @@ if [ "\$AGENT_ROLE" = "vllm-worker" ]; then
 
   # Check tunnel (if set up)
   if [ "\$HAS_TAILSCALE" = "false" ]; then
-    TUNNEL_VERIFY=\$(curl -sf -X POST "\$RCC_URL/api/tunnel/verify" \\
-      -H "Authorization: Bearer \$RCC_AGENT_TOKEN" \\
+    TUNNEL_VERIFY=\$(curl -sf -X POST "\$CCC_URL/api/tunnel/verify" \\
+      -H "Authorization: Bearer \$CCC_AGENT_TOKEN" \\
       -H "Content-Type: application/json" \\
       -d "{\\"agent\\":\\"\$AGENT_NAME\\"}" 2>/dev/null || echo '{"tunnelUp":false}')
     TUNNEL_UP=\$(echo "\$TUNNEL_VERIFY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tunnelUp',False))" 2>/dev/null || echo "False")
@@ -3147,8 +3147,8 @@ echo "  Tailscale:  \$TAILSCALE_IP"
 elif [ "\$AGENT_ROLE" = "vllm-worker" ]; then
 echo "  Tunnel:     port \${TUNNEL_PORT:-unknown} via SSH reverse tunnel"
 fi
-echo "  Token:      \${RCC_AGENT_TOKEN:0:20}..."
-echo "  Dashboard:  \$RCC_URL"
+echo "  Token:      \${CCC_AGENT_TOKEN:0:20}..."
+echo "  Dashboard:  \$CCC_URL"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 `;
 
@@ -5405,7 +5405,7 @@ loadPackages();
       // Broadcast on ClawBus (best-effort)
       // Use CCC's own /bus/send endpoint (8789) — dashboard proxy (8788) has different auth
       const BUS_URL   = process.env.SQUIRRELBUS_URL || `http://localhost:${process.env.RCC_PORT || 8789}`;
-      const BUS_TOKEN = process.env.RCC_AGENT_TOKEN || SQUIRRELBUS_TOKEN;
+      const BUS_TOKEN = process.env.CCC_AGENT_TOKEN || SQUIRRELBUS_TOKEN;
       let busSent = false;
       try {
         const busResp = await fetch(`${BUS_URL}/bus/send`, {
@@ -6272,7 +6272,7 @@ loadPackages();
         setTimeout(() => ctrl.abort(), 3000);
         const r = await fetch('http://127.0.0.1:8789/api/agentos/slots', {
           signal: ctrl.signal,
-          headers: { Authorization: `Bearer ${process.env.RCC_AGENT_TOKEN || ''}` },
+          headers: { Authorization: `Bearer ${process.env.CCC_AGENT_TOKEN || ''}` },
         });
         if (r.ok) vibeSlots = (await r.json()).vibe_engine || null;
       } catch (_) {}

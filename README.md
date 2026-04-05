@@ -125,7 +125,7 @@ git clone https://github.com/jordanhubbard/agentos ~/Src/agentos
 
 **On a dev node (Natasha/Bullwinkle):** clone all four. You'll hit them eventually.
 
-> 🤖 **Agent note:** If you are an agent setting up a new node, clone these repos automatically rather than asking the human to do it. The human should only need to provide `RCC_AGENT_TOKEN` and `RCC_URL`. Everything else bootstraps from there.
+> 🤖 **Agent note:** If you are an agent setting up a new node, clone these repos automatically rather than asking the human to do it. The human should only need to provide `CCC_AGENT_TOKEN` and `CCC_URL`. Everything else bootstraps from there.
 
 ---
 
@@ -152,7 +152,7 @@ cd rcc && npm install
 
 # Configure
 cp deploy/.env.template ~/.rcc/.env
-nano ~/.rcc/.env   # fill in RCC_AUTH_TOKENS, ports, your agent name
+nano ~/.rcc/.env   # fill in CCC_AUTH_TOKENS, ports, your agent name
 
 # Start
 node rcc/api/index.mjs
@@ -279,7 +279,7 @@ All configuration lives in `~/.rcc/.env`. The template at `deploy/.env.template`
 Key variables:
 - `AGENT_NAME` — your agent's short name (used in queue, heartbeats, logs)
 - `AGENT_HOST` — human-readable hostname (shown in dashboard)
-- `RCC_URL` — URL of the CCC API (can be remote or local)
+- `CCC_URL` — URL of the CCC API (can be remote or local)
 - `MINIO_ALIAS` — your `mc` alias for the shared MinIO instance
 - `AGENT_HAS_GPU`, `AGENT_GPU_MODEL` — capability declarations for routing
 - `AGENT_CLAUDE_CLI` — whether this agent has a Claude CLI session available
@@ -348,7 +348,7 @@ curl -X POST http://localhost:8789/api/exec \
 **Get results:**
 ```bash
 curl http://localhost:8789/api/exec/$EXEC_ID \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN"
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN"
 ```
 
 **Security:** All exec payloads are HMAC-SHA256 signed with `CLAWBUS_TOKEN`. Unsigned or tampered payloads are silently dropped. The sandbox has a 10s hard timeout and no access to the filesystem or network — only safe globals (Math, Date, JSON, etc.). Shell exec mode (for system commands) is a planned enhancement.
@@ -357,8 +357,8 @@ curl http://localhost:8789/api/exec/$EXEC_ID \
 ```bash
 CLAWBUS_TOKEN=shared-secret \
 CLAWBUS_URL=https://dashboard.yourmom.photos \
-RCC_URL=https://rcc.yourmom.photos \
-RCC_AUTH_TOKEN=$AGENT_TOKEN \
+CCC_URL=https://rcc.yourmom.photos \
+CCC_AUTH_TOKEN=$AGENT_TOKEN \
 AGENT_NAME=myagent \
   node rcc/exec/agent-listener.mjs
 ```
@@ -399,7 +399,7 @@ Before starting <new-service>:
 |--------|-------|-------------------|
 | `NVIDIA_API_KEY` | TokenHub vault | TokenHub proxies — agents never need it directly |
 | `TOKENHUB_API_KEY` | Per-agent | Provisioned at onboarding, stored in `~/.rcc/.env` |
-| `RCC_AGENT_TOKEN` | Per-agent | Provided by RCC admin at onboarding |
+| `CCC_AGENT_TOKEN` | Per-agent | Provided by CCC admin at onboarding |
 | `SLACK_TOKEN` | Rocky (hub) | Other agents POST to `/api/slack/send` — no per-agent token needed |
 | `MATTERMOST_TOKEN` | Per-agent | Provisioned at onboarding via secrets-sync |
 | vLLM tokens | TokenHub | Rocky proxies via reverse tunnel — fleet doesn't hold these directly |
@@ -425,7 +425,7 @@ The ledger lives in MinIO (`agents/shared/lessons/`) and is indexed by the CCC A
 
 | Service | What it does |
 |---------|-------------|
-| `rcc-api.service` | CCC REST API |
+| `ccc-api.service` | CCC REST API |
 | `wq-dashboard.service` | Web dashboard |
 | `rcc-agent.service` | Brain + work pump (cron-driven via timer) |
 

@@ -5,8 +5,8 @@
 
 import { execSync } from 'child_process';
 
-const RCC_URL = process.env.RCC_URL || 'https://api.yourmom.photos';
-const RCC_TOKEN = process.env.RCC_AGENT_TOKEN || process.env.BUS_TOKEN || '';
+const CCC_URL = process.env.CCC_URL || 'https://api.yourmom.photos';
+const RCC_TOKEN = process.env.CCC_AGENT_TOKEN || process.env.BUS_TOKEN || '';
 const SLACK_TOKEN = process.env.SLACK_OMGJKH_TOKEN || process.env.SLACK_BOT_TOKEN || '';
 const SLACK_CHANNEL = process.env.SLACK_AGENT_CHANNEL || '#rockyandfriends';
 const SLACK_API = 'https://slack.com/api';
@@ -23,7 +23,7 @@ function git(cmd) {
 }
 
 async function rccGet(path) {
-  const r = await fetch(`${RCC_URL}${path}`, {
+  const r = await fetch(`${CCC_URL}${path}`, {
     headers: { 'Authorization': `Bearer ${RCC_TOKEN}` }
   });
   return r.json();
@@ -31,7 +31,7 @@ async function rccGet(path) {
 
 async function rccPost(path, body) {
   if (DRY_RUN) { console.log('[DRY-RUN] POST', path, JSON.stringify(body).slice(0, 200)); return { ok: true }; }
-  const r = await fetch(`${RCC_URL}${path}`, {
+  const r = await fetch(`${CCC_URL}${path}`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${RCC_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

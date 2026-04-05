@@ -2,7 +2,7 @@
 /**
  * provision-project-channels.mjs
  *
- * Creates and configures Slack project channels for repos registered in the RCC.
+ * Creates and configures Slack project channels for repos registered in the CCC.
  * Each channel becomes a first-class project context: channel = project.
  *
  * Usage:
@@ -11,7 +11,7 @@
  * What it does per channel:
  *   1. Creates the channel if it doesn't exist
  *   2. Sets topic with repo URL + description
- *   3. Adds RCC bookmark (links to project page in command center)
+ *   3. Adds CCC bookmark (links to project page in command center)
  *   4. Adds GitHub bookmark
  *   5. Posts a pinned welcome card
  *   6. Writes the Slack channel ID back to repos.json (ownership.slack_channel)
@@ -113,7 +113,7 @@ function repoGithubUrl(repo) {
 }
 
 function rccProjectUrl(repo) {
-  // Future: when RCC has project pages, deep-link there
+  // Future: when CCC has project pages, deep-link there
   // For now: dashboard root (projects page will be added)
   const slug = repo.full_name.replace('/', '--');
   return `${RCC_PUBLIC}/projects/${encodeURIComponent(repo.full_name)}`;
@@ -124,7 +124,7 @@ function buildTopic(repo) {
   if (repo.description) parts.push(repo.description);
   parts.push(`GitHub: ${repoGithubUrl(repo)}`);
   if (repo.issue_tracker_url) parts.push(`Issues: https://${repo.issue_tracker_url}`);
-  parts.push(`RCC: ${rccProjectUrl(repo)}`);
+  parts.push(`CCC: ${rccProjectUrl(repo)}`);
   // Slack topic max 250 chars
   let topic = parts.join(' | ');
   if (topic.length > 250) topic = topic.slice(0, 247) + '…';
@@ -142,7 +142,7 @@ function buildWelcomeMessage(repo, channelName, workspace) {
     `*GitHub:* ${repoGithubUrl(repo)}`,
   ];
   if (repo.issue_tracker_url) lines.push(`*Issue tracker:* https://${repo.issue_tracker_url}`);
-  lines.push(`*RCC dashboard:* ${rccProjectUrl(repo)}`);
+  lines.push(`*CCC dashboard:* ${rccProjectUrl(repo)}`);
   if (repo.description) lines.push('', `_${repo.description}_`);
   const contributors = repo.ownership?.contributors;
   if (Array.isArray(contributors) && contributors.length > 0) {
@@ -189,10 +189,10 @@ async function provisionRepo(repo, workspace) {
       } catch {}
     }
 
-    // Add RCC project bookmark
+    // Add CCC project bookmark
     await slack(workspace, 'POST', 'bookmarks.add', {
       channel_id: id,
-      title:      '🐿️ RCC Dashboard',
+      title:      '🐿️ CCC Dashboard',
       link:       rccProjectUrl(repo),
       type:       'link',
     });

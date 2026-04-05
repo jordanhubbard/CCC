@@ -1,4 +1,4 @@
-# ExternalOperationGate Adoption — Rocky/RCC Design Doc
+# ExternalOperationGate Adoption — Rocky/CCC Design Doc
 
 **Source:** [JKHeadley/instar](https://github.com/JKHeadley/instar/blob/main/src/core/ExternalOperationGate.ts)  
 **Status:** Design complete — Phase 1 implemented below  
@@ -117,7 +117,7 @@ export class ExternalOperationGate {
 
 ---
 
-## RCC API Integration
+## CCC API Integration
 
 New endpoint: `POST /api/ops/evaluate`
 

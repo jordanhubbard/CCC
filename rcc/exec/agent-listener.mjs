@@ -3,7 +3,7 @@
  *
  * Listens on ClawBus for `rcc.exec` messages, verifies HMAC signatures,
  * executes code in a sandboxed vm.runInNewContext() (JS mode) or via
- * child_process.execFile (shell mode), and POSTs results back to the RCC API.
+ * child_process.execFile (shell mode), and POSTs results back to the CCC API.
  *
  * Execution modes (set via envelope.mode):
  *   "js"    (default) — vm.runInNewContext() sandbox, 10s timeout
@@ -22,8 +22,8 @@
  *   CLAWBUS_URL        — bus URL (default: http://localhost:8788)
  *   SQUIRRELBUS_TOKEN  — (deprecated) fallback for CLAWBUS_TOKEN
  *   SQUIRRELBUS_URL    — (deprecated) fallback for CLAWBUS_URL
- *   RCC_URL            — RCC API base URL (default: http://localhost:8789)
- *   RCC_AUTH_TOKEN     — bearer token for RCC API (required)
+ *   CCC_URL            — CCC API base URL (default: http://localhost:8789)
+ *   CCC_AUTH_TOKEN     — bearer token for CCC API (required)
  *   AGENT_NAME         — agent identifier (default: 'unknown')
  *   ALLOW_SHELL_EXEC   — set to "true" to enable shell mode (default: disabled)
  *   SHELL_ALLOWLIST    — comma-separated command prefixes allowed in shell mode
@@ -58,8 +58,8 @@ const DEFAULT_ALLOWLIST = [
 const SHELL_ALLOWLIST   = process.env.SHELL_ALLOWLIST
   ? process.env.SHELL_ALLOWLIST.split(',').map(s => s.trim())
   : DEFAULT_ALLOWLIST;
-const RCC_URL         = process.env.RCC_URL         || 'http://localhost:8789';
-const RCC_AUTH_TOKEN  = process.env.RCC_AUTH_TOKEN  || process.env.RCC_AUTH_TOKENS?.split(',')[0] || '';
+const CCC_URL         = process.env.CCC_URL         || 'http://localhost:8789';
+const CCC_AUTH_TOKEN  = process.env.CCC_AUTH_TOKEN  || process.env.CCC_AUTH_TOKENS?.split(',')[0] || '';
 const AGENT_NAME      = process.env.AGENT_NAME      || 'unknown';
 const BUS_TOKEN       = process.env.CLAWBUS_TOKEN || process.env.SQUIRRELBUS_TOKEN || '';
 const EXEC_TIMEOUT_MS = 10_000;
@@ -238,7 +238,7 @@ async function handleExecMessage(message) {
     replyTo,
   });
 
-  // ── POST result to RCC API ────────────────────────────────────────────
+  // ── POST result to CCC API ────────────────────────────────────────────
   const resultPayload = {
     agent:      AGENT_NAME,
     execId,
@@ -251,10 +251,10 @@ async function handleExecMessage(message) {
   };
 
   try {
-    const resp = await fetch(`${RCC_URL}/api/exec/${execId}/result`, {
+    const resp = await fetch(`${CCC_URL}/api/exec/${execId}/result`, {
       method: 'POST',
       headers: {
-        'Authorization':  `Bearer ${RCC_AUTH_TOKEN}`,
+        'Authorization':  `Bearer ${CCC_AUTH_TOKEN}`,
         'Content-Type':   'application/json',
       },
       body: JSON.stringify(resultPayload),
@@ -334,7 +334,7 @@ if (!BUS_TOKEN) {
   process.exit(1);
 }
 
-console.log(`[exec-listener] Starting agent=${AGENT_NAME} rcc=${RCC_URL} bus=${SQUIRRELBUS_URL}`);
+console.log(`[exec-listener] Starting agent=${AGENT_NAME} rcc=${CCC_URL} bus=${SQUIRRELBUS_URL}`);
 subscribe().catch(err => {
   console.error('[exec-listener] Fatal error:', err.message);
   process.exit(1);

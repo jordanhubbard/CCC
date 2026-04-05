@@ -7,7 +7,7 @@
  * Paths (in priority order):
  *   1. MEMORY_DIR env var — explicit override
  *   2. ~/.openclaw/workspace/memory/ — OpenClaw-managed layout (Rocky, Bullwinkle)
- *   3. ~/.rcc/workspace/memory/ — RCC-only layout
+ *   3. ~/.rcc/workspace/memory/ — CCC-only layout
  *
  * MEMORY.md is looked for at MEMORY_FILE env var, or sibling to memory/ dir.
  *

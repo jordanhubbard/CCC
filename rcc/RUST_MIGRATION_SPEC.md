@@ -1,4 +1,4 @@
-# RCC Rust Migration Spec
+# CCC Rust Migration Spec
 **Author:** Bullwinkle 🫎 (wq-JKH-003)  
 **Date:** 2026-04-02  
 **Directive:** jkh — "NO NODE.JS after this. Everything Rust/WASM."
@@ -230,7 +230,7 @@ SSE streaming is straightforward in Axum with `axum::response::Sse`.
 | Package registry HTML (3 copies) | Low-value feature, not used by agents |
 | `SPARKY_OLLAMA_URL` env var | Use LLM registry instead |
 | `OMGJKH_BOT` env var | Move to secrets store |
-| agentOS routes (`/api/agentos/*`) | Move to agentOS repo, not RCC's concern |
+| agentOS routes (`/api/agentos/*`) | Move to agentOS repo, not CCC's concern |
 | All server-side HTML rendering | WASM SPA does all rendering |
 | Mattermost integration code | Retired per `994f64e` |
 | Duplicate route definitions | Audit P3 — dead code |
@@ -263,7 +263,7 @@ This means the system is always working — never a partial migration with broke
 Each milestone ships with:
 - Native Axum routes passing integration tests
 - Node.js proxy removed for ported routes
-- Updated systemd unit (`rcc-server.service`) using Rust binary
+- Updated systemd unit (`ccc-server.service`) using Rust binary
 - `make test` covering new Rust routes
 
 ---
@@ -328,7 +328,7 @@ cargo build --release -p rcc-server
 ./target/release/rcc-server --config ./rcc.json
 
 # Or via systemd
-sudo cp deploy/rcc-server.service /etc/systemd/system/
+sudo cp deploy/ccc-server.service /etc/systemd/system/
 sudo systemctl enable --now rcc-server
 ```
 

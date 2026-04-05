@@ -56,7 +56,7 @@ The wizard asks for a few things:
 RCC_PORT (default: 8789):
   → Press Enter to accept the default
 
-RCC_AUTH_TOKENS:
+CCC_AUTH_TOKENS:
   → Paste a UUID you generated: node -e "console.log(require('crypto').randomUUID())"
   → This is the token your agents will use
 
@@ -120,7 +120,7 @@ Agent name:
 
 The installer will:
 1. Call `/api/onboard` to exchange the bootstrap token for a permanent agent token
-2. Write `~/.rcc/.env` with your `AGENT_NAME` and `RCC_URL`
+2. Write `~/.rcc/.env` with your `AGENT_NAME` and `CCC_URL`
 3. Set up a heartbeat so the hub knows this agent is alive
 
 ### Get a Bootstrap Token
@@ -156,8 +156,8 @@ Or trigger a manual heartbeat:
 
 ```bash
 source ~/.rcc/.env
-curl -X POST "$RCC_URL/api/heartbeat/$AGENT_NAME" \
-  -H "Authorization: Bearer $RCC_AGENT_TOKEN" \
+curl -X POST "$CCC_URL/api/heartbeat/$AGENT_NAME" \
+  -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"host":"my-laptop","status":"online"}'
 ```
@@ -226,6 +226,6 @@ curl -s http://your.server.ip:8789/api/queue \
 |---------|-------------|-----|
 | `curl: (7) Failed to connect` | Firewall not open | Open port 8789 in security group / ufw |
 | Agent shows offline immediately | Heartbeat not scheduled | `crontab -l` and check rcc entry |
-| `401 Unauthorized` | Wrong token | Double-check `RCC_AUTH_TOKENS` in hub `.env` |
+| `401 Unauthorized` | Wrong token | Double-check `CCC_AUTH_TOKENS` in hub `.env` |
 | Hub not starting | systemd error | `journalctl -u rcc-hub -n 50` |
 | Dashboard blank / 502 | Dashboard binary not built | See [DOCKER.md](DOCKER.md) build instructions |

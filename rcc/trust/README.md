@@ -1,6 +1,6 @@
 # AdaptiveTrust
 
-Per-agent × per-service × per-operation trust model for the RCC agent system.
+Per-agent × per-service × per-operation trust model for the CCC agent system.
 
 ## Trust levels
 

@@ -1,6 +1,6 @@
 //! Integration tests for the dashboard-server proxy routes.
 //!
-//! These tests start an httpmock server to simulate the RCC upstream,
+//! These tests start an httpmock server to simulate the CCC upstream,
 //! then spin up the dashboard-server router in-process using axum-test.
 
 use axum::body::Body;
@@ -196,7 +196,7 @@ async fn get_requests_allowed_when_no_token_configured() {
 
 #[tokio::test]
 async fn httpmock_upstream_proxy_integration() {
-    // Start a mock RCC server
+    // Start a mock CCC server
     let mock_server = MockServer::start();
     mock_server.mock(|when, then| {
         when.method(GET).path("/api/queue");

@@ -1,6 +1,6 @@
 # Storage Topology Recommendation
 **Item:** wq-R-019  
-**Author:** RCC team  
+**Author:** CCC team  
 **Date:** 2026-03-21  
 **Status:** Draft — awaiting jkh decision
 
@@ -10,7 +10,7 @@
 
 | Agent | Tailscale | MinIO (private) | Azure Blob (public) |
 |-------|-----------|-----------------|---------------------|
-| Agent A (RCC host) | ✅ | ✅ | ✅ |
+| Agent A (CCC host) | ✅ | ✅ | ✅ |
 | Bullwinkle | ✅ | ✅ | ✅ |
 | Agent B (GPU node) | ✅ | ✅ | ✅ |
 | Agent C (external node) | ❌ | ❌ (no Tailscale) | ✅ |
@@ -43,7 +43,7 @@
 
 ---
 
-### Option 2: Agent A (RCC host) as S3 Proxy (HTTPS Reverse Proxy to MinIO)
+### Option 2: Agent A (CCC host) as S3 Proxy (HTTPS Reverse Proxy to MinIO)
 **How:** Deploy a small authenticated HTTPS proxy on the hub node (nginx or Caddy) that forwards S3 API calls to MinIO at localhost:9000. Expose it at a public endpoint (e.g., `https://s3.the hub node.example.com`). All agents including Agent C (external node) hit the proxy with a strong bearer token.
 
 **Pros:**
@@ -55,7 +55,7 @@
 **Cons:**
 - New infra to deploy and maintain on the hub node
 - Single point of failure: if the hub node goes down, all agents lose private storage
-- Proxy adds latency for all agents (Agent A (RCC host), Bullwinkle, Agent B (GPU node) currently hit MinIO directly at low latency)
+- Proxy adds latency for all agents (Agent A (CCC host), Bullwinkle, Agent B (GPU node) currently hit MinIO directly at low latency)
 - TLS cert management needed
 - Agent C (external node)'s GPU render artifacts are large → routing everything through the hub node proxy is inefficient
 
@@ -73,16 +73,16 @@
 **Cons:**
 - Additional monthly cost ($15-40/mo for ACI with storage)
 - New infrastructure to operate and monitor
-- Doesn't solve the problem of "Agent A (RCC host)/Bullwinkle/Agent B (GPU node) already have a working MinIO" — creates a second private store to sync
-- Azure VNet private endpoints don't help Agent A (RCC host)/Bullwinkle/Agent B (GPU node) (not in Azure VNet)
+- Doesn't solve the problem of "Agent A (CCC host)/Bullwinkle/Agent B (GPU node) already have a working MinIO" — creates a second private store to sync
+- Azure VNet private endpoints don't help Agent A (CCC host)/Bullwinkle/Agent B (GPU node) (not in Azure VNet)
 - Overkill for our current scale
 
 **Cost:** ~$15-40/month + storage. Not recommended.
 
 ---
 
-### Option 4: Tailscale Exit Node on Agent A (RCC host) (Agent C (external node) tunnels through)
-**How:** Configure Agent A (RCC host) as a Tailscale subnet router / exit node. An agent connects through the RCC host's Tailscale node to reach MinIO at <rcc-host>.
+### Option 4: Tailscale Exit Node on Agent A (CCC host) (Agent C (external node) tunnels through)
+**How:** Configure Agent A (CCC host) as a Tailscale subnet router / exit node. An agent connects through the CCC host's Tailscale node to reach MinIO at <rcc-host>.
 
 **Pros:**
 - Agent C (external node) gets full MinIO access without changing storage architecture
@@ -90,9 +90,9 @@
 
 **Cons:**
 - Agent C (external node)'s container environment may not support Tailscale (it's the reason he lacks it now)
-- Adds routing complexity — Agent C (external node)'s MinIO traffic routes through Agent A (RCC host) (latency, dependency)
+- Adds routing complexity — Agent C (external node)'s MinIO traffic routes through Agent A (CCC host) (latency, dependency)
 - If Agent C (external node) is containerized (likely) and Tailscale requires kernel-level networking, this may be blocked by container runtime
-- Exit node setup on Agent A (RCC host) requires kernel IP forwarding config changes
+- Exit node setup on Agent A (CCC host) requires kernel IP forwarding config changes
 
 **Likely blocked:** Agent C (external node)'s lack of Tailscale is almost certainly a container runtime constraint, not a config oversight. Exit-node routing doesn't bypass container network namespacing.
 
@@ -107,7 +107,7 @@
 3. **Clean tier separation:**
    - `assets/` container: public, internet-readable, SAS token (current — unchanged)
    - `agents-private/` container: private, Shared Key auth, not publicly accessible
-4. **MinIO stays for Tailscale-native agents.** Agent A (RCC host), Bullwinkle, Agent B (GPU node) continue using MinIO at its current low-latency Tailscale endpoint for internal coordination data (heartbeats, syncLog, peer-status, etc.). No migration needed.
+4. **MinIO stays for Tailscale-native agents.** Agent A (CCC host), Bullwinkle, Agent B (GPU node) continue using MinIO at its current low-latency Tailscale endpoint for internal coordination data (heartbeats, syncLog, peer-status, etc.). No migration needed.
 5. **Agent C (external node)-specific data flows to Azure private.** His render outputs, intermediate artifacts, and agent state go to `agents-private/`. All four agents can read his outputs without Tailscale.
 
 ---
@@ -118,15 +118,15 @@
 |------|---------|-----|--------|----------|
 | **Public publish** | Azure Blob `assets/` | All | Public URL | Dashboard HTML, published assets, public files |
 | **Private working** | Azure Blob `agents-private/` | All | Shared Key or scoped SAS | Agent C (external node) render outputs, cross-agent artifacts requiring Agent C (external node) access |
-| **Internal coordination** | MinIO `agents/shared/` | Agent A (RCC host)/Bullwinkle/Agent B (GPU node) | Tailscale only | Heartbeats, jkh-state, syncLog, peer-status, health metrics |
+| **Internal coordination** | MinIO `agents/shared/` | Agent A (CCC host)/Bullwinkle/Agent B (GPU node) | Tailscale only | Heartbeats, jkh-state, syncLog, peer-status, health metrics |
 
-**Agent C (external node)-specific note:** Agent C (external node) uses Azure private for everything (no MinIO access). Coordination data he needs (wq sync, peer-status reads) should be mirrored to Azure private by Agent A (RCC host) periodically, or Agent C (external node) should have a read endpoint for relevant MinIO files exposed via a lightweight sync script.
+**Agent C (external node)-specific note:** Agent C (external node) uses Azure private for everything (no MinIO access). Coordination data he needs (wq sync, peer-status reads) should be mirrored to Azure private by Agent A (CCC host) periodically, or Agent C (external node) should have a read endpoint for relevant MinIO files exposed via a lightweight sync script.
 
 ---
 
 ## Implementation Plan (if approved)
 
-1. **Agent A (RCC host):** `az storage container create --name agents-private --public-access off` (or `mc mb` equivalent via Azure CLI)
+1. **Agent A (CCC host):** `az storage container create --name agents-private --public-access off` (or `mc mb` equivalent via Azure CLI)
 2. **Generate scoped SAS token** for `agents-private` with permissions: read, write, delete, list — no public access. Expiry: 2030. Store in TOOLS.md / agent configs.
 3. **Update Agent C (external node)'s config** with the new container URL + SAS token.
 4. **Document in TOOLS.md** under Storage section alongside existing Azure Blob entry.
@@ -136,10 +136,10 @@
 
 ## Open Questions for jkh
 
-1. **Approve Option 1 (Azure private container)?** Agent A (RCC host) can implement immediately.
+1. **Approve Option 1 (Azure private container)?** Agent A (CCC host) can implement immediately.
 2. **Separate SAS per agent or shared key?** Shared key is simpler; per-agent SAS is cleaner for audit.
 3. **Should Agent C (external node) read MinIO coordination data via a periodic mirror, or is Azure-only coordination sufficient?** (He already checks the dashboard at <your-dashboard-url> — that covers heartbeats.)
 
 ---
 
-*Analysis by Agent A (RCC host), 2026-03-21T16:00Z*
+*Analysis by Agent A (CCC host), 2026-03-21T16:00Z*

@@ -1,10 +1,10 @@
 /*
  * offline-heartbeat/server.mjs — Local SQLite heartbeat fallback server
  *
- * When RCC API (146.190.134.110:8789) is unreachable, agents POST heartbeats
+ * When CCC API (146.190.134.110:8789) is unreachable, agents POST heartbeats
  * here instead.  The dashboard reads GET /local/heartbeat to distinguish
  * "network partition" from "agent truly dead".  On reconnect, buffered
- * heartbeats are replayed to the RCC API.
+ * heartbeats are replayed to the CCC API.
  *
  * Start: node offline-heartbeat/server.mjs
  * Port:  8792 (HB_PORT env to override)
@@ -13,7 +13,7 @@
  *   POST /local/heartbeat        store offline heartbeat
  *   GET  /local/heartbeat        agent liveness summary
  *   GET  /local/heartbeat/stream SSE stream of new events
- *   POST /local/heartbeat/replay replay buffered heartbeats to RCC
+ *   POST /local/heartbeat/replay replay buffered heartbeats to CCC
  *   GET  /local/status           server + DB status
  *
  * Copyright 2026 agentOS Project (BSD-2-Clause)
@@ -30,7 +30,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require   = createRequire(import.meta.url);
 
 const PORT      = parseInt(process.env.HB_PORT   || '8792', 10);
-const RCC_URL   = process.env.RCC_URL            || 'http://146.190.134.110:8789';
+const CCC_URL   = process.env.CCC_URL            || 'http://146.190.134.110:8789';
 const RCC_TOKEN = process.env.RCC_TOKEN          || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const DB_DIR    = process.env.HB_DB_DIR          || path.join(__dirname, '../data');
 const DB_PATH   = path.join(DB_DIR, 'heartbeat-offline.sqlite');
@@ -97,7 +97,7 @@ function dbCount() {
   return db ? db.prepare('SELECT COUNT(*) n FROM heartbeats').get().n : _mem.length;
 }
 
-// ── RCC reachability probe ──────────────────────────────────────────────────
+// ── CCC reachability probe ──────────────────────────────────────────────────
 
 let rccReachable = null, offlineSince = null;
 
@@ -105,17 +105,17 @@ async function checkRcc() {
   try {
     const ac  = new AbortController();
     const tid = setTimeout(() => ac.abort(), 4000);
-    const r   = await fetch(`${RCC_URL}/health`, { signal: ac.signal });
+    const r   = await fetch(`${CCC_URL}/health`, { signal: ac.signal });
     clearTimeout(tid);
     if (!rccReachable && offlineSince) {
-      console.log(`[offline-hb] RCC back online after ${offlineSince}`);
+      console.log(`[offline-hb] CCC back online after ${offlineSince}`);
       offlineSince = null;
     }
     rccReachable = r.ok;
   } catch {
     if (rccReachable !== false) {
       offlineSince = new Date().toISOString();
-      console.log(`[offline-hb] RCC unreachable — offline mode since ${offlineSince}`);
+      console.log(`[offline-hb] CCC unreachable — offline mode since ${offlineSince}`);
     }
     rccReachable = false;
   }
@@ -187,7 +187,7 @@ http.createServer(async (req, res) => {
   if (method === 'GET' && p === '/local/heartbeat') {
     const now = Date.now();
     return resp(res, 200, {
-      ok: true, offline_mode: !rccReachable, offline_since: offlineSince, rcc_url: RCC_URL,
+      ok: true, offline_mode: !rccReachable, offline_since: offlineSince, rcc_url: CCC_URL,
       agents: dbLatestPerAgent().map(a => ({ ...a, online: (now - new Date(a.last_ts).getTime()) < 120_000 })),
     });
   }
@@ -204,7 +204,7 @@ http.createServer(async (req, res) => {
 
   if (method === 'POST' && p === '/local/heartbeat/replay') {
     const body = await readBody(req);
-    const result = await replayToRcc(body.rcc_url||RCC_URL, body.token||RCC_TOKEN);
+    const result = await replayToRcc(body.rcc_url||CCC_URL, body.token||RCC_TOKEN);
     return resp(res, 200, { ok: true, ...result });
   }
 
@@ -214,4 +214,4 @@ http.createServer(async (req, res) => {
   }
 
   res.writeHead(404); res.end('Not found');
-}).listen(PORT, '0.0.0.0', () => console.log(`[offline-hb] :${PORT} | DB: ${DB_PATH} | RCC: ${RCC_URL}`));
+}).listen(PORT, '0.0.0.0', () => console.log(`[offline-hb] :${PORT} | DB: ${DB_PATH} | CCC: ${CCC_URL}`));

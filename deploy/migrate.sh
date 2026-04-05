@@ -6,13 +6,13 @@ set -euo pipefail
 
 # ── Parse args ──────────────────────────────────────────────────────────────
 AGENT=""
-RCC="http://146.190.134.110:8789"
+CCC="http://146.190.134.110:8789"
 TOKEN=""
 
 for arg in "$@"; do
   case $arg in
     --agent=*) AGENT="${arg#*=}" ;;
-    --rcc=*)   RCC="${arg#*=}" ;;
+    --rcc=*)   CCC="${arg#*=}" ;;
     --token=*) TOKEN="${arg#*=}" ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
@@ -49,7 +49,7 @@ fi
 mkdir -p "$(dirname "$ENV_FILE")"
 
 echo "=== migrate.sh — agent: $AGENT ==="
-echo "RCC: $RCC"
+echo "CCC: $CCC"
 echo "Workspace: $WORKSPACE"
 echo ""
 
@@ -102,25 +102,25 @@ set_env_key() {
   fi
 }
 
-set_env_key "RCC_AGENT_TOKEN" "$TOKEN"
-set_env_key "RCC_URL" "$RCC"
+set_env_key "CCC_AGENT_TOKEN" "$TOKEN"
+set_env_key "CCC_URL" "$CCC"
 set_env_key "AGENT_NAME" "$AGENT"
 set_env_key "AGENT_HOST" "$(hostname)"
 
-echo "      .env updated — RCC_AGENT_TOKEN, RCC_URL, AGENT_NAME, AGENT_HOST set"
+echo "      .env updated — CCC_AGENT_TOKEN, CCC_URL, AGENT_NAME, AGENT_HOST set"
 
-# ── Step 4b: Fetch secrets from RCC ─────────────────────────────────────────
-echo "[4b/7] Fetching secrets from RCC..."
+# ── Step 4b: Fetch secrets from CCC ─────────────────────────────────────────
+echo "[4b/7] Fetching secrets from CCC..."
 _secrets_synced=0
 if command -v node &>/dev/null; then
   for _alias in slack mattermost minio milvus nvidia github; do
     _resp=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
-      "${RCC}/api/secrets/${_alias}" 2>/dev/null || true)
+      "${CCC}/api/secrets/${_alias}" 2>/dev/null || true)
     [[ -z "$_resp" ]] && continue
     if echo "$_resp" | grep -q '"secrets"'; then
       while IFS='=' read -r _k _v; do
         [[ -z "$_k" ]] && continue
-        case "$_k" in RCC_AGENT_TOKEN|RCC_URL|AGENT_NAME|AGENT_HOST) continue ;; esac
+        case "$_k" in CCC_AGENT_TOKEN|CCC_URL|AGENT_NAME|AGENT_HOST) continue ;; esac
         set_env_key "$_k" "$_v"
         _secrets_synced=$((_secrets_synced + 1))
       done < <(node -e "
@@ -132,15 +132,15 @@ if command -v node &>/dev/null; then
       " <<< "$_resp" 2>/dev/null)
     fi
   done
-  echo "      Secrets synced: ${_secrets_synced} env vars fetched from RCC"
+  echo "      Secrets synced: ${_secrets_synced} env vars fetched from CCC"
 else
-  echo "      node not available — skipping RCC secrets fetch (set keys manually)"
+  echo "      node not available — skipping CCC secrets fetch (set keys manually)"
 fi
 
 # ── Step 5: Post heartbeat ───────────────────────────────────────────────────
-echo "[5/7] Posting heartbeat to RCC..."
+echo "[5/7] Posting heartbeat to CCC..."
 HEARTBEAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-  "${RCC}/api/heartbeat/${AGENT}" \
+  "${CCC}/api/heartbeat/${AGENT}" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d "{\"source\":\"migrate.sh\",\"status\":\"online\"}")
@@ -152,8 +152,8 @@ if [[ "$HEARTBEAT_HTTP" != 2* ]]; then
 fi
 
 # ── Step 6: Verify agent appears in status ───────────────────────────────────
-echo "[6/7] Verifying agent status at RCC..."
-STATUS_RESPONSE=$(curl -s "${RCC}/api/agents/status" \
+echo "[6/7] Verifying agent status at CCC..."
+STATUS_RESPONSE=$(curl -s "${CCC}/api/agents/status" \
   -H "Authorization: Bearer ${TOKEN}")
 if echo "$STATUS_RESPONSE" | grep -q "\"$AGENT\""; then
   echo "      Agent '$AGENT' found in status response — OK"
@@ -186,7 +186,7 @@ echo ""
 echo "=== Migration complete ==="
 echo "  Agent:     $AGENT"
 echo "  Workspace: $WORKSPACE (on branch $(git -C "$WORKSPACE" rev-parse --abbrev-ref HEAD), $(git -C "$WORKSPACE" rev-parse --short HEAD))"
-echo "  .env:      updated (RCC_AGENT_TOKEN, RCC_URL, AGENT_NAME, AGENT_HOST + RCC secrets)"
+echo "  .env:      updated (CCC_AGENT_TOKEN, CCC_URL, AGENT_NAME, AGENT_HOST + CCC secrets)"
 echo "  Heartbeat: HTTP $HEARTBEAT_HTTP"
 echo "  Ingest:    $INGEST_RESULT"
 echo ""

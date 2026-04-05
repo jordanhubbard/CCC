@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * rcc/scripts/advertise-llms.mjs — Advertise local LLMs to RCC
+ * rcc/scripts/advertise-llms.mjs — Advertise local LLMs to CCC
  *
  * Queries the local ollama instance for running models, then registers
- * them as a first-class LLM endpoint on RCC so other agents can discover
+ * them as a first-class LLM endpoint on CCC so other agents can discover
  * and use them.
  *
  * Usage:
@@ -12,8 +12,8 @@
  *   node advertise-llms.mjs --watch           # re-advertise every 5 minutes
  *
  * Environment:
- *   RCC_URL          — RCC base URL (default: http://localhost:8789)
- *   RCC_AGENT_TOKEN  — Agent bearer token
+ *   CCC_URL          — CCC base URL (default: http://localhost:8789)
+ *   CCC_AGENT_TOKEN  — Agent bearer token
  *   AGENT_NAME       — This agent's name (default: hostname)
  *   OLLAMA_URL       — Ollama base URL (default: http://localhost:11434)
  */
@@ -41,8 +41,8 @@ function loadEnv() {
 
 try { loadEnv(); } catch {}
 
-const RCC_URL       = process.env.RCC_URL        || 'http://localhost:8789';
-const RCC_TOKEN     = process.env.RCC_AGENT_TOKEN || '';
+const CCC_URL       = process.env.CCC_URL        || 'http://localhost:8789';
+const RCC_TOKEN     = process.env.CCC_AGENT_TOKEN || '';
 const AGENT_NAME    = process.env.AGENT_NAME      || hostname();
 const OLLAMA_URL    = process.env.OLLAMA_URL      || 'http://localhost:11434';
 
@@ -174,7 +174,7 @@ async function advertise() {
     status:  'online',
   };
 
-  const resp = await fetch(`${RCC_URL}/api/llms`, {
+  const resp = await fetch(`${CCC_URL}/api/llms`, {
     method:  'POST',
     headers: {
       'Content-Type':  'application/json',
@@ -189,7 +189,7 @@ async function advertise() {
     return false;
   }
 
-  console.log(`[advertise-llms] ✅ ${AGENT_NAME} advertising ${models.length} model(s) to RCC`);
+  console.log(`[advertise-llms] ✅ ${AGENT_NAME} advertising ${models.length} model(s) to CCC`);
   return true;
 }
 

@@ -4,7 +4,7 @@
  *
  * Periodically health-checks ollama models (qwen2.5-coder:32b by default).
  * If response time > RESPONSE_TIMEOUT_MS or output is malformed, restarts the model.
- * Reports ollama_status (ok|degraded|restarting) to the RCC heartbeat payload.
+ * Reports ollama_status (ok|degraded|restarting) to the CCC heartbeat payload.
  *
  * Usage:
  *   node ollama-watchdog.mjs
@@ -15,7 +15,7 @@
  *   CHECK_INTERVAL_MS    default: 900000 (15 min)
  *   RESPONSE_TIMEOUT_MS  default: 30000 (30s)
  *   RCC_API              default: https://api.yourmom.photos
- *   RCC_AUTH_TOKEN       default: rcc-agent-rocky-20maaghccmbmnby63so
+ *   CCC_AUTH_TOKEN       default: rcc-agent-rocky-20maaghccmbmnby63so
  *   AGENT_NAME           default: natasha
  */
 
@@ -28,7 +28,7 @@ const OLLAMA_MODELS       = (process.env.OLLAMA_MODELS      || 'qwen2.5-coder:32
 const CHECK_INTERVAL_MS   = parseInt(process.env.CHECK_INTERVAL_MS   || '900000', 10);  // 15 min
 const RESPONSE_TIMEOUT_MS = parseInt(process.env.RESPONSE_TIMEOUT_MS || '30000', 10);   // 30s
 const RCC_API             = process.env.RCC_API             || 'https://api.yourmom.photos';
-const RCC_AUTH_TOKEN      = process.env.RCC_AUTH_TOKEN      || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
+const CCC_AUTH_TOKEN      = process.env.CCC_AUTH_TOKEN      || 'rcc-agent-natasha-eeynvasslp8mna9bipx';
 const AGENT_NAME          = process.env.AGENT_NAME          || 'natasha';
 const STATUS_FILE         = resolve(process.env.STATUS_FILE || '/home/jkh/.rcc/ollama-status.json');
 const GPU_METRICS_FILE    = resolve(process.env.GPU_METRICS_FILE || '/home/jkh/.openclaw/workspace/telemetry/gpu-metrics.jsonl');
@@ -234,7 +234,7 @@ function appendGpuMetrics(gpuTelemetry, ram, ollamaModelCount) {
   }
 }
 
-/** POST ollama_status (and GPU telemetry) to RCC heartbeat */
+/** POST ollama_status (and GPU telemetry) to CCC heartbeat */
 async function reportToRCC(model, status) {
   const gpuTelemetry = getGpuTelemetry();
   const ram = getSystemRam();
@@ -281,12 +281,12 @@ async function reportToRCC(model, status) {
   try {
     const res = await fetch(`${RCC_API}/api/heartbeat/${AGENT_NAME}`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${RCC_AUTH_TOKEN}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${CCC_AUTH_TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) log(`WARN: RCC heartbeat responded ${res.status}`);
+    if (!res.ok) log(`WARN: CCC heartbeat responded ${res.status}`);
   } catch (e) {
-    log(`WARN: RCC heartbeat failed: ${e.message}`);
+    log(`WARN: CCC heartbeat failed: ${e.message}`);
   }
 }
 

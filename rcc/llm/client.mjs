@@ -1,7 +1,7 @@
 /**
  * rcc/llm/client.mjs — Peer LLM Client
  *
- * Looks up the best available LLM endpoint via RCC, then proxies
+ * Looks up the best available LLM endpoint via CCC, then proxies
  * the call as an OpenAI-compatible request.
  *
  * Usage:
@@ -9,7 +9,7 @@
  *
  *   const client = new PeerLLMClient({
  *     rccUrl:   'http://do-host1:8789',
- *     rccToken: process.env.RCC_AGENT_TOKEN,
+ *     rccToken: process.env.CCC_AGENT_TOKEN,
  *   });
  *
  *   // Chat
@@ -36,13 +36,13 @@
 export class PeerLLMClient {
   /**
    * @param {object} opts
-   * @param {string} opts.rccUrl      — RCC base URL, e.g. http://do-host1:8789
-   * @param {string} opts.rccToken    — Agent bearer token for RCC
+   * @param {string} opts.rccUrl      — CCC base URL, e.g. http://do-host1:8789
+   * @param {string} opts.rccToken    — Agent bearer token for CCC
    * @param {number} [opts.timeoutMs] — Per-request timeout (default 60s)
    */
   constructor({ rccUrl, rccToken, timeoutMs = 60_000 } = {}) {
-    this.rccUrl   = (rccUrl   || process.env.RCC_URL    || 'http://localhost:8789').replace(/\/$/, '');
-    this.rccToken = rccToken  || process.env.RCC_AGENT_TOKEN || '';
+    this.rccUrl   = (rccUrl   || process.env.CCC_URL    || 'http://localhost:8789').replace(/\/$/, '');
+    this.rccToken = rccToken  || process.env.CCC_AGENT_TOKEN || '';
     this.timeoutMs = timeoutMs;
     // TokenHub fallback — used when no peer endpoint is available in the fleet registry
     this._tokenhubUrl = (process.env.TOKENHUB_URL || '').replace(/\/$/, '');
@@ -82,7 +82,7 @@ export class PeerLLMClient {
   }
 
   async _resolve(modelName, type = 'chat') {
-    // Ask RCC fleet registry for best peer endpoint
+    // Ask CCC fleet registry for best peer endpoint
     try {
       const qs = modelName
         ? `model=${encodeURIComponent(modelName)}&type=${type}`

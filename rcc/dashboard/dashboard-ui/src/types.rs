@@ -108,7 +108,7 @@ pub struct QueueItem {
     pub priority: Option<String>,
     pub assignee: Option<String>,
     pub status: Option<String>,
-    /// RCC API sends "created" (not "createdAt") — accept both
+    /// CCC API sends "created" (not "createdAt") — accept both
     #[serde(alias = "created")]
     pub created_at: Option<String>,
     /// Also accept "description" or "notes" as body fallback

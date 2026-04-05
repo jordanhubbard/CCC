@@ -1,6 +1,6 @@
 # Agent Capability Registry
 
-The capability registry lets agents advertise what they can do so the RCC work
+The capability registry lets agents advertise what they can do so the CCC work
 pump can route tasks to the right agent dynamically, rather than relying on
 hardcoded `preferred_executor` fields.
 

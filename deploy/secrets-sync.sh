@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# secrets-sync.sh — Sync secrets from RCC into ~/.rcc/.env
+# secrets-sync.sh — Sync secrets from CCC into ~/.rcc/.env
 #
 # Run this on agent heartbeat to pick up rotated secrets without re-bootstrapping.
 # Only updates keys that differ from what's already in .env (minimizes writes).
@@ -8,7 +8,7 @@
 #   --force    overwrite all keys even if unchanged
 #   --dry-run  print what would change, don't write
 #
-# Requires: RCC_URL and RCC_AGENT_TOKEN in ~/.rcc/.env
+# Requires: CCC_URL and CCC_AGENT_TOKEN in ~/.rcc/.env
 
 set -euo pipefail
 
@@ -34,20 +34,20 @@ set -a
 source "$ENV_FILE"
 set +a
 
-RCC_URL="${RCC_URL:-}"
-RCC_AGENT_TOKEN="${RCC_AGENT_TOKEN:-}"
+CCC_URL="${CCC_URL:-}"
+CCC_AGENT_TOKEN="${CCC_AGENT_TOKEN:-}"
 
-if [[ -z "$RCC_URL" || -z "$RCC_AGENT_TOKEN" ]]; then
-  echo "Missing RCC_URL or RCC_AGENT_TOKEN in .env" >&2
+if [[ -z "$CCC_URL" || -z "$CCC_AGENT_TOKEN" ]]; then
+  echo "Missing CCC_URL or CCC_AGENT_TOKEN in .env" >&2
   exit 1
 fi
 
-# Fetch all secrets from RCC
-SECRETS_RESPONSE=$(curl -sf "${RCC_URL}/api/secrets" \
-  -H "Authorization: Bearer ${RCC_AGENT_TOKEN}" 2>/dev/null || echo "")
+# Fetch all secrets from CCC
+SECRETS_RESPONSE=$(curl -sf "${CCC_URL}/api/secrets" \
+  -H "Authorization: Bearer ${CCC_AGENT_TOKEN}" 2>/dev/null || echo "")
 
 if [[ -z "$SECRETS_RESPONSE" ]]; then
-  echo "Failed to fetch secrets from RCC (network error or no secrets configured)" >&2
+  echo "Failed to fetch secrets from CCC (network error or no secrets configured)" >&2
   exit 0  # non-fatal; agent can still operate with cached .env
 fi
 
@@ -60,11 +60,11 @@ KEYS=$(echo "$SECRETS_RESPONSE" | node -e "
 " 2>/dev/null || echo "")
 
 if [[ -z "$KEYS" ]]; then
-  echo "No secrets in RCC store — nothing to sync"
+  echo "No secrets in CCC store — nothing to sync"
   exit 0
 fi
 
-# Mapping from RCC secret key → .env variable name
+# Mapping from CCC secret key → .env variable name
 # Update this map when new secrets are added
 declare -A KEY_MAP=(
   ["slack/bot_token_omgjkh"]="OMGJKH_BOT"
@@ -133,8 +133,8 @@ while IFS= read -r secret_key; do
   fi
 
   # Fetch the value
-  SECRET_VAL=$(curl -sf "${RCC_URL}/api/secrets/${secret_key}" \
-    -H "Authorization: Bearer ${RCC_AGENT_TOKEN}" 2>/dev/null | \
+  SECRET_VAL=$(curl -sf "${CCC_URL}/api/secrets/${secret_key}" \
+    -H "Authorization: Bearer ${CCC_AGENT_TOKEN}" 2>/dev/null | \
     node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(d).value||'')}catch{}})" 2>/dev/null || echo "")
 
   if [[ -z "$SECRET_VAL" ]]; then

@@ -4,7 +4,7 @@ Each agent node declares its software dependencies in a `<agent>.sbom.json` file
 - Human-editable
 - Mutable by agents themselves (via API or direct edit + commit)
 - Enforced by `install-sbom.sh` on each sync
-- Aggregated by the RCC hub for visibility
+- Aggregated by the CCC hub for visibility
 
 ## Schema
 
@@ -26,7 +26,7 @@ Each agent node declares its software dependencies in a `<agent>.sbom.json` file
     "claude": { "version": "latest", "check": "claude --version", "install": "npm -g" }
   },
   "skills": ["gemini", "github", "weather"],
-  "env_required": ["RCC_AGENT_TOKEN"],
+  "env_required": ["CCC_AGENT_TOKEN"],
   "env_optional": ["NVIDIA_API_KEY", "GITHUB_TOKEN", "SLACK_TOKEN"],
   "platform": "linux",
   "notes": "Optional freeform notes"
@@ -37,7 +37,7 @@ Each agent node declares its software dependencies in a `<agent>.sbom.json` file
 
 | Field | Required | Description |
 |---|---|---|
-| `agent` | yes | Agent name (matches RCC registry) |
+| `agent` | yes | Agent name (matches CCC registry) |
 | `version` | yes | SBOM document version (semver) |
 | `updated` | yes | ISO timestamp of last update |
 | `packages.apt` | no | Debian/Ubuntu packages |

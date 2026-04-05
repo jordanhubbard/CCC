@@ -25,7 +25,7 @@ cd rcc/dashboard && bash scripts/build-and-publish.sh
 
 # Run on Rocky
 DASHBOARD_DIST=~/.rcc/workspace/dashboard-v2/dist \
-RCC_URL=http://localhost:8789 \
+CCC_URL=http://localhost:8789 \
 RCC_DASHBOARD_PORT=8788 \
   ./dashboard-server
 ```

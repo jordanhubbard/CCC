@@ -13,7 +13,7 @@ Remote Code Execution (RCE) lets the admin broadcast JavaScript snippets **or sh
 1. Receives the message over the bus (`type: "rcc.exec"`)
 2. Verifies the HMAC-SHA256 signature using `CLAWBUS_TOKEN`
 3. Executes the code/command in a sandboxed environment (see Execution Modes)
-4. POSTs the result back to the RCC API (`POST /api/exec/:id/result`)
+4. POSTs the result back to the CCC API (`POST /api/exec/:id/result`)
 5. Appends an audit log entry to `~/.rcc/logs/remote-exec.jsonl`
 
 ## Execution Modes
@@ -39,7 +39,7 @@ export SHELL_ALLOWLIST="systemctl status,journalctl,df,free,uptime,nvidia-smi,gi
 ```bash
 curl -s -X POST https://rcc.yourmom.photos/api/exec \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" \
   -d '{
     "targets": ["peabody"],
     "mode": "shell",
@@ -150,10 +150,10 @@ Appends the agent result to the exec record.
 
 ```bash
 CLAWBUS_TOKEN=your-token \
-RCC_AUTH_TOKEN=your-rcc-token \
+CCC_AUTH_TOKEN=your-rcc-token \
 AGENT_NAME=natasha \
 CLAWBUS_URL=https://dashboard.yourmom.photos \
-RCC_URL=https://rcc.yourmom.photos \
+CCC_URL=https://rcc.yourmom.photos \
 node rcc/exec/agent-listener.mjs
 ```
 
@@ -202,7 +202,7 @@ Poll for results:
 ```bash
 EXEC_ID=exec-<uuid>
 curl -s http://localhost:8789/api/exec/$EXEC_ID \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" | jq .results
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" | jq .results
 ```
 
 ---
@@ -223,8 +223,8 @@ sudo mkdir -p /etc/rcc
 sudo tee /etc/rcc/env << 'ENVEOF'
 CLAWBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb
 CLAWBUS_URL=https://dashboard.yourmom.photos
-RCC_URL=https://rcc.yourmom.photos
-RCC_AUTH_TOKEN=<agent-specific-token>
+CCC_URL=https://rcc.yourmom.photos
+CCC_AUTH_TOKEN=<agent-specific-token>
 AGENT_NAME=peabody
 ALLOW_SHELL_EXEC=true
 SHELL_ALLOWLIST=systemctl status,journalctl,df,free,uptime,nvidia-smi,git status,ls,cat,echo,ps aux,curl -s

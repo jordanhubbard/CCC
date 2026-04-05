@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-node.sh — Bootstrap a new RCC agent node
+# setup-node.sh — Bootstrap a new CCC agent node
 # Run once on a new machine. Safe to re-run (idempotent).
 #
 # Usage:
@@ -30,7 +30,7 @@ warn()    { echo -e "${YELLOW}[setup]${NC} ⚠ $1"; }
 error()   { echo -e "${RED}[setup]${NC} ✗ $1"; exit 1; }
 
 echo ""
-echo "🐿️  RCC Agent Node Setup"
+echo "🐿️  CCC Agent Node Setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -78,8 +78,8 @@ else
   echo "  ┌─────────────────────────────────────────────────────┐"
   echo "  │  .env created at: $ENV_FILE"
   echo "  │  IMPORTANT: Edit it and fill in your values!"
-  echo "  │  Required: AGENT_NAME, AGENT_HOST, RCC_URL"
-  echo "  │            RCC_AGENT_TOKEN, NVIDIA_API_KEY"
+  echo "  │  Required: AGENT_NAME, AGENT_HOST, CCC_URL"
+  echo "  │            CCC_AGENT_TOKEN, NVIDIA_API_KEY"
   echo "  └─────────────────────────────────────────────────────┘"
   echo ""
   warn "Edit $ENV_FILE before running the agent!"
@@ -213,7 +213,7 @@ echo "  1. Edit $ENV_FILE with your agent's credentials"
 echo "  2. Run a manual pull: bash $PULL_SCRIPT"
 echo "  3. Check logs: tail -f $LOG_DIR/pull.log"
 echo ""
-echo "  To register this agent with RCC:"
+echo "  To register this agent with CCC:"
 echo "  bash $WORKSPACE/deploy/register-agent.sh"
 echo ""
 echo "  Coding CLI turbocharger (if not already running):"

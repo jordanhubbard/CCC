@@ -1,7 +1,7 @@
 /**
  * crush-server/failover.mjs — Claude Code throttle detection + Crush failover
  *
- * When Claude Code hits a rate-limit or token exhaustion, the RCC work queue
+ * When Claude Code hits a rate-limit or token exhaustion, the CCC work queue
  * item should re-route through crush (charmbracelet/crush) instead of erroring.
  *
  * Detection heuristics (any one triggers failover):
@@ -23,7 +23,7 @@
  *   });
  *   // result: { output, sessionId, provider: 'claude-code' | 'crush', exitCode }
  *
- * RCC integration:
+ * CCC integration:
  *   POST /run — accepts { prompt, sessionId?, cwd?, model?, yolo? }
  *   The route now attempts claude-code first; on throttle → crush.
  *   SSE events include a provider field: { provider: 'crush' } on failover.
@@ -36,8 +36,8 @@ import { EventEmitter } from 'events';
 
 const CLAUDE_BIN   = process.env.CLAUDE_BIN   || 'claude';
 const CRUSH_BIN    = process.env.CRUSH_BIN    || 'crush';
-const RCC_URL      = process.env.RCC_URL      || 'http://localhost:8789';
-const RCC_TOKEN    = process.env.RCC_AGENT_TOKEN || '';
+const CCC_URL      = process.env.CCC_URL      || 'http://localhost:8789';
+const RCC_TOKEN    = process.env.CCC_AGENT_TOKEN || '';
 
 // Patterns that indicate Claude Code is throttled / exhausted
 const THROTTLE_PATTERNS = [
@@ -87,15 +87,15 @@ export function shouldFailover({ exitCode, stdout = '', stderr = '' }) {
   return { throttled: false, reason: null };
 }
 
-// ── RCC notification ───────────────────────────────────────────────────────
+// ── CCC notification ───────────────────────────────────────────────────────
 
 /**
- * Notify RCC that a failover happened (writes to ClawBus + logs a lesson).
+ * Notify CCC that a failover happened (writes to ClawBus + logs a lesson).
  */
 async function notifyRCC({ reason, prompt, provider }) {
   if (!RCC_TOKEN) return;
   try {
-    await fetch(`${RCC_URL}/bus/send`, {
+    await fetch(`${CCC_URL}/bus/send`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

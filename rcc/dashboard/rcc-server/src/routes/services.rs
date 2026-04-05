@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 use crate::AppState;
 
 static CATALOG: &[(&str, &str, &str, &str)] = &[
-    ("rcc-dashboard",  "RCC Dashboard",     "http://146.190.134.110:8789/health", "do-host1"),
+    ("rcc-dashboard",  "CCC Dashboard",     "http://146.190.134.110:8789/health", "do-host1"),
     ("tokenhub-admin", "Tokenhub Admin",    "http://127.0.0.1:8090/health",       "do-host1"),
     ("clawbus",        "ClawBus",       "http://127.0.0.1:8789/api/health",   "do-host1"),
     ("boris-vllm",     "Boris vLLM",        "http://127.0.0.1:18080/health",      "boris"),

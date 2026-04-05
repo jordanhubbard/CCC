@@ -2,7 +2,7 @@
 /**
  * ollama-watchdog.mjs — periodic health check for ollama models on sparky
  * Checks qwen2.5-coder:32b and qwen3-coder every 15 min.
- * Restarts degraded models, surfaces status in RCC heartbeat.
+ * Restarts degraded models, surfaces status in CCC heartbeat.
  * Also logs GPU utilization time-series to ~/.openclaw/workspace/telemetry/gpu-metrics.jsonl
  *
  * Run: node ollama-watchdog.mjs [--once]
@@ -25,8 +25,8 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const TELEMETRY_DIR = `${os.homedir()}/.openclaw/workspace/telemetry`;
 const GPU_METRICS_PATH = `${TELEMETRY_DIR}/gpu-metrics.jsonl`;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const RCC_URL    = process.env.RCC_URL    || 'http://146.190.134.110:8789';
-const RCC_TOKEN  = process.env.RCC_AUTH_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
+const CCC_URL    = process.env.CCC_URL    || 'http://146.190.134.110:8789';
+const RCC_TOKEN  = process.env.CCC_AUTH_TOKEN || 'wq-5dcad756f6d3e345c00b5cb3dfcbdedb';
 const AGENT_NAME = process.env.AGENT_NAME || 'natasha';
 const INTERVAL_MS = 15 * 60 * 1000; // 15 min
 const TIMEOUT_MS  = 90_000; // cold-start for 18-32GB models can take 60-90s
@@ -115,7 +115,7 @@ async function pushStatus(gpuMetrics) {
   };
   for (const [m, s] of Object.entries(state)) payload.ollama[m] = s.status;
   try {
-    await fetch(`${RCC_URL}/api/heartbeat/${AGENT_NAME}`, {
+    await fetch(`${CCC_URL}/api/heartbeat/${AGENT_NAME}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RCC_TOKEN}` },
       body: JSON.stringify(payload),

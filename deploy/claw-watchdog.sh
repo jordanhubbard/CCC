@@ -16,15 +16,15 @@
 #   OPENCLAW_CMD      full command to (re)start openclaw (process mode only)
 #   OPENCLAW_PID_FILE path to openclaw pid file (process mode, optional)
 #   OPENCLAW_HEALTH   health check URL (default: http://localhost:18789/health)
-#   RCC_URL           RCC API base URL for heartbeat staleness check
-#   RCC_AGENT_TOKEN   RCC auth token
+#   CCC_URL           CCC API base URL for heartbeat staleness check
+#   CCC_AGENT_TOKEN   CCC auth token
 #   AGENT_NAME        agent name (for Mattermost alerts and logs)
 #   MATTERMOST_URL    Mattermost server URL
 #   MATTERMOST_TOKEN  Mattermost bot token
 #   MATTERMOST_CHANNEL  channel ID to post restart alerts to
 #   CHECK_INTERVAL    seconds between health checks (default: 30)
 #   HANG_THRESHOLD    seconds of unresponsiveness before restart (default: 120)
-#   HEARTBEAT_STALE   seconds since last RCC heartbeat before hang declared (default: 600)
+#   HEARTBEAT_STALE   seconds since last CCC heartbeat before hang declared (default: 600)
 #   MAX_RESTARTS      max restarts in RESTART_WINDOW seconds before giving up (default: 5)
 #   RESTART_WINDOW    window in seconds for MAX_RESTARTS (default: 3600)
 #   LOG_FILE          log path (default: ~/.rcc/logs/watchdog.log)
@@ -37,8 +37,8 @@ CONTAINER_NAME="${CONTAINER_NAME:-}"
 OPENCLAW_CMD="${OPENCLAW_CMD:-openclaw start}"
 OPENCLAW_PID_FILE="${OPENCLAW_PID_FILE:-}"
 OPENCLAW_HEALTH="${OPENCLAW_HEALTH:-http://localhost:18789/health}"
-RCC_URL="${RCC_URL:-}"
-RCC_AGENT_TOKEN="${RCC_AGENT_TOKEN:-}"
+CCC_URL="${CCC_URL:-}"
+CCC_AGENT_TOKEN="${CCC_AGENT_TOKEN:-}"
 AGENT_NAME="${AGENT_NAME:-agent}"
 MATTERMOST_URL="${MATTERMOST_URL:-}"
 MATTERMOST_TOKEN="${MATTERMOST_TOKEN:-}"
@@ -87,11 +87,11 @@ check_health() {
   [ "$http_code" = "200" ]
 }
 
-# ── RCC heartbeat staleness check ────────────────────────────────────────────
+# ── CCC heartbeat staleness check ────────────────────────────────────────────
 check_rcc_heartbeat() {
-  [ -z "$RCC_URL" ] && return 0  # skip if no RCC configured
+  [ -z "$CCC_URL" ] && return 0  # skip if no CCC configured
   local data
-  data=$(curl -s "$RCC_URL/api/heartbeats" --max-time 10 2>/dev/null) || return 0
+  data=$(curl -s "$CCC_URL/api/heartbeats" --max-time 10 2>/dev/null) || return 0
   local ts
   ts=$(echo "$data" | python3 -c "
 import json,sys,time
@@ -181,10 +181,10 @@ while true; do
     fi
   fi
 
-  # Secondary: check RCC heartbeat staleness (catches hung-but-port-open cases)
+  # Secondary: check CCC heartbeat staleness (catches hung-but-port-open cases)
   if ! check_rcc_heartbeat 2>/dev/null; then
-    log "WARN" "RCC heartbeat stale (>${HEARTBEAT_STALE}s) — process may be hung"
-    do_restart "RCC heartbeat stale (>${HEARTBEAT_STALE}s)" || true
+    log "WARN" "CCC heartbeat stale (>${HEARTBEAT_STALE}s) — process may be hung"
+    do_restart "CCC heartbeat stale (>${HEARTBEAT_STALE}s)" || true
   fi
 
   sleep "$CHECK_INTERVAL"

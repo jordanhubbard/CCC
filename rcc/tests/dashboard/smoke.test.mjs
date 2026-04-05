@@ -99,13 +99,13 @@ async function testApiProxy() {
     return;
   }
 
-  // We expect 200 or 502 (if RCC is not running), but NOT a 500 from the dashboard itself
+  // We expect 200 or 502 (if CCC is not running), but NOT a 500 from the dashboard itself
   if (resp.status === 500) {
     fail(`/api/agents returned 500 (dashboard internal error)`);
   } else if (resp.status === 200) {
     pass(`/api/agents returned 200`);
   } else if (resp.status === 502) {
-    pass(`/api/agents returned 502 (RCC upstream not running — expected in CI)`);
+    pass(`/api/agents returned 502 (CCC upstream not running — expected in CI)`);
   } else {
     pass(`/api/agents returned ${resp.status}`);
   }
@@ -159,7 +159,7 @@ async function testBusStreamHeader() {
 
 // ── Run ───────────────────────────────────────────────────────────────────
 
-console.log(`RCC Dashboard v2 smoke tests — ${BASE}`);
+console.log(`CCC Dashboard v2 smoke tests — ${BASE}`);
 console.log('='.repeat(50));
 
 await testNoEnvLeakage();

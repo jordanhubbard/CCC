@@ -295,7 +295,7 @@ async function embedForCollection(text, collection) {
 // ── Collection management ────────────────────────────────────────────────────
 
 /**
- * Ensure all RCC collections exist with correct schema + HNSW index.
+ * Ensure all CCC collections exist with correct schema + HNSW index.
  * Safe to call on every startup.
  */
 export async function ensureCollections() {

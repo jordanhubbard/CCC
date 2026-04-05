@@ -20,7 +20,7 @@ process.env.RCC_PORT          = String(TEST_PORT);
 process.env.QUEUE_PATH        = TEST_QUEUE;
 process.env.AGENTS_PATH       = TEST_AGENTS;
 process.env.CAPABILITIES_PATH = TEST_CAPS;
-process.env.RCC_AUTH_TOKENS   = 'caps-test-token';
+process.env.CCC_AUTH_TOKENS   = 'caps-test-token';
 process.env.BRAIN_STATE_PATH  = join(tmpdir(), `rcc-caps-brain-${Date.now()}.json`);
 
 await writeFile(TEST_QUEUE,  JSON.stringify({ items: [], completed: [] }, null, 2));

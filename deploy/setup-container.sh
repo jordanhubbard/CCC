@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup-container.sh — Bootstrap RCC agent in a container environment
+# setup-container.sh — Bootstrap CCC agent in a container environment
 # Use this instead of setup-node.sh when running inside Kasm, Docker, or any
 # container where systemd and crontab are unavailable.
 #
@@ -47,7 +47,7 @@ warn()    { echo -e "${YELLOW}[container-setup]${NC} ⚠ $1"; }
 error()   { echo -e "${RED}[container-setup]${NC} ✗ $1" >&2; exit 1; }
 
 echo ""
-echo "🐿️  RCC Agent — Container Setup"
+echo "🐿️  CCC Agent — Container Setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -298,13 +298,13 @@ if [[ ! -f "$TUNNEL_IDENTITY" ]]; then
   success "SSH tunnel key generated: $TUNNEL_IDENTITY"
 fi
 
-# Register with RCC — get port assignment + auto-authorize the key
+# Register with CCC — get port assignment + auto-authorize the key
 # Uses /api/tunnel/request which allocates a port and writes to authorized_keys
 PUBKEY=$(cat "${TUNNEL_IDENTITY}.pub" 2>/dev/null || echo "")
 if [[ -n "$PUBKEY" ]]; then
-  info "Registering shell tunnel key with RCC..."
-  TUNNEL_RESP=$(curl -sf -X POST "${RCC_URL:-http://146.190.134.110:8789}/api/tunnel/shell" \
-    -H "Authorization: Bearer ${RCC_AGENT_TOKEN:-}" \
+  info "Registering shell tunnel key with CCC..."
+  TUNNEL_RESP=$(curl -sf -X POST "${CCC_URL:-http://146.190.134.110:8789}/api/tunnel/shell" \
+    -H "Authorization: Bearer ${CCC_AGENT_TOKEN:-}" \
     -H "Content-Type: application/json" \
     -d "{\"pubkey\":\"${PUBKEY}\",\"agent\":\"${AGENT_NAME:-unknown}\",\"label\":\"${AGENT_NAME:-unknown}-shell-tunnel\"}" 2>/dev/null || echo "")
   
@@ -316,18 +316,18 @@ if [[ -n "$PUBKEY" ]]; then
     if [[ -n "$SHELL_TUNNEL_PORT" ]]; then
       success "Shell tunnel port assigned: ${SHELL_TUNNEL_PORT} (key authorized: ${KEY_WRITTEN})"
     else
-      warn "RCC response missing port — will retry on next setup run. Response: ${TUNNEL_RESP:0:100}"
+      warn "CCC response missing port — will retry on next setup run. Response: ${TUNNEL_RESP:0:100}"
     fi
   else
-    warn "Could not reach RCC tunnel API — tunnel will be configured but may not connect until key is authorized"
+    warn "Could not reach CCC tunnel API — tunnel will be configured but may not connect until key is authorized"
     TUNNEL_USER_REMOTE="tunnel"
   fi
 else
-  warn "Could not read tunnel public key — skipping RCC registration"
+  warn "Could not read tunnel public key — skipping CCC registration"
   TUNNEL_USER_REMOTE="tunnel"
 fi
 
-# If RCC didn't give us a port, use a deterministic fallback based on agent name
+# If CCC didn't give us a port, use a deterministic fallback based on agent name
 if [[ -z "$SHELL_TUNNEL_PORT" ]]; then
   case "${AGENT_NAME:-}" in
     peabody) SHELL_TUNNEL_PORT=19080 ;;
@@ -480,7 +480,7 @@ fi
 
 echo ""
 echo "  Verify these manually:"
-echo "  1. ~/.rcc/.env exists with AGENT_NAME, RCC_URL, RCC_AGENT_TOKEN, SQUIRRELBUS_TOKEN"
+echo "  1. ~/.rcc/.env exists with AGENT_NAME, CCC_URL, CCC_AGENT_TOKEN, SQUIRRELBUS_TOKEN"
 echo "  2. Pull loop running:      tail -f $LOG_FILE"
 echo "  3. Exec listener running:  tail -f $EXEC_LOG"
 echo "  4. SSH tunnel:             tail -f $TUNNEL_LOG (needs key authorized on do-host1)"
@@ -494,9 +494,9 @@ echo "    cp $REPO_DIR/deploy/.env.template ~/.rcc/.env"
 echo "    nano ~/.rcc/.env"
 echo ""
 echo "  Required .env keys for exec listener:"
-echo "    SQUIRRELBUS_TOKEN   — shared bus secret (get from Rocky/RCC)"
+echo "    SQUIRRELBUS_TOKEN   — shared bus secret (get from Rocky/CCC)"
 echo "    SQUIRRELBUS_URL     — http://146.190.134.110:8788"
-echo "    RCC_URL             — http://146.190.134.110:8789"
-echo "    RCC_AGENT_TOKEN     — your agent bearer token"
+echo "    CCC_URL             — http://146.190.134.110:8789"
+echo "    CCC_AGENT_TOKEN     — your agent bearer token"
 echo "    AGENT_NAME          — your agent name (peabody, sherman, etc.)"
 echo ""

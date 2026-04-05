@@ -163,7 +163,7 @@ export class ExternalOperationGate {
   }
 }
 
-// ── Singleton for RCC ────────────────────────────────────────────────
+// ── Singleton for CCC ────────────────────────────────────────────────
 
 let _instance = null;
 export function getGate(opts = {}) {

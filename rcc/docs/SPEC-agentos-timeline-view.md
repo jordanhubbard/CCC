@@ -3,7 +3,7 @@
 **Status:** Design proposal (2026-03-31)  
 **Author:** Rocky / Natasha (Natasha idea: wq-NAT-idea-1774933716361-AGOS-TIMELINE)  
 **Priority:** idea  
-**Grounded in:** RCC dashboard live (:8789), cap_audit_log, fault_handler, quota_pd,
+**Grounded in:** CCC dashboard live (:8789), cap_audit_log, fault_handler, quota_pd,
 mem_profiler, watchdog all shipped.
 
 ---
@@ -25,7 +25,7 @@ is no single "what happened to slot 3 between 22:05 and 22:08?" view.
 
 ## Proposed Feature
 
-**A Timeline tab in the RCC Rust/WASM dashboard** that shows, per agent slot:
+**A Timeline tab in the CCC Rust/WASM dashboard** that shows, per agent slot:
 - A horizontal time axis (last 30 min, configurable)
 - Colored event markers at their exact timestamps
 - Tooltip on hover with event details
@@ -49,7 +49,7 @@ is no single "what happened to slot 3 between 22:05 and 22:08?" view.
 
 ### Backend: `GET /api/agentos/events`
 
-New RCC endpoint that aggregates events from all PD ring buffers via the existing
+New CCC endpoint that aggregates events from all PD ring buffers via the existing
 exec relay.
 
 ```
@@ -142,7 +142,7 @@ Add to `app.rs`:
 agentOS PDs (seL4, sparky)
    └─ /proc/agentos/{cap_audit_log,fault_log,...}  (shared memory ring buffers)
          └─ squirrelbus exec relay (shell mode, existing)
-               └─ GET /api/agentos/events  (new RCC endpoint)
+               └─ GET /api/agentos/events  (new CCC endpoint)
                      └─ dashboard-server Axum proxy  (:8788/api/agentos/events)
                            └─ Timeline Leptos component (WASM browser)
 ```
@@ -152,7 +152,7 @@ agentOS PDs (seL4, sparky)
 ## Zero New PD Infrastructure
 
 All five event sources are already shipped. This feature requires:
-1. One new RCC API route (~50 lines)
+1. One new CCC API route (~50 lines)
 2. One new Leptos component (~150 lines Rust)
 3. One new tab button in app.rs
 
@@ -162,7 +162,7 @@ No seL4 PD changes, no new ring buffers, no new kernel interfaces.
 
 ## Implementation Steps
 
-1. **RCC endpoint** — `GET /api/agentos/events` in `rcc/api/index.mjs`
+1. **CCC endpoint** — `GET /api/agentos/events` in `rcc/api/index.mjs`
    - Shell exec via squirrelbus relay to sparky
    - Parse JSON lines from each PD ring buffer
    - Merge, sort by timestamp, filter by slot/since/limit

@@ -20,7 +20,7 @@ git clone https://github.com/jordanhubbard/agentos         ~/Src/agentos
 Minimum for a command node (no GPU, no dev): `rockyandfriends` + `tokenhub`.
 Full dev node (Natasha/Bullwinkle): all four.
 
-The human should only need to hand you `RCC_URL` and `RCC_AGENT_TOKEN`. Everything else you figure out.
+The human should only need to hand you `CCC_URL` and `CCC_AGENT_TOKEN`. Everything else you figure out.
 
 ### Secrets First — Always
 
@@ -236,12 +236,12 @@ The goal: Be helpful without being annoying. Check in a few times a day, do usef
 
 ## Remote Exec via SquirrelBus
 
-Agents can be commanded remotely using the RCC exec API — no inbound SSH required. This is especially important for the Sweden GPU containers (peabody, sherman, snidely, dudley) which have no inbound network access.
+Agents can be commanded remotely using the CCC exec API — no inbound SSH required. This is especially important for the Sweden GPU containers (peabody, sherman, snidely, dudley) which have no inbound network access.
 
 ### How it works
 
-1. Rocky (or any agent) posts to `POST /api/exec` on RCC
-2. RCC broadcasts a signed `rcc.exec` SquirrelBus message to the target agent(s)
+1. Rocky (or any agent) posts to `POST /api/exec` on CCC
+2. CCC broadcasts a signed `rcc.exec` SquirrelBus message to the target agent(s)
 3. Each target agent running `agent-listener.mjs` verifies the HMAC-SHA256 signature
 4. Executes in sandboxed `vm.runInNewContext()` (JS mode) or `/bin/sh -c` with allowlist (shell mode)
 5. Posts result back to `POST /api/exec/:id/result`
@@ -251,19 +251,19 @@ Agents can be commanded remotely using the RCC exec API — no inbound SSH requi
 ```bash
 # Send exec (JS mode - default):
 curl -X POST https://rcc.yourmom.photos/api/exec \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["peabody"],"code":"process.version"}'
 
 # Send exec (shell mode - for approved commands):
 curl -X POST https://rcc.yourmom.photos/api/exec \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN" \
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targets":["all"],"mode":"shell","code":"nvidia-smi --query-gpu=name,memory.used --format=csv,noheader"}'
 
 # Get results:
 curl https://rcc.yourmom.photos/api/exec/<exec-id> \
-  -H "Authorization: Bearer $RCC_AUTH_TOKEN"
+  -H "Authorization: Bearer $CCC_AUTH_TOKEN"
 ```
 
 ### Running the listener daemon
@@ -271,8 +271,8 @@ curl https://rcc.yourmom.photos/api/exec/<exec-id> \
 ```bash
 SQUIRRELBUS_TOKEN=wq-5dcad756f6d3e345c00b5cb3dfcbdedb \
 SQUIRRELBUS_URL=https://dashboard.yourmom.photos \
-RCC_URL=https://rcc.yourmom.photos \
-RCC_AUTH_TOKEN=<agent-token> \
+CCC_URL=https://rcc.yourmom.photos \
+CCC_AUTH_TOKEN=<agent-token> \
 AGENT_NAME=mynode \
 ALLOW_SHELL_EXEC=true \
 node /opt/rcc/rcc/exec/agent-listener.mjs
