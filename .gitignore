@@ -118,3 +118,4 @@ workqueue/WORKQUEUE_AGENT_NATASHA.md
 # Rust build artifacts
 target/
 **/target/
+rcc/dashboard/data/
