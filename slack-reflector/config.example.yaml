@@ -1,0 +1,33 @@
+# Slack Reflector Configuration
+# Mirrors messages between two paired Slack workspaces.
+# Users and channels are matched by NAME, not by ID.
+
+workspaces:
+  - name: omgjkh
+    # Bot token (xoxb-...) — needs channels:history, channels:read, chat:write,
+    # users:read, groups:read, groups:history, im:read, im:history
+    bot_token: "xoxb-omgjkh-token"
+    # App-level token (xapp-...) — for Socket Mode
+    app_token: "xapp-omgjkh-token"
+
+  - name: offtera
+    bot_token: "xoxb-offtera-token"
+    app_token: "xapp-offtera-token"
+
+# Optional: channels to exclude from mirroring even if names match
+exclude_channels:
+  - "random"       # skip #random on both sides
+  # - "admin-only"
+
+# Optional: users to exclude from mirroring even if names match
+exclude_users:
+  - "slackbot"
+
+# How often to refresh user/channel name→ID caches (seconds)
+cache_refresh_interval_secs: 300
+
+# Log level: trace, debug, info, warn, error
+log_level: "info"
+
+# Health check HTTP port (0 = disabled)
+health_port: 8780

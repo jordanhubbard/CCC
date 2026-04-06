@@ -1,0 +1,21 @@
+[Unit]
+Description=Slack Reflector — mirrors messages between paired Slack workspaces
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jkh
+ExecStart=/home/jkh/Src/CCC/slack-reflector/target/release/slack-reflector /home/jkh/Src/CCC/slack-reflector/config.yaml
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
