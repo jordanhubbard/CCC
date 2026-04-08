@@ -289,7 +289,6 @@ info "Setting up Tailscale (userspace networking for container)..."
 TS_DIR="$HOME/.tailscale"
 TS_SOCK="$TS_DIR/tailscaled.sock"
 TS_LOG="$LOG_DIR/tailscaled.log"
-TS_LOGIN_SERVER="${TS_LOGIN_SERVER:-https://vpn.mass-hysteria.org}"
 TS_AUTHKEY="${TS_AUTHKEY:-}"
 
 mkdir -p "$TS_DIR"
@@ -330,7 +329,7 @@ if [ -n "$SUPERVISORD_CONFD" ]; then
 [program:tailscaled]
 command=tailscaled --tun=userspace-networking --socket=${TS_SOCK} --statedir=${TS_DIR}
 user=${USER}
-environment=HOME="${HOME}",TS_LOGIN_SERVER="${TS_LOGIN_SERVER}"
+environment=HOME="${HOME}"
 stdout_logfile=${TS_LOG}
 stdout_logfile_maxbytes=5MB
 stdout_logfile_backups=0
@@ -355,7 +354,7 @@ elif [ -f "$SUPERVISORD_CONF" ]; then
 [program:tailscaled]
 command=tailscaled --tun=userspace-networking --socket=${TS_SOCK} --statedir=${TS_DIR}
 user=${USER}
-environment=HOME="${HOME}",TS_LOGIN_SERVER="${TS_LOGIN_SERVER}"
+environment=HOME="${HOME}"
 stdout_logfile=${TS_LOG}
 stdout_logfile_maxbytes=5MB
 stdout_logfile_backups=0
@@ -399,20 +398,20 @@ if tailscale --socket="$TS_SOCK" status &>/dev/null 2>&1; then
     2>/dev/null || echo "")
   if [ "$TS_BACKEND" = "Running" ]; then
     TS_IP=$(tailscale --socket="$TS_SOCK" ip -4 2>/dev/null || echo "unknown")
-    success "Tailscale connected (IP: $TS_IP, login server: $TS_LOGIN_SERVER)"
+    success "Tailscale connected (IP: $TS_IP)"
   else
-    info "Running tailscale up (login server: $TS_LOGIN_SERVER)..."
-    TS_UP_CMD="tailscale --socket=${TS_SOCK} up --login-server=${TS_LOGIN_SERVER}"
+    info "Running tailscale up..."
+    TS_UP_CMD="tailscale --socket=${TS_SOCK} up"
     [ -n "$TS_AUTHKEY" ] && TS_UP_CMD="$TS_UP_CMD --authkey=${TS_AUTHKEY}"
     $TS_UP_CMD 2>&1 | tee -a "$TS_LOG" || \
       warn "tailscale up incomplete — if an auth URL was printed, visit it to authorize"
-    warn "  Or run manually: tailscale --socket=${TS_SOCK} up --login-server=${TS_LOGIN_SERVER}"
+    warn "  Or run manually: tailscale --socket=${TS_SOCK} up"
     [ -z "$TS_AUTHKEY" ] && \
       warn "  For unattended setup, set TS_AUTHKEY in ~/.ccc/.env and re-run this script"
   fi
 else
   warn "tailscaled not yet responding — supervisord will start it on next boot"
-  warn "  Then run: tailscale --socket=${TS_SOCK} up --login-server=${TS_LOGIN_SERVER}"
+  warn "  Then run: tailscale --socket=${TS_SOCK} up"
 fi
 
 # ── Step 7: Claude tmux session ─────────────────────────────────────────────
@@ -461,7 +460,7 @@ echo ""
 echo "  Workspace:      $WORKSPACE"
 echo "  Pull loop:      $PULL_LOOP"
 echo "  Exec listener:  $EXEC_LISTENER"
-echo "  Tailscale:      $TS_DIR  (login: $TS_LOGIN_SERVER)"
+echo "  Tailscale:      $TS_DIR"
 echo "  Pull log:       $LOG_FILE"
 echo "  Exec log:       $EXEC_LOG"
 echo "  Tailscale log:  $TS_LOG"
@@ -498,7 +497,6 @@ echo "    CCC_URL             — http://146.190.134.110:8789"
 echo "    CCC_AGENT_TOKEN     — your agent bearer token"
 echo "    AGENT_NAME          — your agent name (peabody, sherman, etc.)"
 echo ""
-echo "  Optional .env keys for Tailscale:"
-echo "    TS_LOGIN_SERVER     — coordination server (default: https://vpn.mass-hysteria.org)"
-echo "    TS_AUTHKEY          — pre-auth key for unattended join (generate in Headscale admin)"
+echo "  Optional .env key for Tailscale:"
+echo "    TS_AUTHKEY          — pre-auth key for unattended join (generate in Tailscale admin console)"
 echo ""
