@@ -128,11 +128,39 @@ fi
 
 # ── 3. Clone / update CCC workspace ──────────────────────────────────────
 CCC_WORKSPACE="$HOME/.ccc/workspace"
+CLAWFS_CCC_REPO="${CLAWFS_CCC_REPO:-$HOME/clawfs/repos/CCC}"
 info "Setting up CCC workspace at $CCC_WORKSPACE..."
-if [[ -d "$CCC_WORKSPACE/.git" ]]; then
-  warn "Already cloned — pulling latest"
-  git -C "$CCC_WORKSPACE" pull --ff-only
+
+# Prefer ClawFS shared repo if available — single copy shared by all agents
+if [[ -d "$CLAWFS_CCC_REPO/.git" ]]; then
+  info "ClawFS shared repo found at $CLAWFS_CCC_REPO"
+  if [[ -L "$CCC_WORKSPACE" ]]; then
+    CURRENT_TARGET="$(readlink -f "$CCC_WORKSPACE")"
+    CLAWFS_RESOLVED="$(readlink -f "$CLAWFS_CCC_REPO")"
+    if [[ "$CURRENT_TARGET" = "$CLAWFS_RESOLVED" ]]; then
+      success "Workspace already symlinked to ClawFS repo"
+    else
+      warn "Workspace symlink points to $CURRENT_TARGET, updating to ClawFS"
+      ln -sfn "$CLAWFS_CCC_REPO" "$CCC_WORKSPACE"
+      success "Workspace re-symlinked to ClawFS repo"
+    fi
+  elif [[ -d "$CCC_WORKSPACE" ]]; then
+    warn "Workspace is a real directory at $CCC_WORKSPACE"
+    warn "ClawFS repo available — consider: rm -rf $CCC_WORKSPACE && ln -s $CLAWFS_CCC_REPO $CCC_WORKSPACE"
+    info "Keeping existing directory for now, pulling latest"
+    git -C "$CCC_WORKSPACE" pull --ff-only || warn "git pull failed"
+  else
+    mkdir -p "$(dirname "$CCC_WORKSPACE")"
+    ln -s "$CLAWFS_CCC_REPO" "$CCC_WORKSPACE"
+    success "Workspace symlinked to ClawFS: $CCC_WORKSPACE -> $CLAWFS_CCC_REPO"
+  fi
+elif [[ -d "$CCC_WORKSPACE/.git" ]]; then
+  # Fallback: no ClawFS, but local clone exists
+  warn "ClawFS not available — using local clone, pulling latest"
+  git -C "$CCC_WORKSPACE" pull --ff-only || warn "git pull failed"
 else
+  # Fallback: no ClawFS, no local clone — fresh git clone
+  info "ClawFS not available — cloning repo locally"
   git clone "${CCC_REPO:-https://github.com/jordanhubbard/rockyandfriends.git}" "$CCC_WORKSPACE"
 fi
 success "CCC workspace ready"

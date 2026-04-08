@@ -1,0 +1,12 @@
+[Unit]
+Description=CCC repo sync timer — runs every 30 minutes
+Requires=ccc-repo-sync.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

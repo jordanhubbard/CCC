@@ -1,0 +1,20 @@
+[Unit]
+Description=JuiceFS ClawFS S3 Gateway
+After=network.target redis-server.service minio.service
+Wants=redis-server.service minio.service
+PartOf=ccc.target
+
+[Service]
+Type=simple
+User=jkh
+Group=jkh
+Environment=MINIO_ROOT_USER=rockymoose5808f4a22ccc869a
+Environment=MINIO_ROOT_PASSWORD=5d3a6a83ef56319242bffe17a2580403f1e63b97dffad270
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; echo "Waiting for redis... ($i/30)"; sleep 2; done; exit 1'
+ExecStart=/usr/local/bin/juicefs gateway redis://127.0.0.1:6379/1 0.0.0.0:9100 --no-usage-report
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=ccc.target
