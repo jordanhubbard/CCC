@@ -96,17 +96,4 @@ services {
   }
 }
 
-services {
-  name = "clawchat"
-  id   = "clawchat-do-host1"
-  port = 8790
-  tags = ["chat"]
-  meta {
-    host = "do-host1"
-  }
-  check {
-    http     = "http://127.0.0.1:8790/"
-    interval = "30s"
-    timeout  = "5s"
-  }
-}
+# ClawChat is a static WASM SPA served by nginx at /clawchat/ — no server process to register.

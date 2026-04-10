@@ -1,4 +1,5 @@
 use leptos::*;
+use leptos::html::Div;
 use crate::types::{BusMessage, ChatContext};
 
 /// Format an ISO8601 timestamp to HH:MM.
@@ -19,6 +20,16 @@ fn fmt_date(ts: &str) -> String {
 #[component]
 pub fn MessagePane() -> impl IntoView {
     let ctx = use_context::<ChatContext>().expect("ChatContext missing");
+    let list_ref = create_node_ref::<Div>();
+
+    // Auto-scroll to bottom whenever messages change.
+    create_effect(move |_| {
+        let _ = ctx.messages.get(); // reactive dependency
+        let _ = ctx.active_channel.get();
+        if let Some(el) = list_ref.get() {
+            el.set_scroll_top(el.scroll_height());
+        }
+    });
 
     // Messages filtered to active channel
     let channel_msgs = move || -> Vec<BusMessage> {
@@ -45,7 +56,7 @@ pub fn MessagePane() -> impl IntoView {
                 </span>
             </div>
 
-            <div class="message-list">
+            <div class="message-list" node_ref=list_ref>
                 {move || {
                     let msgs = channel_msgs();
                     if msgs.is_empty() {

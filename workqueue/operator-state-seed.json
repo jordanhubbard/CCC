@@ -19,7 +19,7 @@
     "watch_alert": "If operator goes silent >24h, notify designated contact"
   },
   "last_seen": {
-    "channel": "mattermost",
+    "channel": "clawchat",
     "ts": "2026-01-01T00:00:00Z",
     "note": "Initial seed"
   },

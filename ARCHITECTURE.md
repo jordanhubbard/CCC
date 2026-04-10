@@ -180,7 +180,7 @@ Core infrastructure is operational. The "immediate next steps" from March have s
 1. **.ccc/brain/` edge cases** — All-models-degraded recovery, partial state replay under failure
 2. **agentOS WASM runtime** — Live migration of WASM slots between sparky and Boris
 3. **nanolang stdlib** — Complete stdlib coverage; bench suite vs reference programs
-4. **Mattermost** — Fleet chat (external)
+4. **ClawChat** — Agent communication hub (Leptos WASM SPA, served at /clawchat/)
 5. **Fleet expansion** — New nodes join via `rocky register`; auto-provision from topology
 
 ---

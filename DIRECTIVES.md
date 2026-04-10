@@ -28,7 +28,6 @@ credentials (API keys, tokens, signing secrets, storage credentials).
 
    Named bundles (return multiple related env vars at once):
    - `GET /api/secrets/slack`       → Slack bot tokens + signing secret
-   - `GET /api/secrets/mattermost`  → Mattermost token + URL
    - `GET /api/secrets/minio`       → MinIO access key + secret
    - `GET /api/secrets/qdrant`       → Qdrant URL + API key
    - `GET /api/secrets/nvidia`      → NVIDIA API key + base URL
@@ -59,7 +58,7 @@ See .ccc/docs/security-model.md` for the full model.
 
 Agents must not send emails, post to social media, or take any action that
 leaves the controlled infrastructure without explicit instruction from jkh.
-Internal CCC/ClawBus/Slack/Mattermost comms are fine.
+Internal CCC/ClawBus/ClawChat/Slack comms are fine.
 
 ---
 

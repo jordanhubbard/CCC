@@ -1,6 +1,12 @@
 use leptos::*;
 use crate::types::{ChatContext, DEFAULT_CHANNELS};
 
+fn ls_remove(key: &str) {
+    if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = s.remove_item(key);
+    }
+}
+
 #[component]
 pub fn Sidebar() -> impl IntoView {
     let ctx = use_context::<ChatContext>().expect("ChatContext missing");
@@ -48,7 +54,15 @@ pub fn Sidebar() -> impl IntoView {
                         <button
                             class="channel-item"
                             class:channel-active=move || ctx.active_channel.get() == id_active
-                            on:click=move |_| ctx.set_active_channel.set(id_click.clone())
+                            on:click=move |_| {
+                                let ch = id_click.clone();
+                                // Mark channel as read
+                                let count = ctx.messages.get().iter()
+                                    .filter(|m| m.subject.as_deref() == Some(ch.as_str()))
+                                    .count();
+                                ctx.read_counts.update(|m| { m.insert(ch.clone(), count); });
+                                ctx.set_active_channel.set(ch);
+                            }
                         >
                             <span class="channel-hash">"#"</span>
                             {lbl}
@@ -57,6 +71,7 @@ pub fn Sidebar() -> impl IntoView {
                                     ctx.messages.get(),
                                     &id_unread,
                                     ctx.active_channel.get(),
+                                    ctx.read_counts.get(),
                                 );
                                 if count > 0 {
                                     view! { <span class="unread-badge">{count}</span> }.into_view()
@@ -78,7 +93,14 @@ pub fn Sidebar() -> impl IntoView {
                             <button
                                 class="channel-item channel-discovered"
                                 class:channel-active=move || ctx.active_channel.get() == id_active
-                                on:click=move |_| ctx.set_active_channel.set(id_click.clone())
+                                on:click=move |_| {
+                                    let ch = id_click.clone();
+                                    let count = ctx.messages.get().iter()
+                                        .filter(|m| m.subject.as_deref() == Some(ch.as_str()))
+                                        .count();
+                                    ctx.read_counts.update(|m| { m.insert(ch.clone(), count); });
+                                    ctx.set_active_channel.set(ch);
+                                }
                             >
                                 <span class="channel-hash">"#"</span>
                                 {lbl}
@@ -108,21 +130,31 @@ pub fn Sidebar() -> impl IntoView {
                     }).collect::<Vec<_>>().into_view()
                 }}
             </div>
+
+            <div class="sidebar-footer">
+                <span class="sidebar-footer-user">{move || ctx.username.get()}</span>
+                <button class="sidebar-signout-btn" on:click=move |_| {
+                    ls_remove("ccc_token");
+                    ls_remove("ccc_username");
+                    ctx.set_token.set(None);
+                }>"Sign out"</button>
+            </div>
         </div>
     }
 }
 
-/// Count messages in a given channel (0 when it's the active channel).
+/// Count unread messages in a channel.
+/// Unread = current_count - read_watermark. Defaults to 0 if channel was never visited.
 fn channel_unread(
     msgs: Vec<crate::types::BusMessage>,
     channel: &str,
     active: String,
+    read_counts: std::collections::HashMap<String, usize>,
 ) -> usize {
     if channel == active.as_str() {
         return 0;
     }
-    msgs.iter()
-        .filter(|m| m.subject.as_deref() == Some(channel))
-        .count()
-        .min(99)
+    let current = msgs.iter().filter(|m| m.subject.as_deref() == Some(channel)).count();
+    let watermark = read_counts.get(channel).copied().unwrap_or(current);
+    current.saturating_sub(watermark).min(99)
 }

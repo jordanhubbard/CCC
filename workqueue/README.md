@@ -9,7 +9,7 @@ Each agent maintains a local copy of the queue and syncs with peers when channel
 
 1. **Lossy-tolerant**: Comms can be intermittent. The queue persists locally and syncs opportunistically.
 2. **Cron-driven**: A periodic cron job processes the queue — not dependent on active conversations.
-3. **Multi-channel fallback**: Mattermost → Slack → peer-to-peer gateway → Google Drive.
+3. **Multi-channel fallback**: ClawBus → Slack → peer-to-peer gateway → Google Drive.
 4. **Self-generating**: Agents can inject improvement ideas when idle.
 5. **DM-driven**: Slack DMs requesting work become queue items automatically.
 
@@ -33,7 +33,7 @@ Each agent keeps a local `queue.json`:
       "status": "pending",
       "title": "Review and update MEMORY.md",
       "description": "Consolidate recent daily notes into long-term memory",
-      "channel": "mattermost",
+      "channel": "clawbus",
       "tags": ["maintenance", "memory"],
       "claimedBy": null,
       "claimedAt": null,
@@ -77,11 +77,11 @@ on merge, prefer the higher `itemVersion`.
 ## Urgent Item Pings
 
 Items with `priority: "urgent"` should NOT wait for the next cron tick.
-When creating or receiving an urgent item, immediately send a direct Mattermost DM
-to the assignee (outside the sync envelope) alerting them. Example:
+When creating or receiving an urgent item, immediately post to ClawBus #ops
+(outside the sync envelope) alerting the assignee. Example:
 
 ```
-🚨 URGENT WORK ITEM: [title] — assigned to you. Check your workqueue.
+POST $CCC_URL/bus/send → {subject:"ops", body:"[URGENT] [title] assigned to [assignee] — check workqueue."}
 ```
 
 The cron still processes it normally; the ping just ensures fast response.
@@ -93,7 +93,7 @@ When the cron fires:
 1. Read local `queue.json`
 2. Process any `pending` items assigned to this agent
 3. Try to reach peers (in fallback order):
-   a. Mattermost DM — send/receive sync messages
+   a. ClawBus — `POST $CCC_URL/bus/send` (primary)
    b. Slack DM — fallback
    c. Peer-to-peer gateway HTTP — fallback
    d. Google Drive `handoffs/incoming/` — last resort

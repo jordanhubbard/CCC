@@ -44,7 +44,7 @@ fn App() -> impl IntoView {
                     <LoginScreen on_login=on_login.clone() />
                 }.into_view(),
                 Some(_) => view! {
-                    <ChatApp token=token username=username />
+                    <ChatApp token=token set_token=set_token username=username />
                 }.into_view(),
             }
         }}
@@ -54,6 +54,7 @@ fn App() -> impl IntoView {
 #[component]
 fn ChatApp(
     token: ReadSignal<Option<String>>,
+    set_token: WriteSignal<Option<String>>,
     username: ReadSignal<String>,
 ) -> impl IntoView {
     let (active_channel, set_active_channel) = create_signal("#general".to_string());
@@ -149,8 +150,11 @@ fn ChatApp(
         }
     }
 
+    let read_counts = create_rw_signal(std::collections::HashMap::<String, usize>::new());
+
     let ctx = ChatContext {
         token,
+        set_token,
         username,
         messages,
         set_messages,
@@ -158,6 +162,7 @@ fn ChatApp(
         set_active_channel,
         presence,
         connected,
+        read_counts,
     };
     provide_context(ctx);
 

@@ -2,23 +2,22 @@
 /**
  * ccc-api-watchdog.mjs
  * Natasha's CCC dashboard API watchdog.
- * Checks http://146.190.134.110:8788/api/queue — fires Mattermost alert to #agent-shared
+ * Checks CCC_URL/api/queue — posts ClawBus alert to #ops
  * if unreachable for >30 consecutive minutes.
  *
+ * Formerly used Mattermost; now uses ClawBus /bus/send.
  * State: ~/.openclaw/workspace/workqueue/state-ccc-watchdog.json
- * Run: every 10-15 min via cron, or called from workqueue tick.
+ * Run: every 10-15 min via cron.
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 
-const API_URL       = 'http://146.190.134.110:8788/api/queue';
-const STATE_PATH    = '/home/jkh/.openclaw/workspace/workqueue/state-ccc-watchdog.json';
+const CCC_URL   = process.env.CCC_URL   || 'http://localhost:8789';
+const CCC_TOKEN = process.env.CCC_AGENT_TOKEN || '';
+const CALLING_AGENT = process.env.AGENT_NAME || 'natasha';
+const STATE_PATH = process.env.WATCHDOG_STATE ||
+  '/home/jkh/.openclaw/workspace/workqueue/state-ccc-watchdog.json';
 const ALERT_AFTER_MS = 30 * 60 * 1000; // 30 minutes
-
-// Mattermost config — same pattern as other scripts
-const MM_URL    = process.env.MATTERMOST_URL    || 'http://localhost:8065';
-const MM_TOKEN  = process.env.MATTERMOST_TOKEN  || '';
-const MM_CHANNEL = process.env.MATTERMOST_AGENT_SHARED_CHANNEL || 'agent-shared';
 
 // ── State management ──────────────────────────────────────────────────────────
 
@@ -41,71 +40,78 @@ function saveState(state) {
 
 async function checkApi() {
   try {
-    const res = await fetch(API_URL, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`${CCC_URL}/api/queue`, {
+      headers: { Authorization: `Bearer ${CCC_TOKEN}` },
+      signal: AbortSignal.timeout(8000),
+    });
     return res.ok;
   } catch {
     return false;
   }
 }
 
-// ── Alert via Mattermost ──────────────────────────────────────────────────────
+// ── Alert via ClawBus ─────────────────────────────────────────────────────────
 
-async function sendMattermostAlert(msg) {
-  if (!MM_TOKEN) {
-    console.log('[watchdog] No MATTERMOST_TOKEN — skipping alert, would send:', msg);
+async function sendAlert(msg) {
+  if (!CCC_TOKEN) {
+    console.log('[watchdog] No CCC_AGENT_TOKEN — skipping alert, would send:', msg);
     return;
   }
   try {
-    // Resolve channel id
-    const chRes = await fetch(`${MM_URL}/api/v4/channels/name/${MM_CHANNEL}`, {
-      headers: { Authorization: `Bearer ${MM_TOKEN}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!chRes.ok) { console.error('[watchdog] Could not resolve channel:', await chRes.text()); return; }
-    const ch = await chRes.json();
-
-    const postRes = await fetch(`${MM_URL}/api/v4/posts`, {
+    const res = await fetch(`${CCC_URL}/bus/send`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${MM_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id: ch.id, message: msg }),
+      headers: {
+        Authorization: `Bearer ${CCC_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: CALLING_AGENT,
+        to: 'all',
+        type: 'text',
+        subject: 'ops',
+        body: msg,
+        mime: 'text/plain',
+      }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!postRes.ok) { console.error('[watchdog] Post failed:', await postRes.text()); }
-    else { console.log('[watchdog] Alert posted to #agent-shared'); }
+    if (!res.ok) {
+      console.error('[watchdog] ClawBus post failed:', await res.text());
+    } else {
+      console.log('[watchdog] Alert posted to #ops via ClawBus');
+    }
   } catch (e) {
-    console.error('[watchdog] Mattermost error:', e.message);
+    console.error('[watchdog] ClawBus error:', e.message);
   }
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const now   = Date.now();
+  const now    = Date.now();
   const nowIso = new Date(now).toISOString();
-  const state = loadState();
-  const up    = await checkApi();
+  const state  = loadState();
+  const up     = await checkApi();
 
   if (up) {
     const wasDown = state.firstDownTs !== null;
-    const downDuration = wasDown
+    const downMin = wasDown
       ? Math.round((now - new Date(state.firstDownTs).getTime()) / 60000)
       : 0;
 
     if (wasDown) {
-      console.log(`[watchdog] API is back UP after ~${downDuration}min down`);
-      // Post recovery notice if we had alerted
+      console.log(`[watchdog] API back UP after ~${downMin}min down`);
       if (state.alertSentTs) {
-        await sendMattermostAlert(
-          `✅ **CCC API recovered** — dashboard at 146.190.134.110:8788 is back online after ~${downDuration} min outage. (Natasha watchdog)`
+        await sendAlert(
+          `[watchdog] CCC API recovered — back online after ~${downMin} min outage. (${CALLING_AGENT})`
         );
       }
     } else {
       console.log('[watchdog] API OK');
     }
 
-    state.firstDownTs       = null;
-    state.lastUpTs          = nowIso;
-    state.alertSentTs       = null;
+    state.firstDownTs        = null;
+    state.lastUpTs           = nowIso;
+    state.alertSentTs        = null;
     state.consecutiveFailures = 0;
     saveState(state);
     return;
@@ -117,15 +123,16 @@ async function main() {
     state.firstDownTs = nowIso;
     console.log('[watchdog] API DOWN — recording first failure at', nowIso);
   } else {
-    const downMs = now - new Date(state.firstDownTs).getTime();
+    const downMs  = now - new Date(state.firstDownTs).getTime();
     const downMin = Math.round(downMs / 60000);
     console.log(`[watchdog] API still DOWN — ${downMin}min since first failure`);
 
-    // Alert if >30min and not already alerted this outage
     if (downMs >= ALERT_AFTER_MS && !state.alertSentTs) {
       state.alertSentTs = nowIso;
-      const msg = `🚨 **CCC API OUTAGE** — dashboard API at 146.190.134.110:8788 has been unreachable for **${downMin} minutes**. Sync to authoritative queue is blocked for all agents. Someone should check the dashboard service on the CCC host. (Natasha watchdog @ ${nowIso})`;
-      await sendMattermostAlert(msg);
+      await sendAlert(
+        `[watchdog] CCC API OUTAGE — ${CCC_URL}/api/queue unreachable for ${downMin} minutes. ` +
+        `Sync blocked for all agents. Please check the ccc-server service. (${CALLING_AGENT} @ ${nowIso})`
+      );
     } else if (downMs >= ALERT_AFTER_MS) {
       console.log(`[watchdog] Already alerted at ${state.alertSentTs}, still down`);
     }

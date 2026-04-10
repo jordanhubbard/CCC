@@ -128,7 +128,7 @@ Auto-escalation thresholds (via `priority-escalation.mjs`):
 {
   "ts": "2026-03-21T07:00:00.000Z",
   "peer": "natasha",
-  "channel": "mattermost",
+  "channel": "clawbus",
   "direction": "outbound",
   "success": true,
   "itemCount": 28,
@@ -140,7 +140,7 @@ Auto-escalation thresholds (via `priority-escalation.mjs`):
 |-------|------|----------|-------|
 | `ts` | ISO-8601 | ✅ | When the sync event occurred. |
 | `peer` | string | ✅ | Peer name (`bullwinkle`, `natasha`). |
-| `channel` | string | ✅ | Channel used (`mattermost`, `p2p`). |
+| `channel` | string | ✅ | Channel used (`clawbus`, `p2p`, `slack`). |
 | `direction` | enum | ✅ | `outbound` or `inbound`. |
 | `success` | boolean | ✅ | Whether the sync succeeded. |
 | `itemCount` | integer | ✅ | Number of items in the sync payload. |

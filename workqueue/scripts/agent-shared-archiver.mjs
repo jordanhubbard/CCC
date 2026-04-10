@@ -1,68 +1,34 @@
 #!/usr/bin/env node
 /**
  * agent-shared-archiver.mjs
- * wq-R-005: Archive Mattermost #agent-shared channel to MinIO
+ * Archive ClawBus #ops channel messages to MinIO.
  *
- * Reads the last 100 messages from #agent-shared (channel ID: set MATTERMOST_ARCHIVE_CHANNEL in .env)
- * on the Mattermost server and uploads the archive as JSON to MinIO at:
- *   agents/shared/agent-shared-archive-YYYY-MM-DD.json
+ * Reads text messages from CCC /bus/messages (filtered to subject=ops),
+ * uploads as JSON to MinIO at: agents/shared/bus-ops-archive-YYYY-MM-DD.json
  *
- * Usage: node agent-shared-archiver.mjs [--date YYYY-MM-DD]
+ * Formerly archived Mattermost #agent-shared; now archives ClawBus #ops.
+ * Updated 2026-04-10.
+ *
+ * Usage: node agent-shared-archiver.mjs [--date YYYY-MM-DD] [--channel ops]
  */
 
-import { execSync, execFileSync } from 'child_process';
-import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import https from 'https';
+import { execFileSync } from 'child_process';
+import { writeFileSync, unlinkSync } from 'fs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORKSPACE = join(__dirname, '../../');
+const CCC_URL   = process.env.CCC_URL   || 'http://localhost:8789';
+const CCC_TOKEN = process.env.CCC_AGENT_TOKEN || '';
+const CHANNEL   = process.argv.find(a => a.startsWith('--channel='))?.split('=')[1] ||
+  process.argv[process.argv.indexOf('--channel') + 1] || 'ops';
 const MC = process.env.MC_BIN || 'mc';
 const MINIO_ALIAS = process.env.MINIO_ALIAS || 'local';
-const SHARED_PREFIX = `${MINIO_ALIAS}/agents/shared`;
-
-const MM_SERVER = process.env.MATTERMOST_URL || '';
-const MM_TOKEN  = process.env.MATTERMOST_TOKEN || '';
-const CHANNEL_ID = process.env.MATTERMOST_ARCHIVE_CHANNEL || '';
-const PER_PAGE = 100;
 
 function getDate() {
-  const dateArg = process.argv.find(a => a.startsWith('--date'));
+  const dateArg = process.argv.find(a => a === '--date');
   if (dateArg) {
-    const d = dateArg.split('=')[1] || process.argv[process.argv.indexOf(dateArg) + 1];
+    const d = process.argv[process.argv.indexOf('--date') + 1];
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   }
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-}
-
-function mmGet(path) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(path, MM_SERVER);
-    const options = {
-      hostname: url.hostname,
-      port: url.port || 443,
-      path: url.pathname + url.search,
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${MM_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    };
-    const req = https.request(options, res => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          resolve({ status: res.statusCode, body: JSON.parse(data) });
-        } catch (e) {
-          resolve({ status: res.statusCode, body: data });
-        }
-      });
-    });
-    req.on('error', reject);
-    req.end();
-  });
 }
 
 function mcPut(localPath, remotePath) {
@@ -70,83 +36,78 @@ function mcPut(localPath, remotePath) {
     execFileSync(MC, ['cp', localPath, remotePath], { stdio: ['pipe', 'pipe', 'pipe'] });
     return true;
   } catch (e) {
-    console.error('[minio] upload failed:', e.message);
+    console.error('[archiver] MinIO upload failed:', e.message);
     return false;
   }
 }
 
 async function main() {
-  const today = getDate();
-  const now = new Date().toISOString();
-
-  console.log(`[agent-shared-archiver] Fetching last ${PER_PAGE} messages from #agent-shared...`);
-
-  // Fetch posts from Mattermost
-  const postsResp = await mmGet(
-    `/api/v4/channels/${CHANNEL_ID}/posts?page=0&per_page=${PER_PAGE}`
-  );
-
-  if (postsResp.status !== 200) {
-    console.error(`[agent-shared-archiver] ERROR: Mattermost API returned ${postsResp.status}:`, postsResp.body);
+  if (!CCC_TOKEN) {
+    console.error('[archiver] CCC_AGENT_TOKEN not set — cannot fetch messages.');
     process.exit(1);
   }
 
-  const postsData = postsResp.body;
+  const today = getDate();
+  const now   = new Date().toISOString();
+  const limit = 1000;
 
-  // postsData.order is array of post IDs in reverse-chronological order
-  // postsData.posts is a map of id → post object
-  const order = postsData.order || [];
-  const postsMap = postsData.posts || {};
+  console.log(`[archiver] Fetching ClawBus text messages (subject=${CHANNEL}, limit=${limit})...`);
 
-  // Build sorted array (oldest first)
-  const messages = order
-    .map(id => postsMap[id])
-    .filter(Boolean)
-    .sort((a, b) => a.create_at - b.create_at)
-    .map(p => ({
-      id: p.id,
-      create_at: p.create_at,
-      create_at_iso: new Date(p.create_at).toISOString(),
-      user_id: p.user_id,
-      channel_id: p.channel_id,
-      message: p.message,
-      type: p.type || '',
-      props: p.props || {}
+  const res = await fetch(
+    `${CCC_URL}/bus/messages?type=text&limit=${limit}`,
+    { headers: { Authorization: `Bearer ${CCC_TOKEN}` } }
+  );
+
+  if (!res.ok) {
+    console.error(`[archiver] Failed to fetch messages: ${res.status} ${await res.text()}`);
+    process.exit(1);
+  }
+
+  const allMessages = await res.json();
+
+  // Filter to the target channel (subject field)
+  const messages = (Array.isArray(allMessages) ? allMessages : [])
+    .filter(m => !CHANNEL || m.subject === CHANNEL || m.subject === `#${CHANNEL}`)
+    .map(m => ({
+      id:      m.id,
+      ts:      m.ts,
+      from:    m.from,
+      to:      m.to,
+      subject: m.subject,
+      body:    m.body,
+      mime:    m.mime || 'text/plain',
     }));
 
   const archive = {
-    archived_at: now,
-    archive_date: today,
-    channel_id: CHANNEL_ID,
-    server: MM_SERVER,
+    archived_at:   now,
+    archive_date:  today,
+    channel:       CHANNEL,
+    source:        'clawbus',
+    ccc_url:       CCC_URL,
     message_count: messages.length,
-    messages
+    messages,
   };
 
-  // Write to temp file
-  const tmpPath = `/tmp/agent-shared-archive-${today}.json`;
+  const tmpPath = `/tmp/bus-${CHANNEL}-archive-${today}.json`;
   writeFileSync(tmpPath, JSON.stringify(archive, null, 2), 'utf8');
-  console.log(`[agent-shared-archiver] Wrote ${messages.length} messages to ${tmpPath}`);
+  console.log(`[archiver] Wrote ${messages.length} messages to ${tmpPath}`);
 
-  // Upload to MinIO
-  const remotePath = `${SHARED_PREFIX}/agent-shared-archive-${today}.json`;
+  const remotePath = `${MINIO_ALIAS}/agents/shared/bus-${CHANNEL}-archive-${today}.json`;
   const ok = mcPut(tmpPath, remotePath);
 
   if (ok) {
-    console.log(`[agent-shared-archiver] Uploaded to MinIO: agents/shared/agent-shared-archive-${today}.json`);
+    console.log(`[archiver] Uploaded to MinIO: agents/shared/bus-${CHANNEL}-archive-${today}.json`);
   } else {
-    console.error(`[agent-shared-archiver] WARNING: MinIO upload failed — local copy at ${tmpPath}`);
+    console.error(`[archiver] WARNING: MinIO upload failed — local copy at ${tmpPath}`);
     process.exit(1);
   }
 
-  // Clean up temp file
   try { unlinkSync(tmpPath); } catch {}
 
-  console.log(`[agent-shared-archiver] Done. ${messages.length} messages archived for ${today}.`);
-  process.exit(0);
+  console.log(`[archiver] Done. ${messages.length} messages archived for ${today}.`);
 }
 
 main().catch(e => {
-  console.error('[agent-shared-archiver] FATAL:', e.message);
+  console.error('[archiver] FATAL:', e.message);
   process.exit(1);
 });
