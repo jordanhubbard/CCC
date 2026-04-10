@@ -12,7 +12,7 @@
 #   2. Symlinks ~/.ccc/workspace → this repo (if not already set up)
 #   3. Creates ~/.ccc/ccc-pull-loop.sh (a while-true pull loop)
 #   4. Registers ccc-pull-loop with supervisord (or falls back to nohup)
-#   5. Registers ccc-exec-listener (SquirrelBus remote exec) with supervisord
+#   5. Registers ccc-exec-listener (ClawBus remote exec) with supervisord
 #   6. Sets up Tailscale (userspace networking for container environments)
 #   7. Starts a 'claude-main' tmux session with Claude Code
 #   8. Prints a summary
@@ -145,6 +145,35 @@ else
   success "Workspace symlinked: $WORKSPACE -> $PREFERRED_TARGET"
 fi
 
+# ── Step 2b: Install npm dependencies ────────────────────────────────────────
+# The exec-listener and other CCC tools need node_modules (better-sqlite3, etc.)
+# This must happen BEFORE supervisor starts the exec-listener.
+info "Installing npm dependencies..."
+
+if command -v node &>/dev/null && command -v npm &>/dev/null; then
+  # Fix .npm ownership (can get set to root inside containers)
+  if [ -d "$HOME/.npm" ]; then
+    chown -R "$(id -u):$(id -g)" "$HOME/.npm" 2>/dev/null || true
+  fi
+
+  # Root package.json (better-sqlite3 for exec-listener, etc.)
+  RESOLVED_WORKSPACE="$(readlink -f "$WORKSPACE" 2>/dev/null || echo "$WORKSPACE")"
+  if [ -f "$RESOLVED_WORKSPACE/package.json" ]; then
+    (cd "$RESOLVED_WORKSPACE" && npm install --silent 2>&1) && \
+      success "npm install (root): done" || \
+      warn "npm install (root) failed — exec-listener may not start"
+  fi
+
+  # Dashboard deps (separate package.json)
+  if [ -f "$RESOLVED_WORKSPACE/dashboard/package.json" ]; then
+    (cd "$RESOLVED_WORKSPACE/dashboard" && npm install --silent 2>&1) && \
+      success "npm install (dashboard): done" || \
+      warn "npm install (dashboard) failed"
+  fi
+else
+  warn "node/npm not found — skipping npm install (exec-listener will fail without it)"
+fi
+
 # ── Step 3: Create pull loop script ─────────────────────────────────────────
 info "Creating pull loop script..."
 
@@ -216,7 +245,7 @@ EOF
     PULL_REGISTERED=true
   fi
 
-  # Register ccc-exec-listener
+  # Register ccc-exec-listener (ClawBus remote exec)
   if grep -q "\[program:ccc-exec-listener\]" "$SUPERVISORD_CONF" 2>/dev/null; then
     success "ccc-exec-listener already in supervisord.conf — skipping"
     EXEC_REGISTERED=true
@@ -278,7 +307,7 @@ else
       success "Exec listener started via nohup (PID: $EXEC_PID)"
       echo "$EXEC_PID" > "$CCC_DIR/exec-listener.pid"
     else
-      warn "Exec listener may have exited — check $EXEC_LOG (SQUIRRELBUS_TOKEN required in .env)"
+      warn "Exec listener may have exited — check $EXEC_LOG (CLAWBUS_TOKEN required in .env)"
     fi
     EXEC_REGISTERED=true
   fi
@@ -492,7 +521,7 @@ fi
 
 echo ""
 echo "  Verify these manually:"
-echo "  1. ~/.ccc/.env exists with AGENT_NAME, CCC_URL, CCC_AGENT_TOKEN, SQUIRRELBUS_TOKEN"
+echo "  1. ~/.ccc/.env exists with AGENT_NAME, CCC_URL, CCC_AGENT_TOKEN, CLAWBUS_TOKEN"
 echo "  2. Pull loop running:      tail -f $LOG_FILE"
 echo "  3. Exec listener running:  tail -f $EXEC_LOG"
 echo "  4. Tailscale status:       tailscale --socket=${TS_SOCK} status"
@@ -503,8 +532,8 @@ echo "    cp $REPO_DIR/deploy/.env.template ~/.ccc/.env"
 echo "    nano ~/.ccc/.env"
 echo ""
 echo "  Required .env keys for exec listener:"
-echo "    SQUIRRELBUS_TOKEN   — shared bus secret (get from Rocky/CCC)"
-echo "    SQUIRRELBUS_URL     — http://146.190.134.110:8788"
+echo "    CLAWBUS_TOKEN       — shared bus secret (get from Rocky/CCC admin)"
+echo "    CLAWBUS_URL         — http://146.190.134.110:8788"
 echo "    CCC_URL             — http://146.190.134.110:8789"
 echo "    CCC_AGENT_TOKEN     — your agent bearer token"
 echo "    AGENT_NAME          — your agent name (peabody, sherman, etc.)"

@@ -132,8 +132,19 @@ else
   # Reinstall node deps if package.json changed
   if echo "$CHANGED" | grep -q "package.json"; then
     log "package.json changed — running npm install"
-    cd "$WORKSPACE/dashboard" && npm install --silent && cd "$WORKSPACE"
-    log "npm install done"
+    # Fix .npm ownership (can get set to root in containers)
+    if [ -d "$HOME/.npm" ]; then
+      chown -R "$(id -u):$(id -g)" "$HOME/.npm" 2>/dev/null || true
+    fi
+    # Root deps (better-sqlite3 for exec-listener, etc.)
+    if echo "$CHANGED" | grep -q "^package.json$\|^package-lock.json$"; then
+      cd "$WORKSPACE" && npm install --silent && log "npm install (root) done" || log "WARNING: npm install (root) failed"
+    fi
+    # Dashboard deps
+    if echo "$CHANGED" | grep -q "^dashboard/package"; then
+      cd "$WORKSPACE/dashboard" && npm install --silent && log "npm install (dashboard) done" || log "WARNING: npm install (dashboard) failed"
+    fi
+    cd "$WORKSPACE"
   fi
 fi
 
@@ -180,7 +191,7 @@ if [ -n "$CCC_URL" ] && [ -n "$CCC_AGENT_TOKEN" ] && command -v node >/dev/null 
     fi
     _sync_count=$((_sync_count + 1))
   }
-  for _alias in slack mattermost minio qdrant nvidia github; do
+  for _alias in slack minio qdrant nvidia github; do
     _resp=$(curl -sf --max-time 5 \
       -H "Authorization: Bearer ${CCC_AGENT_TOKEN}" \
       "${CCC_URL}/api/secrets/${_alias}" 2>/dev/null || true)
