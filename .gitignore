@@ -51,6 +51,9 @@ crash-reports/
 dist/
 .cache/
 
+# Python type-check cache (local experiments / one-off scripts)
+.mypy_cache/
+
 # Large binary/render outputs — stored in MinIO/Azure instead
 hatchery_frames/
 shanghai_output/frames/

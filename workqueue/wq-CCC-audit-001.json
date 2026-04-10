@@ -1,7 +1,9 @@
 {
   "id": "wq-CCC-audit-001",
   "title": "CCC: full codebase audit — architecture conformance, legacy cleanup, 'as little as possible' refactor",
-  "status": "proposed",
+  "status": "completed",
+  "completed_at": "2026-04-07T00:00:00Z",
+  "audit_report": ["ccc/AUDIT.md"],
   "priority": "high",
   "assigned_to": "all",
   "created_by": "natasha",

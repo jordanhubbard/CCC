@@ -1,0 +1,7 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+# In production, ClawChat is served at /chat/ as a sub-path.
+# Uncomment when deploying behind nginx/caddy proxy:
+# public_url = "/chat/"
