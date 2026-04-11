@@ -370,6 +370,31 @@ if [[ "$PLATFORM" == "linux" ]] && command -v systemctl &>/dev/null; then
   fi
 fi
 
+# ── Write onboarding signature ────────────────────────────────────────────
+if [ ! -f "$CCC_DIR/agent.json" ]; then
+  CCC_VERSION=$(cd "$WORKSPACE" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if command -v node >/dev/null 2>&1; then
+    node -e "
+      require('fs').writeFileSync('$CCC_DIR/agent.json', JSON.stringify({
+        schema_version: 1,
+        agent_name: '${AGENT_NAME:-unknown}',
+        host: '$(hostname)',
+        onboarded_at: '$NOW',
+        onboarded_by: 'setup-node.sh',
+        ccc_version: '$CCC_VERSION',
+        last_upgraded_at: '$NOW',
+        last_upgraded_version: '$CCC_VERSION'
+      }, null, 2) + '\n');
+    " && chmod 600 "$CCC_DIR/agent.json" && success "Onboarding signature written to $CCC_DIR/agent.json" \
+      || warn "Failed to write agent.json (non-fatal)"
+  else
+    warn "node not found — skipping agent.json write"
+  fi
+else
+  info "agent.json already exists — skipping (run upgrade-node.sh to update)"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.rcc.agent</string>
+    <string>com.ccc.agent</string>
 
     <key>ProgramArguments</key>
     <array>

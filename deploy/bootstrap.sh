@@ -914,6 +914,32 @@ curl -s -X PATCH "${CCC_URL}/api/agents/${AGENT}" \
 
 success "Heartbeat + hardware fingerprint posted"
 
+# ── Write onboarding signature ────────────────────────────────────────────
+_AGENT_JSON="$HOME/.ccc/agent.json"
+if [ ! -f "$_AGENT_JSON" ]; then
+  _CCC_VERSION=$(cd "${CCC_WORKSPACE:-$HOME/.ccc/workspace}" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  _NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if command -v node >/dev/null 2>&1; then
+    node -e "
+      require('fs').writeFileSync('$_AGENT_JSON', JSON.stringify({
+        schema_version: 1,
+        agent_name: '${AGENT:-unknown}',
+        host: '$(hostname)',
+        onboarded_at: '$_NOW',
+        onboarded_by: 'bootstrap.sh',
+        ccc_version: '$_CCC_VERSION',
+        last_upgraded_at: '$_NOW',
+        last_upgraded_version: '$_CCC_VERSION'
+      }, null, 2) + '\n');
+    " && chmod 600 "$_AGENT_JSON" && success "Onboarding signature written to $_AGENT_JSON" \
+      || warn "Failed to write agent.json (non-fatal)"
+  else
+    warn "node not found — skipping agent.json write"
+  fi
+else
+  info "agent.json already exists at $_AGENT_JSON"
+fi
+
 # ── 11. Done ──────────────────────────────────────────────────────────────
 # Clear the failure trap — we succeeded
 trap - EXIT

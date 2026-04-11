@@ -1,0 +1,118 @@
+[
+  {
+    "name": "ccc-agent.service",
+    "type": "systemd",
+    "condition": "linux",
+    "description": "CCC Agent Pull Service — runs agent-pull.sh every 10 minutes via ccc-agent.timer",
+    "source": "deploy/systemd/ccc-agent.service"
+  },
+  {
+    "name": "ccc-agent.timer",
+    "type": "systemd",
+    "condition": "linux",
+    "description": "CCC Agent Pull Timer — fires ccc-agent.service every 10 minutes",
+    "source": "deploy/systemd/ccc-agent.timer"
+  },
+  {
+    "name": "ccc-server.service",
+    "type": "systemd",
+    "condition": "hub",
+    "description": "CCC hub server (Rust/Axum) — listens on :8789",
+    "source": "deploy/systemd/ccc-server.service"
+  },
+  {
+    "name": "ccc-dashboard.service",
+    "type": "systemd",
+    "condition": "hub",
+    "description": "CCC dashboard frontend (Vite dev or static serve)",
+    "source": "deploy/systemd/ccc-dashboard.service"
+  },
+  {
+    "name": "agent-listener.service",
+    "type": "systemd",
+    "condition": "linux",
+    "description": "ClawBus agent-listener — subscribes to ClawBus and dispatches tasks",
+    "source": "deploy/systemd/agent-listener.service"
+  },
+  {
+    "name": "clawfs-metrics-push.service",
+    "type": "systemd",
+    "condition": "linux",
+    "description": "ClawFS/agentOS metrics push — streams Prometheus metrics to ClawBus every 5s",
+    "source": "deploy/systemd/clawfs-metrics-push.service"
+  },
+  {
+    "name": "clawfs-sparky.service",
+    "type": "systemd",
+    "condition": "gpu",
+    "description": "ClawFS FUSE mount for sparky GPU node",
+    "source": "deploy/systemd/clawfs-sparky.service"
+  },
+  {
+    "name": "clawfs-sync.service",
+    "type": "systemd",
+    "condition": "minio",
+    "description": "ClawFS sync service — syncs JuiceFS metadata to MinIO backend",
+    "source": "deploy/systemd/clawfs-sync.service"
+  },
+  {
+    "name": "heartbeat-local.service",
+    "type": "systemd",
+    "condition": "sparky",
+    "description": "Local heartbeat for sparky — posts GPU/system metrics to CCC hub",
+    "source": "deploy/systemd/heartbeat-local.service"
+  },
+  {
+    "name": "ollama-keepalive.service",
+    "type": "systemd",
+    "condition": "gpu",
+    "description": "Ollama keepalive — prevents Ollama from unloading models on sparky",
+    "source": "deploy/systemd/ollama-keepalive.service"
+  },
+  {
+    "name": "slack-reflector.service",
+    "type": "systemd",
+    "condition": "bridge",
+    "description": "Slack bridge reflector — mirrors Slack messages to ClawBus",
+    "source": "deploy/systemd/slack-reflector.service"
+  },
+  {
+    "name": "sparky-reverse-tunnel.service",
+    "type": "systemd",
+    "condition": "sparky",
+    "description": "SSH reverse tunnel from sparky back to do-host1 hub",
+    "source": "deploy/systemd/sparky-reverse-tunnel.service"
+  },
+  {
+    "name": "ssh-tunnel-do-host1.service",
+    "type": "systemd",
+    "condition": "ci",
+    "description": "SSH tunnel to do-host1 for CI/CD access",
+    "source": "deploy/systemd/ssh-tunnel-do-host1.service"
+  },
+  {
+    "name": "whisper-natasha.service",
+    "type": "systemd",
+    "condition": "whisper",
+    "description": "Whisper transcription service on natasha node",
+    "source": "deploy/systemd/whisper-natasha.service"
+  },
+  {
+    "name": "com.ccc.agent.plist",
+    "type": "launchd",
+    "condition": "macos",
+    "description": "macOS LaunchAgent — runs agent-pull.sh every 10 minutes",
+    "source": "deploy/launchd/com.ccc.agent.plist",
+    "label": "com.ccc.agent",
+    "install_path": "~/Library/LaunchAgents/com.ccc.agent.plist"
+  },
+  {
+    "name": "com.ccc.claude-main.plist",
+    "type": "launchd",
+    "condition": "macos_claude",
+    "description": "macOS LaunchAgent — keeps a tmux claude-main session alive with Claude Code",
+    "source": "deploy/launchd/com.ccc.claude-main.plist",
+    "label": "com.ccc.claude-main",
+    "install_path": "~/Library/LaunchAgents/com.ccc.claude-main.plist"
+  }
+]

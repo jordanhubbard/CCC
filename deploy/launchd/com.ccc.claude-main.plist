@@ -3,21 +3,21 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!--
-  com.rcc.claude-main.plist
+  com.ccc.claude-main.plist
   Keeps a tmux session named "claude-main" alive with Claude Code running inside.
   Survives reboots and auto-restarts if the process dies.
 
   Install:
-    cp deploy/launchd/com.rcc.claude-main.plist ~/Library/LaunchAgents/
+    cp deploy/launchd/com.ccc.claude-main.plist ~/Library/LaunchAgents/
     # Edit HOME_DIR below to match your actual home directory
-    launchctl load ~/Library/LaunchAgents/com.rcc.claude-main.plist
+    launchctl load ~/Library/LaunchAgents/com.ccc.claude-main.plist
 
   Uninstall:
-    launchctl unload ~/Library/LaunchAgents/com.rcc.claude-main.plist
-    rm ~/Library/LaunchAgents/com.rcc.claude-main.plist
+    launchctl unload ~/Library/LaunchAgents/com.ccc.claude-main.plist
+    rm ~/Library/LaunchAgents/com.ccc.claude-main.plist
 
   Check status:
-    launchctl list | grep rcc.claude
+    launchctl list | grep ccc.claude
     tail -f /tmp/claude-main.log
 
   Notes:
@@ -28,7 +28,7 @@
 -->
 <dict>
   <key>Label</key>
-  <string>com.rcc.claude-main</string>
+  <string>com.ccc.claude-main</string>
 
   <key>ProgramArguments</key>
   <array>

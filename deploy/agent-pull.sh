@@ -102,6 +102,8 @@ else
   AFTER=$(git rev-parse HEAD)
 fi
 
+CCC_VERSION=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 if [ "$BEFORE" = "$AFTER" ]; then
   log "No changes"
 else
@@ -219,7 +221,7 @@ fi
 
 # ── Post heartbeat to CCC ─────────────────────────────────────────────────
 if [ -n "$CCC_URL" ] && [ -n "$CCC_AGENT_TOKEN" ]; then
-  HEARTBEAT_PAYLOAD="{\"agent\":\"$AGENT_NAME\",\"host\":\"${AGENT_HOST:-$(hostname)}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"online\",\"pullRev\":\"$AFTER\"}"
+  HEARTBEAT_PAYLOAD="{\"agent\":\"$AGENT_NAME\",\"host\":\"${AGENT_HOST:-$(hostname)}\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"status\":\"online\",\"pullRev\":\"$AFTER\",\"ccc_version\":\"$CCC_VERSION\"}"
   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "$CCC_URL/api/heartbeat/$AGENT_NAME" \
     -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
@@ -230,6 +232,17 @@ if [ -n "$CCC_URL" ] && [ -n "$CCC_AGENT_TOKEN" ]; then
     log "Heartbeat posted to CCC"
   else
     log "WARNING: Heartbeat POST returned HTTP $HTTP_STATUS"
+  fi
+  # Update ~/.ccc/agent.json with latest ccc_version (non-fatal)
+  if [ -f "$CCC_DIR/agent.json" ] && command -v node >/dev/null 2>&1; then
+    node -e "
+      try {
+        const f='$CCC_DIR/agent.json';
+        const d=JSON.parse(require('fs').readFileSync(f,'utf8'));
+        d.ccc_version='$CCC_VERSION';
+        require('fs').writeFileSync(f,JSON.stringify(d,null,2)+'\n');
+      } catch(e){}
+    " 2>/dev/null || true
   fi
 fi
 

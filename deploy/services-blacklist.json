@@ -1,0 +1,134 @@
+[
+  {
+    "name": "rcc-agent.service",
+    "type": "systemd",
+    "condition": "linux",
+    "reason": "Renamed to ccc-agent.service in rcc→ccc rebrand (commit 03be35e)",
+    "unit_paths": [
+      "/etc/systemd/system/rcc-agent.service",
+      "/etc/systemd/system/rcc-agent.timer",
+      "/usr/lib/systemd/system/rcc-agent.service",
+      "/usr/lib/systemd/system/rcc-agent.timer"
+    ]
+  },
+  {
+    "name": "rcc-agent.timer",
+    "type": "systemd",
+    "condition": "linux",
+    "reason": "Renamed to ccc-agent.timer in rcc→ccc rebrand (commit 03be35e)",
+    "unit_paths": [
+      "/etc/systemd/system/rcc-agent.timer",
+      "/usr/lib/systemd/system/rcc-agent.timer"
+    ]
+  },
+  {
+    "name": "rcc-dashboard.service",
+    "type": "systemd",
+    "condition": "hub",
+    "reason": "Renamed to ccc-dashboard.service in rcc→ccc rebrand",
+    "unit_paths": [
+      "/etc/systemd/system/rcc-dashboard.service",
+      "/usr/lib/systemd/system/rcc-dashboard.service"
+    ]
+  },
+  {
+    "name": "squirrelchat-natasha.service",
+    "type": "systemd",
+    "condition": "linux",
+    "reason": "Deleted in commit 2b2d6bb — SquirrelChat replaced by ClawChat",
+    "unit_paths": [
+      "/etc/systemd/system/squirrelchat-natasha.service",
+      "/usr/lib/systemd/system/squirrelchat-natasha.service"
+    ]
+  },
+  {
+    "name": "crush-server.service",
+    "type": "systemd",
+    "condition": "hub",
+    "reason": "Deleted in commit be63945 — CRUSH server removed from stack",
+    "unit_paths": [
+      "/etc/systemd/system/crush-server.service",
+      "/usr/lib/systemd/system/crush-server.service"
+    ]
+  },
+  {
+    "name": "openclaw-register.service",
+    "type": "systemd",
+    "condition": "linux",
+    "reason": "Removed in openclaw→ccc migration era (~commit 7875733) — openclaw registration replaced by CCC onboarding",
+    "unit_paths": [
+      "/etc/systemd/system/openclaw-register.service",
+      "/usr/lib/systemd/system/openclaw-register.service"
+    ]
+  },
+  {
+    "name": "mm-bridge.service",
+    "type": "systemd",
+    "condition": "bridge",
+    "reason": "Mattermost infrastructure purged (commit dec4b83) — replaced by Slack bridge",
+    "unit_paths": [
+      "/etc/systemd/system/mm-bridge.service",
+      "/usr/lib/systemd/system/mm-bridge.service"
+    ]
+  },
+  {
+    "name": "agentfs-metrics-push.service",
+    "type": "systemd",
+    "condition": "linux",
+    "reason": "Superseded by clawfs-metrics-push.service (AgentFS→ClawFS rename)",
+    "unit_paths": [
+      "/etc/systemd/system/agentfs-metrics-push.service",
+      "/usr/lib/systemd/system/agentfs-metrics-push.service"
+    ]
+  },
+  {
+    "name": "clawbus-natasha.service",
+    "type": "systemd",
+    "condition": "linux",
+    "reason": "Points to ~/.openclaw paths; superseded by agent-listener.service",
+    "unit_paths": [
+      "/etc/systemd/system/clawbus-natasha.service",
+      "/usr/lib/systemd/system/clawbus-natasha.service"
+    ]
+  },
+  {
+    "name": "com.rcc.agent.plist",
+    "type": "launchd",
+    "condition": "macos",
+    "reason": "Renamed to com.ccc.agent.plist in rcc→ccc rebrand",
+    "unit_paths": [
+      "~/Library/LaunchAgents/com.rcc.agent.plist"
+    ],
+    "label": "com.rcc.agent"
+  },
+  {
+    "name": "com.rcc.claude-main.plist",
+    "type": "launchd",
+    "condition": "macos_claude",
+    "reason": "Renamed to com.ccc.claude-main.plist in rcc→ccc rebrand",
+    "unit_paths": [
+      "~/Library/LaunchAgents/com.rcc.claude-main.plist"
+    ],
+    "label": "com.rcc.claude-main"
+  },
+  {
+    "name": "openclaw-cron",
+    "type": "cron",
+    "condition": "linux",
+    "reason": "Legacy openclaw runtime replaced by CCC — all openclaw workspace and gateway crons must be removed",
+    "cron_patterns": [
+      "\\.openclaw/workspace",
+      "openclaw.*gateway",
+      "claw-watchdog\\.sh"
+    ]
+  },
+  {
+    "name": "rcc-pull-cron",
+    "type": "cron",
+    "condition": "linux",
+    "reason": "Old RCC pull cron replaced by ccc-agent.timer (systemd) or com.ccc.agent.plist (launchd)",
+    "cron_patterns": [
+      "\\.rcc/workspace/deploy/agent-pull\\.sh"
+    ]
+  }
+]

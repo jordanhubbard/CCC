@@ -109,7 +109,7 @@ async fn get_agent_health(
                 "vram_used_mb", "vram_total_mb",
                 "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
                 "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-                "ollama_status", "ollama_models",
+                "ollama_status", "ollama_models", "ccc_version",
             ];
             let mut health = serde_json::Map::new();
             health.insert("agent".into(), json!(agent_name));
@@ -143,7 +143,7 @@ async fn agent_heartbeat(
         "vram_used_mb", "vram_total_mb",
         "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
         "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-        "ollama_status", "ollama_models",
+        "ollama_status", "ollama_models", "ccc_version",
     ];
 
     if let Some(agent_obj) = agents_map.get_mut(&agent_name) {
@@ -225,6 +225,7 @@ async fn register_agent(
         "host": body.get("host").or_else(|| existing.get("host")).and_then(|h| h.as_str()).unwrap_or("unknown"),
         "type": body.get("type").or_else(|| existing.get("type")).and_then(|t| t.as_str()).unwrap_or("full"),
         "version": body.get("version").or_else(|| existing.get("version")).cloned().unwrap_or(json!(null)),
+        "ccc_version": body.get("ccc_version").or_else(|| existing.get("ccc_version")).cloned().unwrap_or(json!(null)),
         "vllm_port": body.get("vllm_port").or_else(|| existing.get("vllm_port")).cloned().unwrap_or(json!(null)),
         "slack_id": body.get("slack_id").or_else(|| existing.get("slack_id")).cloned().unwrap_or(json!(null)),
         "token": token,
@@ -376,7 +377,7 @@ async fn post_heartbeat(
         "vram_used_mb", "vram_total_mb",
         "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
         "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-        "ollama_status", "ollama_models",
+        "ollama_status", "ollama_models", "ccc_version",
     ];
 
     let mut agents = state.agents.write().await;
