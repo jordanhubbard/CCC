@@ -16,7 +16,7 @@ const CCC_URL   = process.env.CCC_URL   || 'http://localhost:8789';
 const CCC_TOKEN = process.env.CCC_AGENT_TOKEN || '';
 const CALLING_AGENT = process.env.AGENT_NAME || 'natasha';
 const STATE_PATH = process.env.WATCHDOG_STATE ||
-  '/home/jkh/.openclaw/workspace/workqueue/state-ccc-watchdog.json';
+  `${process.env.HOME}/.ccc/state-ccc-watchdog.json`;
 const ALERT_AFTER_MS = 30 * 60 * 1000; // 30 minutes
 
 // ── State management ──────────────────────────────────────────────────────────

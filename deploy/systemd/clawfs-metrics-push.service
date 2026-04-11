@@ -1,0 +1,15 @@
+[Unit]
+Description=ClawFS/agentOS Metrics Push — stream Prometheus metrics to ClawBus every 5s
+After=network.target ccc-server.service
+Wants=ccc-server.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node %h/Src/CCC/ccc/scripts/clawfs-metrics-push.mjs
+Restart=always
+RestartSec=15
+# Tokens loaded from environment (set in ~/.ccc/.env or EnvironmentFile)
+EnvironmentFile=-%h/.ccc/.env
+
+[Install]
+WantedBy=multi-user.target

@@ -14,9 +14,9 @@
  *   CCC_LOCAL_URL     — Local CCC metrics endpoint (default http://127.0.0.1:8789)
  */
 
-const TOKEN         = process.env.CCC_AUTH_TOKEN  || '<YOUR_CCC_TOKEN>';
-const BUS_URL       = process.env.CLAWBUS_URL || process.env.SQUIRRELBUS_URL || 'http://100.89.199.14:8788';
-const CCC_LOCAL_URL = process.env.CCC_LOCAL_URL   || 'http://127.0.0.1:8789';
+const TOKEN         = process.env.CCC_AGENT_TOKEN || process.env.CCC_AUTH_TOKEN || '';
+const BUS_URL       = process.env.CLAWBUS_URL || process.env.CCC_URL || 'http://127.0.0.1:8789';
+const CCC_LOCAL_URL = process.env.CCC_LOCAL_URL || 'http://127.0.0.1:8789';
 const INTERVAL_MS   = 5_000;
 
 /**

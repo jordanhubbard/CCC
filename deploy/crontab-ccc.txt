@@ -1,0 +1,14 @@
+# crontab-ccc.txt — CCC ops cron fragment
+# Install with:
+#   WORKSPACE=$HOME/Src/CCC LOG_DIR=$HOME/.ccc/logs
+#   (crontab -l 2>/dev/null; sed "s|WORKSPACE|$WORKSPACE|g; s|LOG_DIR|$LOG_DIR|g" deploy/crontab-ccc.txt) | crontab -
+# Or run setup-node.sh — it installs these automatically.
+
+# CCC API watchdog — check every 10 min, alert on 30+ min outage
+*/10 * * * * /usr/bin/node WORKSPACE/workqueue/scripts/ccc-api-watchdog.mjs >> LOG_DIR/watchdog.log 2>&1
+
+# Stale queue nudge — daily at 9 AM, post to #ops if items stuck >48h
+0 9 * * * /usr/bin/node WORKSPACE/workqueue/scripts/stale-assignee-nudge.mjs >> LOG_DIR/nudge.log 2>&1
+
+# Memory git snapshot — daily at midnight, commit MEMORY.md to git history
+0 0 * * * bash WORKSPACE/scripts/memory-git-commit.sh >> LOG_DIR/memory-commit.log 2>&1

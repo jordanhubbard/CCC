@@ -119,6 +119,32 @@ else
   warn "Unknown platform — install cron manually: bash $PULL_SCRIPT"
 fi
 
+# ── Install ops crons (watchdog, nudge, memory snapshot) ──────────────────
+install_ops_crons() {
+  local CRON_FRAGMENT="$WORKSPACE/deploy/crontab-ccc.txt"
+  if [ ! -f "$CRON_FRAGMENT" ]; then
+    warn "Ops cron fragment not found at $CRON_FRAGMENT — skipping"
+    return
+  fi
+  # Check if already installed (look for a sentinel)
+  if crontab -l 2>/dev/null | grep -q "ccc-api-watchdog.mjs"; then
+    warn "Ops crons already installed — skipping"
+    return
+  fi
+  # Expand WORKSPACE and LOG_DIR placeholders, then append to crontab
+  local EXPANDED
+  EXPANDED=$(sed "s|WORKSPACE|$WORKSPACE|g; s|LOG_DIR|$LOG_DIR|g" "$CRON_FRAGMENT" | grep -v '^#' | grep -v '^$')
+  (crontab -l 2>/dev/null; echo "$EXPANDED") | crontab -
+  success "Ops crons installed (watchdog every 10min, nudge daily 9AM, memory-commit daily midnight)"
+}
+
+info "Installing ops crons..."
+if [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
+  install_ops_crons
+else
+  warn "Unknown platform — install ops crons manually from deploy/crontab-ccc.txt"
+fi
+
 # ── Install node dependencies ─────────────────────────────────────────────
 info "Installing dashboard dependencies..."
 cd "$WORKSPACE/dashboard" && npm install --silent

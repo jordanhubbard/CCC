@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-WORKSPACE="${WORKSPACE:-/home/jkh/.openclaw/workspace}"
+WORKSPACE="${CCC_WORKSPACE:-${WORKSPACE:-${HOME}/Src/CCC}}"
 cd "$WORKSPACE"
 
 # Check we're in a git repo
