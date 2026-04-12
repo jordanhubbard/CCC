@@ -1,11 +1,8 @@
 [workspace]
-members = ["dashboard-server", "dashboard-ui", "ccc-server"]
+members = ["ccc-server"]
 resolver = "2"
 
 [profile.release]
 opt-level = "s"
 lto = true
 codegen-units = 1
-
-[profile.release.package.dashboard-ui]
-opt-level = "z"

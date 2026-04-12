@@ -2,7 +2,6 @@
 
 # Paths
 CLAWCHAT_UI   := ../clawchat
-DASHBOARD_UI  := dashboard-ui
 CCC_SERVER    := ccc-server
 DIST          := $(CLAWCHAT_UI)/dist
 
@@ -75,9 +74,3 @@ clean:
 	cargo clean
 	rm -rf $(DIST)
 
-# ── Legacy: dashboard-server (deprecated) ────────────────────────────────
-# dashboard-server is superseded by ccc-server + DASHBOARD_DIST.
-# These targets remain for reference only.
-build-dashboard-server:
-	@echo "WARNING: dashboard-server is deprecated. Use 'make build-server' instead."
-	cargo build -p dashboard-server
