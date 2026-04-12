@@ -75,7 +75,12 @@ if [ "$FORCE" = false ] && [ ! -f "$AGENT_JSON" ]; then
 fi
 
 [ -d "$WORKSPACE/.git" ] || error "Workspace not a git repo at $WORKSPACE"
-command -v node >/dev/null 2>&1 || error "node is required but not found"
+
+# Prefer the CCC-installed binary; fall back to PATH
+CCC_AGENT="${CCC_AGENT:-$CCC_DIR/bin/ccc-agent}"
+if [ ! -x "$CCC_AGENT" ]; then
+  CCC_AGENT="$(command -v ccc-agent 2>/dev/null || echo "")"
+fi
 
 # ── 2. Git update ─────────────────────────────────────────────────────────
 info "Updating git repo..."
@@ -131,30 +136,20 @@ NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ "$DRY_RUN" = true ]; then
   info "  [DRY-RUN] would update $AGENT_JSON: ccc_version=$CCC_VERSION"
 else
-  if [ -f "$AGENT_JSON" ]; then
-    node -e "
-      try {
-        const f='$AGENT_JSON';
-        const d=JSON.parse(require('fs').readFileSync(f,'utf8'));
-        d.ccc_version='$CCC_VERSION';
-        d.last_upgraded_at='$NOW';
-        d.last_upgraded_version='$CCC_VERSION';
-        require('fs').writeFileSync(f,JSON.stringify(d,null,2)+'\n');
-      } catch(e){ process.stderr.write('agent.json update failed: '+e.message+'\n'); }
-    " 2>&1 || warn "agent.json update failed (non-fatal)"
+  if [ -x "$CCC_AGENT" ]; then
+    if [ -f "$AGENT_JSON" ]; then
+      "$CCC_AGENT" agent upgrade "$AGENT_JSON" --version="$CCC_VERSION" \
+        || warn "agent.json update failed (non-fatal)"
+    else
+      "$CCC_AGENT" agent init "$AGENT_JSON" \
+        --name="${AGENT_NAME:-unknown}" \
+        --host="$(hostname)" \
+        --version="$CCC_VERSION" \
+        --by="upgrade-node.sh (--force)" \
+        || warn "Failed to create agent.json (non-fatal)"
+    fi
   else
-    node -e "
-      require('fs').writeFileSync('$AGENT_JSON', JSON.stringify({
-        schema_version: 1,
-        agent_name: '${AGENT_NAME:-unknown}',
-        host: '$(hostname)',
-        onboarded_at: '$NOW',
-        onboarded_by: 'upgrade-node.sh (--force migration)',
-        ccc_version: '$CCC_VERSION',
-        last_upgraded_at: '$NOW',
-        last_upgraded_version: '$CCC_VERSION'
-      }, null, 2) + '\n');
-    " && chmod 600 "$AGENT_JSON" || warn "Failed to create agent.json (non-fatal)"
+    warn "ccc-agent not found — skipping agent.json update (run migration 0011 to build it)"
   fi
   success "agent.json updated (ccc_version=$CCC_VERSION)"
 fi

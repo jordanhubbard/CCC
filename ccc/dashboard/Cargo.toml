@@ -1,5 +1,5 @@
 [workspace]
-members = ["ccc-server"]
+members = ["ccc-server", "ccc-agent"]
 resolver = "2"
 
 [profile.release]

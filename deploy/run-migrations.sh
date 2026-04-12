@@ -159,6 +159,53 @@ export -f on_platform service_exists systemd_teardown systemd_install launchd_te
 
 export CCC_DIR WORKSPACE LOG_DIR AGENT_NAME PLATFORM DRY_RUN RED GREEN YELLOW BLUE CYAN NC
 
+# ── Migration state backend: ccc-agent (preferred) or python3 (bootstrap fallback) ──
+# ccc-agent is built by migration 0011. Before that migration runs, python3 handles
+# state tracking. After 0011, ccc-agent takes over permanently.
+CCC_AGENT="${CCC_AGENT:-$CCC_DIR/bin/ccc-agent}"
+if [ ! -x "$CCC_AGENT" ]; then
+  CCC_AGENT="$(command -v ccc-agent 2>/dev/null || echo "")"
+fi
+
+is_applied() {
+  local name="$1"
+  if [ -x "$CCC_AGENT" ]; then
+    "$CCC_AGENT" migrate is-applied "$name"
+  else
+    python3 - "$MIGRATIONS_JSON" "$name" << 'PYEOF' 2>/dev/null
+import json, sys
+path, name = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(path))
+    sys.exit(0 if d.get(name, {}).get('status') == 'ok' else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+  fi
+}
+
+record_applied() {
+  local name="$1" status="$2"
+  if [ -x "$CCC_AGENT" ]; then
+    "$CCC_AGENT" migrate record "$name" "$status"
+  else
+    python3 - "$MIGRATIONS_JSON" "$name" "$status" << 'PYEOF' 2>/dev/null
+import json, sys, os
+from datetime import datetime, timezone
+path, name, status = sys.argv[1], sys.argv[2], sys.argv[3]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+try:
+    d = json.load(open(path)) if os.path.exists(path) else {}
+except Exception:
+    d = {}
+d[name] = {'status': status, 'appliedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+PYEOF
+  fi
+}
+
 # ── Load/initialise migrations.json ──────────────────────────────────────
 if [ "$RESET" = true ]; then
   echo "{}" > "$MIGRATIONS_JSON"
@@ -170,28 +217,6 @@ mkdir -p "$(dirname "$MIGRATIONS_JSON")"
 if [ ! -f "$MIGRATIONS_JSON" ]; then
   echo "{}" > "$MIGRATIONS_JSON"
 fi
-
-applied_migrations() {
-  node -e "try { const d=JSON.parse(require('fs').readFileSync('$MIGRATIONS_JSON','utf8')); console.log(JSON.stringify(d)); } catch(e){ console.log('{}'); }" 2>/dev/null || echo "{}"
-}
-
-is_applied() {
-  local name="$1"
-  node -e "try { const d=JSON.parse(require('fs').readFileSync('$MIGRATIONS_JSON','utf8')); process.exit(d['$name'] ? 0 : 1); } catch(e){ process.exit(1); }" 2>/dev/null
-}
-
-record_applied() {
-  local name="$1" status="$2" ts
-  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  node -e "
-    try {
-      const f='$MIGRATIONS_JSON';
-      const d=JSON.parse(require('fs').readFileSync(f,'utf8'));
-      d['$name']={status:'$status',appliedAt:'$ts'};
-      require('fs').writeFileSync(f,JSON.stringify(d,null,2)+'\n');
-    } catch(e){ process.stderr.write('migrations.json update failed: '+e.message+'\n'); }
-  " 2>&1 || true
-}
 
 # ── Discover migrations ───────────────────────────────────────────────────
 if [ ! -d "$MIGRATIONS_DIR" ]; then
@@ -211,17 +236,21 @@ if [ "$LIST_ONLY" = true ]; then
   echo ""
   echo "CCC Migrations — $AGENT_NAME ($PLATFORM)"
   echo "───────────────────────────────────────────────"
-  for f in "${migration_files[@]}"; do
-    name=$(basename "$f" .sh)
-    num="${name%%_*}"
-    desc=$(grep -m1 '^# Description:' "$f" 2>/dev/null | sed 's/# Description: //' || echo "$name")
-    if is_applied "$name" 2>/dev/null; then
-      ts=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('$MIGRATIONS_JSON','utf8'));console.log(d['$name']?.appliedAt||'?');}catch(e){console.log('?');}" 2>/dev/null)
-      echo -e "  ${GREEN}✓${NC} [$num] $desc  (applied $ts)"
-    else
-      echo -e "  ${YELLOW}○${NC} [$num] $desc  (pending)"
-    fi
-  done
+  if [ -x "$CCC_AGENT" ]; then
+    "$CCC_AGENT" migrate list "$MIGRATIONS_DIR"
+  else
+    # python3 fallback for list mode (used before migration 0011 installs ccc-agent)
+    for f in "${migration_files[@]}"; do
+      name=$(basename "$f" .sh)
+      num="${name%%_*}"
+      desc=$(grep -m1 '^# Description:' "$f" 2>/dev/null | sed 's/# Description: //' || echo "$name")
+      if is_applied "$name" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} [$num] $desc"
+      else
+        echo -e "  ${YELLOW}○${NC} [$num] $desc  (pending)"
+      fi
+    done
+  fi
   echo ""
   exit 0
 fi
