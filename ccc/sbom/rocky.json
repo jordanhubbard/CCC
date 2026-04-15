@@ -1,8 +1,8 @@
 {
   "agent": "rocky",
   "version": "1.0.0",
-  "description": "CCC hub node on do-host1 (DigitalOcean) — primary command center",
-  "host": "do-host1",
+  "description": "CCC hub node — primary command center",
+  "host": "hub",
   "os": "linux",
   "packages": {
     "apt": [

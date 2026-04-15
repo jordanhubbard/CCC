@@ -3,7 +3,7 @@
 # Installs the full Leptos/WASM build toolchain on any agent host.
 # Run once. Safe to re-run (idempotent).
 #
-# Tested on: sparky (aarch64/Linux), do-host1 (x86_64/Linux), puck (macOS)
+# Tested on: aarch64/Linux (GPU node), x86_64/Linux (hub), macOS (dev node)
 
 set -euo pipefail
 

@@ -4,17 +4,17 @@
   "data_dir": "./data",
   "auth_tokens": [],
   "minio": {
-    "endpoint": "http://minio.service.consul:9000",
+    "endpoint": "http://localhost:9000",
     "bucket": "agents",
     "access_key": "REPLACE_ME",
     "secret_key": "REPLACE_ME"
   },
   "qdrant": {
-    "url": "http://qdrant.service.consul:6333",
+    "url": "http://localhost:6333",
     "api_key": "REPLACE_ME"
   },
   "tokenhub": {
-    "url": "http://tokenhub.service.consul:8090"
+    "url": "http://localhost:8090"
   },
   "supervisor": {
     "enabled": false,

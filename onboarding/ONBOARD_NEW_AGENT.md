@@ -151,7 +151,7 @@ no FUSE mount, no macFUSE, no JuiceFS installation required on agent nodes.
 
 **Verify the gateway is reachable from your agent:**
 ```bash
-curl -s http://do-host1.service.consul:9100/  # should return S3 XML
+curl -s "${CCC_MINIO_URL}/agents/"  # should return S3 XML; CCC_MINIO_URL from ~/.ccc/.env
 ```
 
 **For GPU nodes serving vLLM** — models are downloaded locally to `~/models/` on first

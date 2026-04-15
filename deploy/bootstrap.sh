@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 # bootstrap.sh — One-command agent bootstrap from CCC
-# Installs OpenClaw, seeds workspace, configures agent identity, starts daemon.
+# Installs hermes-agent, seeds workspace, configures agent identity.
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/deploy/bootstrap.sh | \
 #     bash -s -- --ccc=http://<your-ccc-hub-url>:8789 --token=<bootstrap-token> --agent=boris
 #
-# NOTE: Port 8789 is the OpenClaw gateway (CCC API). Port 8788 is the workqueue dashboard.
-# Use 8789 for --ccc. If you have a pre-known agent token, pass --agent-token=<token> to skip
-# the bootstrap API call (useful if the API is down or the token is already known).
-#
-# All secrets (NVIDIA key, Mattermost token, etc.) are fetched automatically
-# from CCC via the bootstrap token. No --nvidia-key or channel tokens needed.
+# If you have a pre-known agent token, pass --agent-token=<token> to skip the bootstrap API call.
+# All secrets (NVIDIA key, channel tokens, etc.) are fetched automatically from CCC.
 set -euo pipefail
 
 CCC=""
@@ -58,7 +54,6 @@ echo ""
 
 # ── 0. Clean slate (safe) ────────────────────────────────────────────────
 info "Cleaning up previous install..."
-pkill -f "openclaw.*gateway" 2>/dev/null || true
 
 # Back up .ccc/.env before wiping — we restore it if bootstrap fails
 ENV_BACKUP=""
@@ -68,11 +63,10 @@ if [[ -f "$HOME/.ccc/.env" ]]; then
   info "Backed up existing .env to $ENV_BACKUP"
 fi
 
-# Remove old directories but NOT .env backup (we restore below on failure)
-rm -rf "$HOME/.openclaw" "$HOME/.ccc" 2>/dev/null || true
+rm -rf "$HOME/.ccc" 2>/dev/null || true
 success "Clean slate ready"
 
-# Trap: restore .env backup if we exit unexpectedly before step 8
+# Trap: restore .env backup if we exit unexpectedly before step 7
 _restore_env_on_failure() {
   local code=$?
   if [[ $code -ne 0 && -n "$ENV_BACKUP" && -f "$ENV_BACKUP" ]]; then
@@ -92,7 +86,7 @@ for dep in git curl; do
 done
 success "Core dependencies present"
 
-# ── JSON helper — ccc-agent preferred, python3 fallback (bootstrap runs before migrations) ──
+# ── JSON helper — ccc-agent preferred, python3 fallback ──────────────────
 _CCC_DIR="${HOME}/.ccc"
 CCC_AGENT="${CCC_AGENT:-$_CCC_DIR/bin/ccc-agent}"
 [ ! -x "$CCC_AGENT" ] && CCC_AGENT="$(command -v ccc-agent 2>/dev/null || echo "")"
@@ -116,19 +110,7 @@ PYEOF
   fi
 }
 
-# ── 2. Install OpenClaw ───────────────────────────────────────────────────
-if command -v openclaw &>/dev/null; then
-  success "OpenClaw already installed ($(openclaw --version 2>/dev/null || echo 'version unknown'))"
-else
-  info "Installing OpenClaw..."
-  curl -fsSL https://openclaw.ai/install.sh | bash
-  # Reload PATH in case openclaw was just added
-  export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
-  command -v openclaw &>/dev/null || error "OpenClaw install failed — openclaw not found in PATH"
-  success "OpenClaw installed"
-fi
-
-# ── 2b. Install Hermes Agent (standard runtime) ──────────────────────────
+# ── 2. Install Hermes Agent ───────────────────────────────────────────────
 if command -v hermes &>/dev/null; then
   success "Hermes agent already installed ($(hermes --version 2>/dev/null || echo 'version unknown'))"
 else
@@ -165,20 +147,17 @@ CCC_URL="${CCC}"  # default to the --ccc URL; may be overridden by API response
 DEPLOY_KEY=""
 
 if [[ -n "$AGENT_TOKEN_OVERRIDE" ]]; then
-  # Skip bootstrap API call — use the provided token directly
   AGENT_TOKEN="$AGENT_TOKEN_OVERRIDE"
   info "Using pre-provided agent token (skipping bootstrap API call)"
   success "Agent token set from --agent-token"
 else
   info "Consuming bootstrap token..."
   BOOTSTRAP_RESP=$(curl -sf "${CCC}/api/bootstrap?token=${TOKEN}" 2>&1) || true
-  # Verify it looks like JSON (not an error page or empty)
   if echo "$BOOTSTRAP_RESP" | grep -q '"ok":true'; then
     BOOTSTRAP_JSON="$BOOTSTRAP_RESP"
   fi
 
   if [[ -z "$BOOTSTRAP_JSON" ]]; then
-    # If we have a previous .env with a working token, offer to use it
     if [[ -n "$ENV_BACKUP" ]]; then
       PREV_TOKEN=$(grep '^CCC_AGENT_TOKEN=' "$ENV_BACKUP" 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
       if [[ -n "$PREV_TOKEN" ]]; then
@@ -188,10 +167,9 @@ else
       fi
     fi
     if [[ -z "$AGENT_TOKEN" ]]; then
-      error "Bootstrap API call failed or returned invalid response.\nResponse: ${BOOTSTRAP_RESP:-<empty>}\nCheck that CCC is reachable at ${CCC} (port 8788) and the token is valid/unexpired.\nAlternatively, pass --agent-token=<known-token> to skip the API call."
+      error "Bootstrap API call failed or returned invalid response.\nResponse: ${BOOTSTRAP_RESP:-<empty>}\nCheck that CCC is reachable at ${CCC} and the token is valid/unexpired.\nAlternatively, pass --agent-token=<known-token> to skip the API call."
     fi
   else
-    # Parse core fields from bootstrap JSON response
     REPO_URL=$(echo    "$BOOTSTRAP_JSON" | _json_get .repoUrl)
     AGENT_TOKEN=$(echo "$BOOTSTRAP_JSON" | _json_get .agentToken)
     CCC_URL=$(echo     "$BOOTSTRAP_JSON" | _json_get .cccUrl)
@@ -205,9 +183,6 @@ else
 fi
 
 # ── 4b. Extract secrets from bootstrap response ───────────────────────────
-# The bootstrap API returns the full secrets bundle. Extract what we need now
-# so openclaw.json can be written correctly in step 7. CLI args take precedence
-# if explicitly provided (for testing/overrides); otherwise use CCC secrets.
 info "Extracting secrets from bootstrap response..."
 [[ -z "$NVIDIA_KEY"     ]] && NVIDIA_KEY=$(echo    "$BOOTSTRAP_JSON" | _json_get .secrets.NVIDIA_API_KEY     .secrets.nvidia_api_key)
 [[ -z "$TOKENHUB_URL"   ]] && TOKENHUB_URL=$(echo  "$BOOTSTRAP_JSON" | _json_get .secrets.TOKENHUB_URL       .secrets.tokenhub_url)
@@ -234,7 +209,7 @@ fi
 if [[ -n "$NVIDIA_KEY" ]]; then
   success "NVIDIA API key obtained from CCC secrets"
 else
-  warn "No NVIDIA_API_KEY in CCC secrets — will use anthropic direct (set ANTHROPIC_API_KEY in env)"
+  warn "No NVIDIA_API_KEY in CCC secrets — configure ANTHROPIC_API_KEY in .env if needed"
 fi
 
 # ── 5. Deploy key + SSH config ────────────────────────────────────────────
@@ -260,163 +235,13 @@ SSHEOF
   success "Deploy key installed"
 fi
 
-# ── 6. Seed OpenClaw workspace ────────────────────────────────────────────
-OC_WORKSPACE="$HOME/.openclaw/workspace"
-info "Seeding OpenClaw workspace at $OC_WORKSPACE..."
-mkdir -p "$OC_WORKSPACE/memory/people" "$OC_WORKSPACE/skills"
-
-# Copy shared files from repo
-SHARED_DIR="$CCC_WORKSPACE/openclaw/shared"
-if [[ -d "$SHARED_DIR" ]]; then
-  cp "$SHARED_DIR/AGENTS.md" "$OC_WORKSPACE/AGENTS.md" 2>/dev/null || true
-fi
-
-# Copy agent soul if it exists; otherwise stub it
-SOUL_SRC="$CCC_WORKSPACE/openclaw/souls/${AGENT}.md"
-if [[ -f "$SOUL_SRC" ]]; then
-  cp "$SOUL_SRC" "$OC_WORKSPACE/SOUL.md"
-  success "Soul loaded from repo: openclaw/souls/${AGENT}.md"
-else
-  warn "No soul file found for '${AGENT}' in repo — creating stub (edit $OC_WORKSPACE/SOUL.md)"
-  cat > "$OC_WORKSPACE/SOUL.md" <<SOULEOF
-# SOUL.md - Who You Are
-
-Your name is ${AGENT^}. You are a member of the Rocky & Friends agent crew.
-
-Edit this file to define your personality, role, and voice.
-Refer to rocky.md or natasha.md in openclaw/souls/ for examples.
-SOULEOF
-fi
-
-# Bootstrap IDENTITY.md
-cat > "$OC_WORKSPACE/IDENTITY.md" <<IDEOF
-# IDENTITY.md - Who Am I?
-
-- **Name:** ${AGENT^}
-- **Agent:** ${AGENT}
-- **CCC:** ${CCC_URL}
-IDEOF
-
-# Bootstrap MEMORY.md if not present
-[[ -f "$OC_WORKSPACE/MEMORY.md" ]] || cat > "$OC_WORKSPACE/MEMORY.md" <<MEMEOF
-# MEMORY.md - Long-Term Memory
-
-## Identity
-- My name is ${AGENT^}. I am a member of the Rocky & Friends agent crew.
-- CCC hub: ${CCC_URL}
-MEMEOF
-
-# Bootstrap HEARTBEAT.md
-[[ -f "$OC_WORKSPACE/HEARTBEAT.md" ]] || cat > "$OC_WORKSPACE/HEARTBEAT.md" <<HBEOF
-# HEARTBEAT.md
-
-# Standard heartbeat. Check queue and CCC health each beat.
-HBEOF
-
-success "OpenClaw workspace seeded"
-
-# ── 7. Write openclaw.json ────────────────────────────────────────────────
-OC_CONFIG="$HOME/.openclaw/openclaw.json"
-info "Writing OpenClaw config..."
-mkdir -p "$HOME/.openclaw"
-
-# Build channel config fragments
-TELEGRAM_FRAGMENT=""
-if [[ -n "$TELEGRAM_TOKEN" ]]; then
-  TELEGRAM_FRAGMENT=$(cat <<TGEOF
-    "telegram": {
-      "enabled": true,
-      "token": "${TELEGRAM_TOKEN}"
-    }
-TGEOF
-)
-fi
-
-SLACK_FRAGMENT=""
-if [[ -n "$SLACK_BOT_TOKEN" ]]; then
-  SLACK_FRAGMENT=$(cat <<SLKEOF
-    "slack": {
-      "enabled": true,
-      "mode": "socket",
-      "botToken": "${SLACK_BOT_TOKEN}",
-      "appToken": "${SLACK_APP_TOKEN}",
-      "streaming": "partial",
-      "nativeStreaming": true
-    }
-SLKEOF
-)
-fi
-
-# Determine model config — use NVIDIA gateway if key provided, else anthropic direct
-if [[ -n "$NVIDIA_KEY" ]]; then
-  MODEL_PROVIDER_JSON=$(cat <<MODEOF
-      "nvidia": {
-        "baseUrl": "https://inference-api.nvidia.com/v1",
-        "apiKey": "${NVIDIA_KEY}",
-        "api": "openai-completions",
-        "models": [
-          {
-            "id": "azure/anthropic/claude-sonnet-4-6",
-            "name": "Claude Sonnet 4.6 (NVIDIA)",
-            "api": "openai-completions",
-            "contextWindow": 200000,
-            "maxTokens": 8192
-          }
-        ]
-      }
-MODEOF
-)
-  DEFAULT_MODEL="nvidia/azure/anthropic/claude-sonnet-4-6"
-else
-  MODEL_PROVIDER_JSON='{}'
-  DEFAULT_MODEL="anthropic/claude-sonnet-4-6"
-  warn "No NVIDIA_API_KEY in secrets or args — defaulting to anthropic direct. Set ANTHROPIC_API_KEY in env or add nvidia/api_key to CCC secrets."
-fi
-
-cat > "$OC_CONFIG" <<OCEOF
-{
-  "meta": {
-    "lastTouchedVersion": "2026.3.8",
-    "lastTouchedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  },
-  "gateway": {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18789,
-    "auth": {
-      "mode": "none"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "workspace": "${OC_WORKSPACE}",
-      "model": "${DEFAULT_MODEL}"
-    }
-  },
-  "ui": {
-    "assistant": {
-      "name": "${AGENT^}",
-      "avatar": "🤖"
-    }
-  },
-  "models": {
-    "providers": {
-      ${MODEL_PROVIDER_JSON}
-    }
-  },
-  "channels": {
-    ${SLACK_FRAGMENT}${SLACK_FRAGMENT:+,}${TELEGRAM_FRAGMENT}
-  }
-}
-OCEOF
-success "openclaw.json written"
-
-# ── 8. Write ~/.ccc/.env ──────────────────────────────────────────────────
+# ── 6. Write ~/.ccc/.env ──────────────────────────────────────────────────
 info "Writing ~/.ccc/.env..."
 mkdir -p "$HOME/.ccc"
 ENV_FILE="$HOME/.ccc/.env"
 touch "$ENV_FILE"
-for key in AGENT_NAME CCC_AGENT_TOKEN CCC_URL AGENT_HOST NVIDIA_API_KEY NVIDIA_API_BASE; do
+for key in AGENT_NAME CCC_AGENT_TOKEN CCC_URL AGENT_HOST NVIDIA_API_KEY NVIDIA_API_BASE \
+           SLACK_BOT_TOKEN SLACK_APP_TOKEN TELEGRAM_BOT_TOKEN; do
   sed -i "/^${key}=/d" "$ENV_FILE" 2>/dev/null || true
 done
 cat >> "$ENV_FILE" <<ENVEOF
@@ -427,12 +252,17 @@ AGENT_HOST=$(hostname)
 NVIDIA_API_BASE=https://inference-api.nvidia.com/v1
 NVIDIA_API_KEY=${NVIDIA_KEY}
 # TokenHub — preferred inference router (aggregates local vLLM + NVIDIA NIM)
-TOKENHUB_URL=${TOKENHUB_URL:-http://tokenhub.service.consul:8090}
+TOKENHUB_URL=${TOKENHUB_URL:-http://localhost:8090}
 TOKENHUB_AGENT_KEY=${TOKENHUB_KEY}
 ENVEOF
+
+# Write channel tokens if obtained
+[[ -n "$SLACK_BOT_TOKEN"  ]] && echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}"   >> "$ENV_FILE"
+[[ -n "$SLACK_APP_TOKEN"  ]] && echo "SLACK_APP_TOKEN=${SLACK_APP_TOKEN}"   >> "$ENV_FILE"
+[[ -n "$TELEGRAM_TOKEN"   ]] && echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}" >> "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
-# ── 8 smoke test: verify critical vars are non-empty ─────────────────────
+# Smoke test: verify critical vars are non-empty
 _env_val() { grep "^${1}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d '"' || true; }
 _SMOKE_OK=true
 for _VAR in AGENT_NAME CCC_AGENT_TOKEN CCC_URL; do
@@ -445,13 +275,10 @@ done
 if [[ "$_SMOKE_OK" == true ]]; then
   success "~/.ccc/.env written and smoke-tested (all critical vars non-empty)"
 else
-  # Don't exit — secrets may be written in 8b. But flag it.
   warn "~/.ccc/.env has empty critical vars — check the file before using this agent"
 fi
 
-# ── 8b. Write full secrets bundle to .env ────────────────────────────────
-# Secrets were already fetched as part of the bootstrap response in step 4b.
-# Write all flat string secrets to .env now. Never overwrites identity keys.
+# ── 6b. Write full secrets bundle to .env ────────────────────────────────
 info "Writing secrets bundle to .env..."
 if [ -x "$CCC_AGENT" ]; then
   echo "$BOOTSTRAP_JSON" | "$CCC_AGENT" json env-merge .secrets "$ENV_FILE" \
@@ -482,102 +309,24 @@ PYEOF
   success "Secrets bundle written to .env"
 fi
 
-# ── 9. Start OpenClaw gateway ────────────────────────────────────────────
-info "Starting OpenClaw gateway..."
-
-# Kill any stale gateway process
-pkill -f "openclaw.*gateway" 2>/dev/null || true
-sleep 1
-
-# ── Set gateway.mode=local (required for agent operation) ─────────────────
-openclaw config set gateway.mode local 2>/dev/null || true
-
-_gateway_running() {
-  curl -sf http://127.0.0.1:18789/health > /dev/null 2>&1
-}
-
-# ── 9a. Try systemd user service (works on full Linux hosts) ──────────────
-if systemctl --user status &>/dev/null 2>&1; then
-  if command -v loginctl &>/dev/null; then
-    sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
-  fi
-  if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
-    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-    mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
-  fi
-  openclaw gateway start --daemon 2>/dev/null && sleep 2 || true
-  if _gateway_running; then
-    success "OpenClaw gateway started (systemd)"
-  fi
-fi
-
-# ── 9b. tmux fallback (containers / no-systemd) ───────────────────────────
-if ! _gateway_running; then
-  if ! command -v tmux &>/dev/null; then
-    info "Installing tmux..."
-    sudo apt-get install -y -q tmux 2>/dev/null || sudo yum install -y -q tmux 2>/dev/null || true
-  fi
-  if command -v tmux &>/dev/null; then
-    tmux kill-session -t openclaw 2>/dev/null || true
-    tmux new-session -d -s openclaw "openclaw gateway run --allow-unconfigured"
-    sleep 3
-    if _gateway_running; then
-      success "OpenClaw gateway started (tmux session 'openclaw')"
-    else
-      warn "tmux session started but gateway not responding — check: tmux attach -t openclaw"
-    fi
-  fi
-fi
-
-# ── 9c. nohup last resort ─────────────────────────────────────────────────
-if ! _gateway_running; then
-  mkdir -p /tmp/openclaw
-  nohup openclaw gateway run --allow-unconfigured > /tmp/openclaw/gateway.log 2>&1 &
-  sleep 3
-  if _gateway_running; then
-    success "OpenClaw gateway started (nohup)"
-  else
-    warn "Gateway failed to start — check /tmp/openclaw/gateway.log"
-  fi
-fi
-
-# ── 9d. Persist autostart in .bashrc (survives container restarts) ────────
-# For containers with persistent home dirs, wire gateway autostart into .bashrc
-# so it comes back on the next interactive session / container restart.
-PROFILE="$HOME/.bashrc"
-AUTOSTART_MARKER="# openclaw-gateway-autostart"
-if ! grep -q "$AUTOSTART_MARKER" "$PROFILE" 2>/dev/null; then
-  cat >> "$PROFILE" <<'AUTOSTART'
-# openclaw-gateway-autostart
-# Started by bootstrap.sh — restarts gateway if not already running
-if command -v openclaw &>/dev/null; then
-  if ! curl -sf http://127.0.0.1:18789/health >/dev/null 2>&1; then
-    if command -v tmux &>/dev/null && ! tmux has-session -t openclaw 2>/dev/null; then
-      tmux new-session -d -s openclaw "openclaw gateway run --allow-unconfigured" 2>/dev/null || true
-    elif ! pgrep -f "openclaw.*gateway" >/dev/null 2>&1; then
-      nohup openclaw gateway run --allow-unconfigured > /tmp/openclaw/gateway.log 2>&1 &
-    fi
-  fi
-fi
-AUTOSTART
-  success "Gateway autostart wired into .bashrc (survives container restarts)"
-fi
-
-# ── 9e. Install agentfs-sync ──────────────────────────────────────────────
+# ── 7. Install agentfs-sync ───────────────────────────────────────────────
 AGENTFS_BIN="/usr/local/bin/agentfs-sync"
 AGENTFS_SVC="/etc/systemd/system/agentfs-sync.service"
 AGENTFS_SVC_SRC="$CCC_WORKSPACE.ccc/agentfs-sync/agentfs-sync.service"
 
 if [[ ! -f "$AGENTFS_BIN" ]]; then
-  info "Downloading agentfs-sync from MinIO..."
-  # Use public MinIO endpoint — override CCC_MINIO_URL in .env for non-default fleets
-  _AGENTFS_URL="${CCC_MINIO_URL:-http://do-host1.service.consul:9000}/agents/shared/bin/agentfs-sync"
-  if curl -sf --max-time 30 -o /tmp/agentfs-sync "$_AGENTFS_URL" 2>/dev/null; then
-    sudo install -m 755 /tmp/agentfs-sync "$AGENTFS_BIN"
-    rm -f /tmp/agentfs-sync
-    success "agentfs-sync installed from MinIO"
+  if [[ -z "${CCC_MINIO_URL:-}" ]]; then
+    warn "CCC_MINIO_URL not set — skipping agentfs-sync download (set it in .env if needed)"
   else
-    warn "agentfs-sync not yet deployed to MinIO — run after first build"
+    info "Downloading agentfs-sync from MinIO..."
+    _AGENTFS_URL="${CCC_MINIO_URL}/agents/shared/bin/agentfs-sync"
+    if curl -sf --max-time 30 -o /tmp/agentfs-sync "$_AGENTFS_URL" 2>/dev/null; then
+      sudo install -m 755 /tmp/agentfs-sync "$AGENTFS_BIN"
+      rm -f /tmp/agentfs-sync
+      success "agentfs-sync installed from MinIO"
+    else
+      warn "agentfs-sync not available at MinIO — run after first build"
+    fi
   fi
 fi
 
@@ -595,30 +344,18 @@ if [[ -f "$AGENTFS_BIN" ]]; then
   fi
 fi
 
-# ── 9f. Install openclaw-register service ────────────────────────────────
-REGISTER_SVC="/etc/systemd/system/openclaw-register.service"
-REGISTER_SVC_SRC="$CCC_WORKSPACE.ccc/scripts/openclaw-register.service"
-
-if [[ -f "$REGISTER_SVC_SRC" ]]; then
-  info "Installing openclaw-register systemd service..."
-  mkdir -p "$HOME/.ccc/logs"
-  sed "s/AGENT_USER/$(whoami)/g" "$REGISTER_SVC_SRC" | sudo tee "$REGISTER_SVC" > /dev/null
-  sudo systemctl daemon-reload
-  sudo systemctl enable openclaw-register
-  sudo systemctl restart openclaw-register 2>/dev/null || sudo systemctl start openclaw-register 2>/dev/null || true
-  success "openclaw-register service enabled and started"
-else
-  warn "openclaw-register.service not found in workspace — skipping (run after pulling latest)"
+# ── 8. vLLM (GPU nodes only) ──────────────────────────────────────────────
+GPU_COUNT=0
+if command -v nvidia-smi &>/dev/null; then
+  GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l || echo 0)
 fi
 
-# ── 9g. vLLM setup (GPU nodes only) ──────────────────────────────────────
 if [[ ${GPU_COUNT:-0} -gt 0 ]]; then
   info "GPU detected — setting up vLLM model serving..."
   VLLM_MODEL="${VLLM_MODEL:-google/gemma-4-31B-it}"
   VLLM_SERVED_NAME="${VLLM_SERVED_NAME:-gemma}"
   VLLM_PORT="${VLLM_PORT:-8000}"
 
-  # Determine model path: local cache > HuggingFace download
   if [[ -d "$HOME/models/$(basename $VLLM_MODEL)" ]]; then
     VLLM_MODEL_PATH="$HOME/models/$(basename $VLLM_MODEL)"
     success "Model found locally: $VLLM_MODEL_PATH"
@@ -627,20 +364,17 @@ if [[ ${GPU_COUNT:-0} -gt 0 ]]; then
     info "Model not cached — vLLM will download from HuggingFace on first start"
   fi
 
-  # Install vLLM if not present
   if ! command -v vllm &>/dev/null && ! python3 -c "import vllm" 2>/dev/null; then
     info "Installing vLLM..."
     pip3 install vllm 2>/dev/null && success "vLLM installed" || warn "vLLM install failed — install manually: pip3 install vllm"
   fi
 
-  # Determine extra args (tensor parallel for multi-GPU)
   VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
   if [[ ${GPU_COUNT} -gt 1 && -z "$VLLM_EXTRA_ARGS" ]]; then
     VLLM_EXTRA_ARGS="--tensor-parallel-size ${GPU_COUNT}"
     info "Multi-GPU detected: adding $VLLM_EXTRA_ARGS"
   fi
 
-  # Write vLLM vars to .env
   for key in VLLM_ENABLED VLLM_MODEL VLLM_SERVED_NAME VLLM_PORT VLLM_MODEL_PATH VLLM_EXTRA_ARGS; do
     sed -i "/^${key}=/d" "$ENV_FILE" 2>/dev/null || true
   done
@@ -653,19 +387,17 @@ VLLM_MODEL_PATH=${VLLM_MODEL_PATH}
 VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS}
 VLLMENV
 
-  # Start vLLM
   if python3 -c "import vllm" 2>/dev/null; then
     _vllm_running() { curl -sf "http://127.0.0.1:${VLLM_PORT}/v1/models" > /dev/null 2>&1; }
 
     if _vllm_running; then
       success "vLLM already running on port ${VLLM_PORT}"
     elif command -v systemctl &>/dev/null && [[ "$(uname)" == "Linux" ]]; then
-      # Install systemd unit
       VLLM_SVC="/etc/systemd/system/vllm-${AGENT}.service"
       cat > /tmp/vllm.service <<VLLMSVC
 [Unit]
 Description=vLLM model server for ${AGENT}
-After=network-online.target clawfs-${AGENT}.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -685,7 +417,6 @@ VLLMSVC
       sudo systemctl start "vllm-${AGENT}" 2>/dev/null || true
       success "vLLM systemd service installed and started"
     else
-      # tmux fallback
       tmux kill-session -t vllm 2>/dev/null || true
       tmux new-session -d -s vllm "python3 -m vllm.entrypoints.openai.api_server --model ${VLLM_MODEL_PATH} --served-model-name ${VLLM_SERVED_NAME} --port ${VLLM_PORT} ${VLLM_EXTRA_ARGS}"
       success "vLLM started (tmux session 'vllm')"
@@ -699,49 +430,38 @@ else
   echo "VLLM_ENABLED=false" >> "$ENV_FILE"
 fi
 
-# ── 9i. Install Hermes skills + migrate OpenClaw ─────────────────────────
+# ── 9. Install Hermes skills ──────────────────────────────────────────────
 if command -v hermes &>/dev/null; then
   info "Configuring Hermes agent..."
   mkdir -p "$HOME/.hermes/skills"
-  # Install ccc-node skill
   if [[ -d "$CCC_WORKSPACE/skills/ccc-node" ]]; then
     cp -r "$CCC_WORKSPACE/skills/ccc-node/" "$HOME/.hermes/skills/ccc-node/"
     success "CCC-node skill installed into Hermes"
   fi
-  # Migrate OpenClaw config if present
-  if [[ -d "$HOME/.openclaw" ]]; then
-    hermes claw migrate 2>/dev/null && success "OpenClaw config migrated to Hermes" || true
-  fi
 fi
 
-# ── 10. Hardware fingerprint + heartbeat ─────────────────────────────────
+# ── 10. Hardware fingerprint + heartbeat ──────────────────────────────────
 info "Collecting hardware fingerprint..."
 
-# GPU info via nvidia-smi
-GPU_COUNT=0
 GPU_MODEL=""
 GPU_VRAM_GB=0
 if command -v nvidia-smi &>/dev/null; then
-  GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l || echo 0)
   GPU_MODEL=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | tr -d '\n' || echo "")
   GPU_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | \
     awk '{s+=$1} END {print int(s)}' || echo 0)
   GPU_VRAM_GB=$(( GPU_VRAM_MB / 1024 ))
 fi
 
-# CPU info
 CPU_CORES=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 0)
 CPU_MODEL=$(grep 'model name' /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | sed 's/^ *//' || echo "unknown")
 CPU_ARCH=$(uname -m 2>/dev/null || echo "unknown")
 
-# RAM
 RAM_GB=0
 if [[ -r /proc/meminfo ]]; then
   RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
   RAM_GB=$(( RAM_KB / 1024 / 1024 ))
 fi
 
-# Disk free on home
 DISK_FREE_GB=$(df -BG "$HOME" 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G' || echo 0)
 
 HW_JSON=$(cat <<HWEOF
@@ -772,7 +492,6 @@ curl -s -X POST "${CCC_URL}/api/heartbeat/${AGENT}" \
     \"hardware\":${HW_JSON}
   }" > /dev/null || warn "Heartbeat post failed (non-fatal)"
 
-# Also PATCH agent record with real hardware data so CCC dashboard is accurate
 curl -s -X PATCH "${CCC_URL}/api/agents/${AGENT}" \
   -H "Authorization: Bearer ${AGENT_TOKEN}" \
   -H "Content-Type: application/json" \
@@ -826,7 +545,6 @@ else
 fi
 
 # ── 11. Done ──────────────────────────────────────────────────────────────
-# Clear the failure trap — we succeeded
 trap - EXIT
 [[ -n "${ENV_BACKUP:-}" && -f "${ENV_BACKUP:-/dev/null}" ]] && rm -f "$ENV_BACKUP"
 
@@ -834,17 +552,8 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "${GREEN}✅ Bootstrap complete!${NC} ${AGENT^} is alive."
 echo ""
-echo "  OpenClaw workspace:  ${OC_WORKSPACE}"
-echo "  OpenClaw config:     ${OC_CONFIG}"
-echo "  CCC workspace:       ${CCC_WORKSPACE}"
-echo "  CCC env:             ${HOME}/.ccc/.env"
+echo "  CCC workspace:  ${CCC_WORKSPACE}"
+echo "  CCC env:        ${HOME}/.ccc/.env"
 echo ""
-if [[ -z "$TELEGRAM_TOKEN" ]]; then
-  echo -e "${YELLOW}  ⚠ No messaging channels configured.${NC}"
-  echo "    Add TELEGRAM_BOT_TOKEN to CCC secrets and re-bootstrap,"
-  echo "    OR edit openclaw.json and run: openclaw gateway restart"
-  echo ""
-fi
-echo "  Next: edit ${OC_WORKSPACE}/SOUL.md to give ${AGENT^} a personality."
-echo "  Then: openclaw gateway status"
+echo "  Next: hermes gateway   (starts the agent runtime)"
 echo ""

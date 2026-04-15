@@ -38,7 +38,7 @@ while routing bulk inference to fixed-cost providers?"**
 - Produces: `/v1/chat/completions`, `/v1/models` — OpenAI-compatible API
 
 ### 3. CCC Central Command
-- Running on: do-host1 (146.190.134.110)
+- Running on: hub node (CCC server host)
 - Has: Public IP, port management, ClawBus, work queue, UI
 - Does: Coordinates consumers ↔ providers, human ↔ agent interface
 - Acts as: Registry, router hint, heartbeat monitor

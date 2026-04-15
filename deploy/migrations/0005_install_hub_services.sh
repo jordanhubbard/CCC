@@ -2,7 +2,7 @@
 #
 # Context: Hub nodes run the main ccc-server (Rust/Axum) and the dashboard frontend.
 # Hub detection: HUB_NODE=true in .env, or IS_HUB=true, or ccc-server is in /usr/local/bin.
-# Only runs on Linux since hub is always do-host1 (Ubuntu).
+# Only runs on Linux since hub nodes run Ubuntu/Debian.
 
 if ! on_platform linux; then return 0; fi
 

@@ -283,7 +283,7 @@ VLLM_EXTRA_ARGS=${VLLM_EXTRA_ARGS:-}
 NVIDIA_API_BASE=https://inference-api.nvidia.com/v1
 NVIDIA_API_KEY=${NVIDIA_API_KEY}
 # TokenHub — preferred inference router (aggregates local vLLM + NVIDIA NIM)
-TOKENHUB_URL=http://tokenhub.service.consul:8090
+TOKENHUB_URL=http://localhost:8090
 TOKENHUB_AGENT_KEY=${TOKENHUB_API_KEY:-}
 TOKENHUB_ADMIN_TOKEN=${TOKENHUB_ADMIN_TOKEN:-}
 

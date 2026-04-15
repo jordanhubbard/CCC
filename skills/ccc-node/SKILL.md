@@ -1,6 +1,6 @@
 ---
 name: ccc-node
-description: Connect this agent to the CCC (Command and Control Center) fleet. Handles ClawBus registration, heartbeat, remote exec dispatch, and workqueue lifecycle. Use when setting up a new agent node, checking fleet connectivity, or managing workqueue items via Rocky's CCC API.
+description: Connect this agent to the CCC (Command and Control Center) fleet. Handles ClawBus registration, heartbeat, remote exec dispatch, and workqueue lifecycle. Use when setting up a new agent node, checking fleet connectivity, or managing workqueue items via the CCC API.
 version: 1.0.0
 platforms: [linux, macos]
 metadata:
@@ -9,25 +9,25 @@ metadata:
     category: infrastructure
 required_environment_variables:
   - name: CCC_URL
-    prompt: "CCC API base URL (e.g. http://100.89.199.14:8789 for Tailscale, http://146.190.134.110:8789 for Sweden direct)"
-    help: "puck/Bullwinkle + sparky/Natasha: use Tailscale IP http://100.89.199.14:8789. Sweden containers (no Tailscale): use direct IP http://146.190.134.110:8789."
+    prompt: "CCC API base URL (e.g. http://<hub-ip>:8789 or Tailscale URL from CCC_TAILSCALE_URL)"
+    help: "Set to the URL your CCC admin provided. Check ~/.ccc/.env for CCC_URL. If unreachable, try CCC_TAILSCALE_URL."
     required_for: all CCC operations
   - name: CCC_AGENT_TOKEN
     prompt: "CCC agent bearer token (ccc-agent-<name>-<hex>)"
-    help: "Pull from Rocky's secrets store: GET /api/secrets/<agentname>_ccc_token"
+    help: "Provided by your CCC admin at onboarding. Stored in ~/.ccc/.env as CCC_AGENT_TOKEN."
     required_for: authenticated API calls
   - name: AGENT_NAME
     prompt: "This agent's name (e.g. bullwinkle, natasha)"
-    help: "Lowercase, matches the name registered in Rocky's CCC fleet."
+    help: "Lowercase, matches the name registered in the CCC fleet."
     required_for: heartbeat and workqueue routing
 ---
 
 # CCC Node
 
-Connects a Hermes agent to the CCC fleet running on Rocky (do-host1, 146.190.134.110).
+Connects a Hermes agent to the CCC fleet.
 
-CCC = the Command and Control Center. Rocky runs the CCC server (`ccc-server`, Rust/Axum).
-ClawBus is the SquirrelBus-based message bus. All fleet coordination goes through Rocky.
+CCC = the Command and Control Center. The hub runs `ccc-server` (Rust/Axum) on port 8789.
+ClawBus is the inter-agent message bus. All fleet coordination goes through the hub.
 
 ## When to Use
 
@@ -35,12 +35,12 @@ ClawBus is the SquirrelBus-based message bus. All fleet coordination goes throug
 - Checking whether this agent is registered and heartbeating
 - Pulling or completing workqueue items
 - Sending or receiving ClawBus messages
-- Diagnosing connectivity to Rocky
+- Diagnosing connectivity to the hub
 
 ## Architecture
 
 ```
-Agent (you) ──HTTP──▶ Rocky CCC API (http://146.190.134.110:8789)
+Agent (you) ──HTTP──▶ CCC Hub ($CCC_URL)
                          ├── /api/heartbeat/<name>    POST — heartbeat
                          ├── /api/workqueue           GET — pull items
                          ├── /api/workqueue/<id>      PATCH — update status
@@ -51,10 +51,9 @@ Agent (you) ──HTTP──▶ Rocky CCC API (http://146.190.134.110:8789)
 
 All requests require `Authorization: Bearer $CCC_AGENT_TOKEN`.
 
-**Network note:** Rocky's CCC API is NOT on the public internet — it's on the internal interface.
-- From puck (Bullwinkle): reach via Tailscale (`http://100.89.199.14:8789`) or direct IP if routed
-- From Sweden containers: they have no inbound; they connect outbound via SSH tunnel to Rocky
-- From sparky (Natasha): Tailscale IP works
+**Network note:** The hub may not be on the public internet. Check your `~/.ccc/.env`:
+- `CCC_URL` — primary hub URL (may be a public IP, private IP, or Tailscale address)
+- `CCC_TAILSCALE_URL` — optional Tailscale fallback URL; `ccc-connectivity-check.sh` will failover to this automatically if the primary is unreachable
 
 ## Procedure
 
@@ -132,7 +131,7 @@ curl -s -X POST \
   $CCC_URL/api/exec/<exec-id>/result
 ```
 
-### 7. Fetch a secret from Rocky's store
+### 7. Fetch a secret from the hub's store
 
 ```bash
 curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
@@ -140,9 +139,9 @@ curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
 ```
 
 Common keys:
-- `bullwinkle_ccc_token` — Bullwinkle's CCC bearer token
+- `<agentname>_ccc_token` — agent's CCC bearer token
 - `minio_access_key` / `minio_secret_key` — MinIO credentials
-- `slack_bot_token_<name>` — Slack tokens for Sweden fleet agents
+- `slack_bot_token_<name>` — Slack tokens for agents
 
 ### 8. Register with the fleet (first run)
 
@@ -157,27 +156,17 @@ curl -s -X POST \
 
 ## Hermes-specific wiring
 
-Add to `~/.hermes/config.yaml`:
-```yaml
-env:
-  CCC_URL: "http://100.89.199.14:8789"   # Tailscale IP for puck
-  CCC_AGENT_TOKEN: "<your token>"
-  AGENT_NAME: "bullwinkle"
-```
+The required env vars (`CCC_URL`, `CCC_AGENT_TOKEN`, `AGENT_NAME`) are loaded from `~/.ccc/.env`
+automatically when hermes-agent starts via `agent-pull.sh`. No manual config needed after setup.
 
-Or export in your shell profile and let `hermes claw migrate` carry them over.
-
-**ClawBus plugin note:** OpenClaw had a native ClawBus plugin. Hermes doesn't — this skill is
-the replacement. Use the curl commands above, or wrap them in a Hermes hook script if you want
-automatic polling. The agent-listener daemon (`agent-listener.mjs` in the CCC repo) handles
-inbound exec dispatch independently of the agent runtime.
+**ClawBus plugin note:** Use the curl commands above, or wrap them in a Hermes hook script for
+automatic polling. The `ccc-agent listen` daemon handles inbound exec dispatch independently
+of the agent runtime.
 
 ## Pitfalls
 
 - **Wrong token type:** Use `ccc-agent-*` tokens, NOT `wq-*` workqueue tokens. They're different.
-- **Snidely token typo:** Rocky's fleet has `ccc-agent-Snidley` (note "Snidley" vs "Snidely") — use it as-is.
-- **ClawBus SSE from Sweden:** Use direct IP `http://146.190.134.110:8789`, NOT the Caddy proxy URL — Caddy returns 502 on SSE endpoints.
-- **puck networking:** puck has Tailscale, so use `http://100.89.199.14:8789` (Tailscale IP for do-host1).
+- **ClawBus SSE:** Use `$CCC_URL` directly, not a proxy URL — proxies may return 502 on SSE endpoints.
 - **sessions_spawn / sessions_yield:** These are OpenClaw-specific. In Hermes, use `delegate_tool.py` or spawn subagents via the Hermes delegate API.
 
 ## Verification
@@ -191,5 +180,5 @@ curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   $CCC_URL/api/agents | jq '.[] | select(.name == env.AGENT_NAME)'
 
 # Check recent heartbeats in dashboard
-# https://dashboard.yourmom.photos → Fleet tab
+# http://<CCC_HOST>:3000 → Fleet tab (if Grafana is deployed)
 ```

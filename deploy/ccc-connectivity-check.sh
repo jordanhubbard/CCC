@@ -1,8 +1,7 @@
 #!/bin/bash
-# ccc-connectivity-check.sh — Test CCC API reachability and auto-failover to Tailscale IP
-# Intended for: sparky (Natasha) and any agent that may be behind NAT/firewall
+# ccc-connectivity-check.sh — Test CCC API reachability and auto-failover to Tailscale URL
+# Intended for: any agent node connecting to a remote CCC hub
 # Run from: agent-pull.sh (or as a standalone cron job)
-# Created: 2026-03-27 by Rocky (wq-API-1774652964439)
 
 set -e
 
@@ -19,9 +18,9 @@ fi
 AGENT_NAME="${AGENT_NAME:-unknown}"
 CURRENT_CCC_URL="${CCC_URL:-}"
 
-# Known CCC endpoints (in order of preference)
-CCC_PUBLIC="http://146.190.134.110:8789"
-CCC_TAILSCALE="http://ccc-server.service.consul:8789"
+# Fallback endpoints (in order of preference after current URL fails)
+# CCC_TAILSCALE_URL: operator-set Tailscale URL for the hub (from .env)
+CCC_TAILSCALE="${CCC_TAILSCALE_URL:-}"
 CCC_LOCALHOST="http://localhost:8789"
 
 log() {
@@ -61,9 +60,9 @@ update_ccc_url() {
   fi
 }
 
-# Skip if we're running on do-host1 (CCC itself)
-if [ "${AGENT_HOST}" = "do-host1" ] || [ "${AGENT_NAME}" = "rocky" ]; then
-  log "Skipping connectivity check (running on CCC host)"
+# Skip if CCC_URL points to localhost — this node IS the hub
+if echo "${CURRENT_CCC_URL}" | grep -qE '^https?://localhost(:[0-9]+)?(/|$)'; then
+  log "Skipping connectivity check (CCC_URL is localhost — this is the hub node)"
   exit 0
 fi
 
@@ -78,8 +77,8 @@ if [ -n "$CURRENT_CCC_URL" ]; then
   fi
 fi
 
-# Try Tailscale IP (best for agents on the same tailnet)
-if [ "$CURRENT_CCC_URL" != "$CCC_TAILSCALE" ]; then
+# Try Tailscale URL if configured (best for agents on the same tailnet)
+if [ -n "$CCC_TAILSCALE" ] && [ "$CURRENT_CCC_URL" != "$CCC_TAILSCALE" ]; then
   STATUS=$(check_ccc "$CCC_TAILSCALE")
   if [ "$STATUS" = "OK" ]; then
     log "Tailscale path OK: $CCC_TAILSCALE — switching"
@@ -88,19 +87,6 @@ if [ "$CURRENT_CCC_URL" != "$CCC_TAILSCALE" ]; then
     exit 0
   else
     log "Tailscale path also unreachable: $CCC_TAILSCALE"
-  fi
-fi
-
-# Try public IP
-if [ "$CURRENT_CCC_URL" != "$CCC_PUBLIC" ]; then
-  STATUS=$(check_ccc "$CCC_PUBLIC")
-  if [ "$STATUS" = "OK" ]; then
-    log "Public IP path OK: $CCC_PUBLIC — switching"
-    update_ccc_url "$CCC_PUBLIC"
-    echo "SWITCHED_TO_PUBLIC"
-    exit 0
-  else
-    log "Public IP also unreachable: $CCC_PUBLIC"
   fi
 fi
 

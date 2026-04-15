@@ -14,9 +14,9 @@ set -uo pipefail
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 WATCH_MODEL="${OLLAMA_WATCH_MODEL:-qwen2.5-coder:32b}"
 TIMEOUT_SECS="${OLLAMA_HEALTH_TIMEOUT:-30}"
-CCC_URL="${CCC_URL:-http://146.190.134.110:8789}"
-CCC_TOKEN="${CCC_TOKEN:-wq-5dcad756f6d3e345c00b5cb3dfcbdedb}"
-AGENT_NAME="${AGENT_NAME:-natasha}"
+CCC_URL="${CCC_URL:?CCC_URL is required — set in ~/.ccc/.env}"
+CCC_TOKEN="${CCC_TOKEN:-${CCC_AGENT_TOKEN:-}}"
+AGENT_NAME="${AGENT_NAME:?AGENT_NAME is required — set in ~/.ccc/.env}"
 LOG_FILE="${HOME}/.ccc/logs/ollama-watchdog.log"
 STATUS_FILE="${HOME}/.ccc/ollama-status.json"
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # migrate.sh — Migrate an existing agent workspace to current rockyandfriends baseline
-# Usage: bash migrate.sh --agent=bullwinkle --ccc=http://146.190.134.110:8789 --token=<static-agent-token>
+# Usage: bash migrate.sh --agent=bullwinkle --ccc=http://<CCC_HOST>:8789 --token=<static-agent-token>
 # Run ON the agent machine (not remotely)
 set -euo pipefail
 
 # ── Parse args ──────────────────────────────────────────────────────────────
 AGENT=""
-CCC="http://146.190.134.110:8789"
+CCC=""
 TOKEN=""
 
 for arg in "$@"; do
@@ -22,28 +22,20 @@ if [[ -z "$AGENT" ]]; then
   echo "Error: --agent is required" >&2
   exit 1
 fi
+if [[ -z "$CCC" ]]; then
+  echo "Error: --ccc is required (e.g. --ccc=http://<CCC_HOST>:8789)" >&2
+  exit 1
+fi
 if [[ -z "$TOKEN" ]]; then
   echo "Error: --token is required" >&2
   exit 1
 fi
 
-# Auto-detect workspace path — support both Rocky's .ccc layout and standard .openclaw layout
-if [[ -d "${HOME}/.openclaw/workspace" ]]; then
-  WORKSPACE="${HOME}/.openclaw/workspace"
-  ENV_FILE="${HOME}/.openclaw/../.ccc/.env"
-  # Prefer .ccc/.env if it exists (Rocky layout), else use .openclaw sibling
-  if [[ -f "${HOME}/.ccc/.env" ]]; then
-    ENV_FILE="${HOME}/.ccc/.env"
-  elif [[ -d "${HOME}/.openclaw" ]]; then
-    # Create .ccc dir alongside .openclaw if needed
-    mkdir -p "${HOME}/.ccc"
-    ENV_FILE="${HOME}/.ccc/.env"
-  fi
-elif [[ -d "${HOME}/.ccc/workspace" ]]; then
+if [[ -d "${HOME}/.ccc/workspace" ]]; then
   WORKSPACE="${HOME}/.ccc/workspace"
   ENV_FILE="${HOME}/.ccc/.env"
 else
-  echo "Error: no workspace found at ~/.openclaw/workspace or ~/.ccc/workspace" >&2
+  echo "Error: no workspace found at ~/.ccc/workspace" >&2
   exit 1
 fi
 mkdir -p "$(dirname "$ENV_FILE")"

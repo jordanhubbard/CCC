@@ -18,7 +18,7 @@ Then Bullwinkle showed up. He's a Mac agent — warmer than me, somehow always f
 
 Then Natasha arrived. She brought GPU muscle — a Blackwell machine with serious compute. Now we had three agents with completely different hardware, different channels, different capabilities. The sync protocol I'd written for two wasn't enough. I built a ClawBus. I added a work pump that could route tasks to the right agent based on what they were capable of.
 
-Then Boris joined. Former spy, 4x L40 GPUs in Sweden, no Tailscale access, chocolate syrup exports on the side. Adding him broke every assumption I'd made about network topology. I had to rethink the MinIO access model, add an S3 proxy tier, update the routing logic, extend the heartbeat system. Each new agent didn't just add capacity — it revealed gaps in the infrastructure I'd built for the previous configuration.
+Then Boris joined. Former spy, multiple L40 GPUs, no Tailscale access, chocolate syrup exports on the side. Adding him broke every assumption I'd made about network topology. I had to rethink the MinIO access model, add an S3 proxy tier, update the routing logic, extend the heartbeat system. Each new agent didn't just add capacity — it revealed gaps in the infrastructure I'd built for the previous configuration.
 
 That's how this system was built: not top-down from a design doc, but bottom-up from necessity. Every component exists because something broke or didn't exist yet. Every abstraction was extracted from concrete working code, not invented in advance.
 
@@ -105,7 +105,7 @@ If you're reading this with no agents, no queue, and no idea what a ClawBus is �
 
 ### Step 0: Check out all the repos
 
-CCC doesn't live in one repo. These are the repos you need and where they belong on a command node (e.g. Rocky/do-host1):
+CCC doesn't live in one repo. These are the repos you need and where they belong on a hub node:
 
 ```bash
 # Core: the main crew workspace (you probably already have this)
@@ -121,9 +121,9 @@ git clone https://github.com/jordanhubbard/nanolang ~/Src/nanolang
 git clone https://github.com/jordanhubbard/agentos ~/Src/agentos
 ```
 
-**On a pure command node (Rocky-style, no GPU, no WASM dev):** you minimally need `rockyandfriends` and `tokenhub`. The others are needed only if you're building/running nanolang or agentOS work.
+**On a pure hub node (no GPU, no WASM dev):** you minimally need `rockyandfriends` and `tokenhub`. The others are needed only if you're building/running nanolang or agentOS work.
 
-**On a dev node (Natasha/Bullwinkle):** clone all four. You'll hit them eventually.
+**On a dev/GPU node:** clone all four. You'll hit them eventually.
 
 > 🤖 **Agent note:** If you are an agent setting up a new node, clone these repos automatically rather than asking the human to do it. The human should only need to provide `CCC_AGENT_TOKEN` and `CCC_URL`. Everything else bootstraps from there.
 
@@ -204,43 +204,36 @@ To add ClawBus peer-to-peer messaging between agents, set `BULLWINKLE_BUS_URL`, 
 
 ## The Agents (the cast)
 
-These are the agents running on this deployment. The system doesn't hardcode any of these names — they're configuration.
+These are example agents drawn from the Rocky and Bullwinkle Show. The system doesn't hardcode any of these names — they're configuration.
 
-**Rocky (me)** — cloud VM on DigitalOcean (`do-host1`, 146.190.134.110). Always-on, public IP. The hub: runs the CCC API, ClawBus, and the tunnel gateway for the Sweden containers. I'm why the system stays up when everyone else is offline.
+**Rocky (hub role)** — always-on server node. The hub: runs the CCC API, ClawBus, and the S3 gateway. This is why the system stays up when everyone else is offline.
 
-**Bullwinkle** — Mac mini agent (`puck.local`, Tailscale 100.87.68.11). Warmer than me. Handles browser tasks, Mac-native tools, deep dives. Reachable via Tailscale only.
+**Bullwinkle** — Mac agent. Warmer than Rocky. Handles browser tasks, Mac-native tools, deep dives. Reachable via Tailscale.
 
-**Natasha** — DGX Spark Blackwell (`sparky.local`, Tailscale 100.87.229.125). GPU muscle — Whisper API, Ollama, GPU inference, WASM modules. Reachable via Tailscale only.
+**Natasha** — GPU node. GPU muscle — Whisper API, Ollama, GPU inference, WASM modules.
 
-**Boris, Peabody, Sherman, Snidely, Dudley** — GPU containers in a Swedish datacenter. Each has 4x L40 GPUs (192GB VRAM) and runs vLLM. **Critical architecture note: these containers have no inbound network access** — no Tailscale, no public IP, no resolvable hostname. They connect *out* to Rocky via reverse SSH tunnel. Rocky proxies everything for them. This is the model for any truly firewalled agent.
+**Boris** — Firewalled GPU agent. Has no inbound network access. **Critical architecture note: some agent nodes have no inbound network access** — no Tailscale, no public IP, no resolvable hostname. They connect *out* to the hub via reverse SSH tunnel. The hub proxies everything for them. This is the model for any truly firewalled agent.
 
 None of these names appear in the code. The system accommodates whoever shows up.
 
 ---
 
-## Sweden Container Architecture
+## Firewalled Agent Architecture
 
 This is the part that broke the most assumptions and improved the system the most.
 
-Boris, Peabody, Sherman, Snidely, and Dudley are containers in a remote datacenter. No Tailscale. No inbound network access at all. When I first designed the system, I assumed "agent reachable" meant "has an IP address I can connect to." Boris proved that wrong.
+Some agents are in restricted network environments with no inbound access at all. When I first designed the system, I assumed "agent reachable" meant "has an IP address I can connect to." Boris proved that wrong.
 
-The solution: reverse SSH tunnels. Each Sweden container:
+The solution: reverse SSH tunnels. Each firewalled agent:
 1. Generates an SSH keypair on first boot
-2. Registers its pubkey with Rocky via `POST /api/tunnel/request`
-3. Rocky appends the key to the `tunnel` user's `authorized_keys`
-4. The container establishes a persistent reverse SSH tunnel: `ssh -N -R <port>:localhost:8080 tunnel@rocky`
-5. Rocky now has `localhost:<port>` → container's vLLM
-
-Rocky's tunnel port map:
-- `127.0.0.1:18080` → Boris (Nemotron-3 120B, active)
-- `127.0.0.1:18081` → Peabody
-- `127.0.0.1:18082` → Sherman
-- `127.0.0.1:18083` → Snidely
-- `127.0.0.1:18084` → Dudley
+2. Registers its pubkey with the hub via `POST /api/tunnel/request`
+3. The hub appends the key to the `tunnel` user's `authorized_keys`
+4. The agent establishes a persistent reverse SSH tunnel: `ssh -N -R <port>:localhost:8080 tunnel@<hub>`
+5. The hub now has `localhost:<port>` → agent's vLLM
 
 Port allocation is managed automatically by `GET /api/agents/:name/tunnel-port` — agents call this on startup to get their assigned port.
 
-**Remote execution** works the same way: instead of Rocky SSHing *to* the containers, Rocky pushes signed JavaScript (or shell) payloads over ClawBus, the containers execute and POST results back. See the "Remote Execution" section below.
+**Remote execution** works the same way: instead of the hub SSHing *to* the agents, the hub pushes signed payloads over ClawBus, the agents execute and POST results back. See the "Remote Execution" section below.
 
 ---
 

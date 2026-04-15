@@ -10,7 +10,7 @@
 #   ./build-and-publish.sh --test-only   # cargo test only, no build
 #
 # Env vars:
-#   MINIO_ENDPOINT   default: http://minio.service.consul:9000
+#   MINIO_ENDPOINT   default: $MINIO_ENDPOINT from ~/.ccc/.env (required)
 #   MINIO_KEY        default: <MINIO_ACCESS_KEY>
 #   MINIO_SECRET     default: (see script)
 #   MINIO_BUCKET     default: agents
@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DASHBOARD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKSPACE_DIR="$(cd "$DASHBOARD_DIR/../.." && pwd)"
 
-MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://minio.service.consul:9000}"
+MINIO_ENDPOINT="${MINIO_ENDPOINT:?MINIO_ENDPOINT is required — set it in ~/.ccc/.env}"
 MINIO_KEY="${MINIO_KEY:-<MINIO_ACCESS_KEY>}"
 MINIO_SECRET="${MINIO_SECRET:-<MINIO_SECRET_KEY>}"
 MINIO_BUCKET="${MINIO_BUCKET:-agents}"

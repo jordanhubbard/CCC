@@ -109,7 +109,7 @@ Tests: api.test.mjs, integration.test.mjs, ui.test.mjs
 
 ## Bug: Dashboard UI port (8788) is separate process — may not be running
 
-- **Route:** GET http://146.190.134.110:8788/
+- **Route:** GET http://<CCC_HOST>:8788/
 - **Expected:** 200 text/html
 - **Actual:** The dashboard at :8788 is a separate service (not served by the CCC API at :8789). If that process is down, ui.test.mjs will skip gracefully. The API at :8789 serves /projects as HTML but does not serve a full dashboard UI at its root.
 - **Severity:** low (deployment concern, not an API bug)

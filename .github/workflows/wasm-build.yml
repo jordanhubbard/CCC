@@ -22,13 +22,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Route: CI runner → do-host1 (Rocky, public IP) → sparky LAN (10.11.100.116)
-      # Reason: sparky has GlobalProtect VPN that conflicts with Tailscale kernel routing,
-      # making direct TS SSH impossible. do-host1 can reach sparky's LAN IP directly.
-      - name: Run build on sparky via SSH (ProxyJump through do-host1)
+      # Route: CI runner → hub node (ProxyJump) → GPU build node
+      # Reason: the GPU node may not be directly reachable from CI runners.
+      - name: Run build on GPU node via SSH (ProxyJump through hub)
         uses: appleboy/ssh-action@v1
         with:
-          host: 10.11.100.116
+          host: ${{ secrets.SPARKY_HOST }}
           username: jkh
           key: ${{ secrets.SPARKY_SSH_KEY }}
           timeout: 300s
@@ -47,7 +46,7 @@ jobs:
             echo "trunk: $(trunk --version)"
             echo "sccache: $(sccache --version)"
 
-            cd ~/.openclaw/workspace
+            cd ~/.ccc/workspace
             git fetch origin main
             git checkout ${{ github.sha }} --.ccc/dashboard/
 
@@ -62,7 +61,7 @@ jobs:
       - name: Package and publish dist artifact to MinIO
         uses: appleboy/ssh-action@v1
         with:
-          host: 10.11.100.116
+          host: ${{ secrets.SPARKY_HOST }}
           username: jkh
           key: ${{ secrets.SPARKY_SSH_KEY }}
           timeout: 60s
@@ -74,7 +73,7 @@ jobs:
             set -euo pipefail
             export PATH="$HOME/.local/bin:$PATH"
 
-            DIST="$HOME/.openclaw/workspace.ccc/dashboard/dist"
+            DIST="$HOME/.ccc/workspace/.ccc/dashboard/dist"
             TARBALL="/tmp/wasm-dist-${{ github.sha }}.tar.gz"
 
             tar -czf "$TARBALL" -C "$DIST" .
@@ -87,7 +86,7 @@ jobs:
             sha_file = open("/tmp/wasm-dist-${{ github.sha }}.tar.gz", "rb").read()
             payload = sha_file
 
-            endpoint = "http://100.89.199.14:9000"
+            endpoint = "${{ secrets.MINIO_ENDPOINT }}"
             access_key = "${{ secrets.MINIO_ACCESS_KEY }}"
             secret_key = "${{ secrets.MINIO_SECRET_KEY }}"
             bucket = "agents"
@@ -104,7 +103,7 @@ jobs:
                 amz_date = now.strftime("%Y%m%dT%H%M%SZ")
                 date_stamp = now.strftime("%Y%m%d")
                 region, service = "us-east-1", "s3"
-                host = "100.89.199.14:9000"
+                import urllib.parse as _up; _ep = endpoint; host = _up.urlparse(_ep).netloc
                 content_type = "application/gzip"
                 payload_hash = hashlib.sha256(data).hexdigest()
                 canon_headers = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
@@ -134,7 +133,7 @@ jobs:
       - name: Run dashboard-server unit tests on sparky
         uses: appleboy/ssh-action@v1
         with:
-          host: 10.11.100.116
+          host: ${{ secrets.SPARKY_HOST }}
           username: jkh
           key: ${{ secrets.SPARKY_SSH_KEY }}
           timeout: 120s
@@ -146,5 +145,5 @@ jobs:
             set -euo pipefail
             export PATH="$HOME/.cargo/bin:$PATH"
             source "$HOME/.cargo/env"
-            cd ~/.openclaw/workspace.ccc/dashboard
+            cd ~/.ccc/workspace.ccc/dashboard
             cargo test --package dashboard-server 2>&1 | tail -5

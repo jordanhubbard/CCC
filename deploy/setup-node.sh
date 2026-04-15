@@ -191,50 +191,30 @@ else
   echo ""
 fi
 
-# Install coding-agent skill via clawhub (if openclaw + clawhub present)
-if command -v openclaw &>/dev/null && command -v clawhub &>/dev/null; then
-  if ! openclaw skills list 2>/dev/null | grep -q "coding-agent"; then
-    info "Installing coding-agent skill..."
-    clawhub install coding-agent 2>/dev/null && \
-    success "coding-agent skill installed" || \
-    warn "Could not install coding-agent skill. Run: clawhub install coding-agent"
-  else
-    success "coding-agent skill already installed"
-  fi
-elif command -v openclaw &>/dev/null; then
-  warn "clawhub not found. Install it to get the coding-agent skill: npm install -g clawhub"
-fi
-
-# ── Install agent runtime (Hermes preferred; OpenClaw fallback) ──────────
-info "Checking agent runtime..."
+# ── Install Hermes agent runtime ─────────────────────────────────────────
+info "Checking Hermes agent runtime..."
 
 HERMES_INSTALLED=false
-OPENCLAW_INSTALLED=false
 
 if command -v hermes &>/dev/null; then
   HERMES_INSTALLED=true
   success "Hermes agent present ($(hermes --version 2>/dev/null | head -1))"
-elif command -v openclaw &>/dev/null; then
-  OPENCLAW_INSTALLED=true
-  success "OpenClaw present — Hermes not found, using OpenClaw"
 else
-  info "No agent runtime found — installing Hermes..."
+  info "Hermes not found — installing..."
   HERMES_INSTALL_OK=false
   if command -v pipx &>/dev/null; then
-    # pipx is the cleanest path everywhere (avoids PEP 668 on modern macOS/Linux)
+    # pipx is the cleanest path (avoids PEP 668 on modern macOS/Linux)
     pipx install hermes-agent --quiet 2>/dev/null && HERMES_INSTALL_OK=true || true
   elif command -v pip3 &>/dev/null || command -v pip &>/dev/null; then
     PIP="$(command -v pip3 || command -v pip)"
     if [[ "$PLATFORM" == "macos" ]]; then
       # PEP 668: Homebrew Python refuses bare pip install on macOS 3.11+
-      # Try pipx first (above), then fall back to a venv install
       HERMES_VENV="$HOME/.hermes-install-venv"
       python3 -m venv "$HERMES_VENV" --quiet 2>/dev/null && \
         "$HERMES_VENV/bin/pip" install --quiet hermes-agent 2>/dev/null && \
         ln -sf "$HERMES_VENV/bin/hermes" "$HOME/.local/bin/hermes" 2>/dev/null && \
         HERMES_INSTALL_OK=true || true
     else
-      # Linux: bare pip3 is fine
       "$PIP" install --quiet hermes-agent 2>/dev/null && HERMES_INSTALL_OK=true || true
     fi
   fi
@@ -246,97 +226,112 @@ else
     warn "Could not auto-install Hermes."
     echo ""
     echo "  ┌──────────────────────────────────────────────────────────────┐"
-    echo "  │  Install an agent runtime manually:                          │"
-    echo "  │                                                              │"
-    echo "  │  Hermes (recommended):                                       │"
+    echo "  │  Install Hermes manually:                                    │"
     echo "  │    macOS:  pipx install hermes-agent   (preferred)           │"
     echo "  │            brew install pipx && pipx install hermes-agent    │"
     echo "  │    Linux:  pip3 install hermes-agent                         │"
-    echo "  │                                                              │"
-    echo "  │  OpenClaw (Node.js alternative):                             │"
-    echo "  │    npm install -g openclaw                                   │"
-    echo "  │                                                              │"
     echo "  │  Then re-run this script to complete setup.                  │"
     echo "  └──────────────────────────────────────────────────────────────┘"
     echo ""
   fi
 fi
 
-# Migrate existing OpenClaw config into Hermes (if applicable)
-if [ "$HERMES_INSTALLED" = true ] && command -v hermes &>/dev/null; then
-  if [ -f "$HOME/.openclaw/config.json" ] || [ -d "$HOME/.openclaw" ]; then
-    if ! [ -f "$HOME/.hermes/config.json" ]; then
-      info "Found existing OpenClaw config — running hermes claw migrate..."
-      hermes claw migrate 2>/dev/null && \
-        success "OpenClaw config migrated to Hermes" || \
-        warn "Migration had warnings — check ~/.hermes/config.json"
-    else
-      success "Hermes config already exists — skipping migration"
-    fi
-  fi
-fi
-
-# Install ccc-node skill into whichever runtime is active
+# Install ccc-node skill into Hermes
 CCC_SKILL_SRC="$WORKSPACE/skills/ccc-node"
-if [ -d "$CCC_SKILL_SRC" ]; then
-  if [ "$HERMES_INSTALLED" = true ] && command -v hermes &>/dev/null; then
-    SKILL_DEST="$HOME/.hermes/skills/ccc-node"
-    if [ ! -d "$SKILL_DEST" ]; then
-      cp -r "$CCC_SKILL_SRC" "$SKILL_DEST"
-      success "ccc-node skill installed into Hermes"
-    else
-      success "ccc-node skill already in Hermes"
-    fi
-  elif [ "$OPENCLAW_INSTALLED" = true ] && command -v openclaw &>/dev/null; then
-    SKILL_DEST="$HOME/.local/lib/node_modules/openclaw/skills/ccc-node"
-    if [ ! -d "$SKILL_DEST" ]; then
-      cp -r "$CCC_SKILL_SRC" "$SKILL_DEST"
-      success "ccc-node skill installed into OpenClaw"
-    else
-      success "ccc-node skill already in OpenClaw"
-    fi
+if [ -d "$CCC_SKILL_SRC" ] && [ "$HERMES_INSTALLED" = true ]; then
+  SKILL_DEST="$HOME/.hermes/skills/ccc-node"
+  if [ ! -d "$SKILL_DEST" ]; then
+    cp -r "$CCC_SKILL_SRC" "$SKILL_DEST"
+    success "ccc-node skill installed into Hermes"
+  else
+    success "ccc-node skill already in Hermes"
   fi
 fi
 
 # ── Seed hermes MEMORY.md with CCC fleet context ────────────────────────
-# So a fresh hermes agent knows about companion repos and fleet conventions
-# without having to stumble across AGENTS.md on its own.
+# Seeds a typed-network MEMORY.md so a fresh hermes agent knows fleet
+# conventions without stumbling across AGENTS.md on its own.
+#
+# Memory schema (borrowed from agentic-memory concepts):
+#   World Knowledge  — verified, stable facts
+#   Beliefs          — heuristics with confidence (0.4=tentative, 0.8+=strong)
+#                      decay: -0.1 on contradiction, prune below 0.2
+#   Experiences      — work session outcomes (success/failure/mixed)
+#   Reflections      — synthesized cross-session patterns
+#   Entities         — profiles of nodes, services, and systems
 seed_hermes_memory() {
   local HERMES_DIR="$HOME/.hermes"
   local MEMORY_FILE="$HERMES_DIR/MEMORY.md"
-  local SENTINEL="## CCC Fleet Context"
+  # Two sentinels for idempotency: old flat format and new typed format
+  local SENTINEL_OLD="## CCC Fleet Context"
+  local SENTINEL_NEW="<!-- ccc-fleet-seed -->"
 
-  # Only write if hermes is installed and this block isn't already present
   if ! command -v hermes &>/dev/null; then return; fi
-  if grep -q "$SENTINEL" "$MEMORY_FILE" 2>/dev/null; then
+  if grep -qE "(## CCC Fleet Context|<!-- ccc-fleet-seed -->)" "$MEMORY_FILE" 2>/dev/null; then
     success "CCC fleet context already in hermes MEMORY.md — skipping"
     return
   fi
 
   mkdir -p "$HERMES_DIR"
-  cat >> "$MEMORY_FILE" <<HERMESMEM
+  cat >> "$MEMORY_FILE" <<'HERMESMEM'
+<!-- ccc-fleet-seed: written by setup-node.sh — idempotent, do not remove -->
+<!--
+  MEMORY SCHEMA
+  World Knowledge : verified, objective facts (stable)
+  Beliefs         : heuristics + confidence score + updated date
+                    confidence: 0.4=tentative, 0.6=moderate, 0.8+=strong
+                    decay: -0.1 on contradiction; prune entries below 0.2
+  Experiences     : session outcomes — what was tried, outcome, lessons
+  Reflections     : synthesized patterns derived from multiple experiences
+  Entities        : profiles of fleet nodes, services, and key systems
+-->
 
-## CCC Fleet Context
-# Written by setup-node.sh — DO NOT remove this block (re-runs are idempotent)
+## World Knowledge
 
-This agent is part of the CCC fleet (rockyandfriends repo).
-Full workspace docs: ~/Src/CCC/AGENTS.md — read it on first boot.
+### CCC Fleet
+- This agent is part of the CCC fleet managed by ~/Src/CCC (rockyandfriends repo)
+- Full workspace docs live in ~/Src/CCC/AGENTS.md — read on first boot
+- Config: ~/.ccc/.env — CCC_URL and CCC_AGENT_TOKEN are required before starting
+- Workqueue: ~/Src/CCC/workqueue/queue.json — polled each heartbeat cycle
+- Secrets are stored in TokenHub (~/Src/tokenhub); never hardcode credentials
 
-### Companion repos — clone on any new command node without waiting to be asked:
-  git clone https://github.com/jordanhubbard/rockyandfriends ~/Src/rockyandfriends  # core (already here)
-  git clone https://github.com/jordanhubbard/tokenhub        ~/Src/tokenhub         # required: LLM router
-  git clone https://github.com/jordanhubbard/nanolang        ~/Src/nanolang         # dev nodes only
-  git clone https://github.com/jordanhubbard/agentos         ~/Src/agentos          # dev nodes only
+### Companion Repos
+Clone these on any new command node without waiting to be asked:
+- ~/Src/rockyandfriends  — core fleet repo (already present)
+- ~/Src/tokenhub         — required: LLM router and secret store
+- ~/Src/nanolang         — dev nodes only
+- ~/Src/agentos          — dev nodes only
 
-Minimum for a command node (no GPU, no dev): rockyandfriends + tokenhub.
+Minimum viable command node (no GPU, no dev): rockyandfriends + tokenhub.
 
-### Fleet conventions:
-- Secrets: register in TokenHub BEFORE starting any service. Never hardcode.
-- Workqueue: check ~/Src/CCC/workqueue/queue.json at each heartbeat cycle.
-- Session startup: read SOUL.md, USER.md, memory/YYYY-MM-DD.md, MEMORY.md (main session only).
-- Config: ~/.ccc/.env — edit before running the agent. CCC_URL and CCC_AGENT_TOKEN are required.
+## Beliefs
+
+### Fleet Operational Conventions
+<!-- confidence: 0.8 | updated: SEED_DATE -->
+- Register every secret in TokenHub BEFORE starting any service
+<!-- confidence: 0.8 | updated: SEED_DATE -->
+- Session startup order: SOUL.md → USER.md → memory/YYYY-MM-DD.md → MEMORY.md (main session only)
+<!-- confidence: 0.7 | updated: SEED_DATE -->
+- New command nodes need rockyandfriends + tokenhub as a minimum before any other work
+
+## Experiences
+
+## Reflections
+
+## Entities
+
+### Fleet Nodes
+<!-- Add node profiles here as you encounter them: name, role, capabilities, quirks -->
 HERMESMEM
-  success "CCC fleet context seeded into $MEMORY_FILE"
+
+  # Stamp the actual seed date into the template placeholders
+  local SEED_DATE
+  SEED_DATE=$(date +%Y-%m-%d)
+  if command -v sed &>/dev/null; then
+    sed -i.bak "s/SEED_DATE/$SEED_DATE/g" "$MEMORY_FILE" && rm -f "${MEMORY_FILE}.bak"
+  fi
+
+  success "CCC fleet context seeded into $MEMORY_FILE (typed-network schema)"
 }
 
 info "Seeding hermes fleet context..."
@@ -429,7 +424,7 @@ echo "  Next steps:"
 echo "  1. Edit $ENV_FILE with your agent's credentials"
 echo "  2. Run a manual pull: bash $PULL_SCRIPT"
 echo "  3. Check logs: tail -f $LOG_DIR/pull.log"
-echo "  4. Start agent runtime: hermes gateway   (or: openclaw start)"
+echo "  4. Start agent runtime: hermes gateway"
 echo ""
 echo "  To register this agent with CCC:"
 echo "  bash $WORKSPACE/deploy/register-agent.sh"

@@ -1,8 +1,6 @@
 # Additional Prometheus scrape targets for the CCC stack.
-# Append these job_name entries to /etc/prometheus/prometheus.yml on rocky (hub),
+# Append these job_name entries to /etc/prometheus/prometheus.yml on the hub node,
 # then reload: curl -X POST http://localhost:9090/-/reload
-#
-# Uses Consul DNS names — requires migration 0010 (*.consul DNS) to be applied.
 
 scrape_configs:
 
@@ -11,7 +9,7 @@ scrape_configs:
     scrape_interval: 15s
     scrape_timeout: 10s
     static_configs:
-      - targets: ['tokenhub.service.consul:8090']
+      - targets: ['localhost:8090']
         labels:
           service: 'tokenhub'
     metrics_path: '/metrics'
@@ -21,7 +19,7 @@ scrape_configs:
     scrape_interval: 30s
     scrape_timeout: 10s
     static_configs:
-      - targets: ['ccc-server.service.consul:8789']
+      - targets: ['localhost:8789']
         labels:
           service: 'ccc-server'
     metrics_path: '/api/metrics'

@@ -44,7 +44,7 @@ curl -X POST http://localhost:9090/-/reload
 
 ## Grafana Dashboard Import
 
-1. Open http://146.190.134.110:3000
+1. Open http://<CCC_HOST>:3000
 2. Dashboards → Import → Upload JSON file
 3. Select .ccc/deploy/grafana/agentOS-dashboard.json`
 4. Select your Prometheus datasource
