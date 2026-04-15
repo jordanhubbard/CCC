@@ -707,15 +707,16 @@ elif [[ "$(uname)" == "Darwin" ]]; then
     if ! _clawfs_mounted; then
       juicefs mount --background --cache-dir "$CLAWFS_CACHE" "$CLAWFS_REDIS" "$CLAWFS_MOUNT" 2>/dev/null && \
         success "ClawFS mounted at $CLAWFS_MOUNT" || \
-        warn "ClawFS mount failed — install macFUSE first: brew install --cask macfuse (requires reboot)"
+        info "ClawFS POSIX mount unavailable (macFUSE not installed) — S3 gateway sync still works. Install macFUSE only if this node will serve vLLM models from ClawFS paths."
     else
       success "ClawFS already mounted at $CLAWFS_MOUNT"
     fi
   else
-    warn "JuiceFS not found — to enable ClawFS on macOS:"
-    warn "  1. brew install --cask macfuse   (reboot + approve system extension)"
-    warn "  2. brew install juicefs"
-    warn "  3. juicefs mount --background --cache-dir /tmp/jfscache \${CLAWFS_REDIS_URL:-redis://ccc-server.service.consul:6379/1} ~/clawfs"
+    # macOS: FUSE mount is optional. Memory sync uses the S3 gateway (port 9100 on hub)
+    # via clawfs-sync — no macFUSE needed for normal agent operation.
+    # Only needed if this node will serve vLLM models from ClawFS paths.
+    info "ClawFS POSIX mount skipped on macOS (no JuiceFS) — S3 gateway sync still works."
+    info "  Optional (GPU/model-serving nodes only): brew install --cask macfuse && brew install juicefs"
   fi
 fi
 

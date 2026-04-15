@@ -183,9 +183,11 @@ else
 fi
 
 echo ""
-info "Configuring ClawFS (shared model/file cache via JuiceFS FUSE)..."
-echo "  ClawFS mounts a shared filesystem at ~/clawfs for models and artifacts."
-echo "  Linux: auto-mounted.  macOS: requires macFUSE (brew install --cask macfuse)."
+info "Configuring ClawFS (shared model/file cache via JuiceFS)..."
+echo "  ClawFS provides shared storage for models and artifacts."
+echo "  Linux: auto-mounted via FUSE at ~/clawfs."
+echo "  macOS: memory sync uses S3 gateway (no FUSE needed). POSIX mount optional"
+echo "         (only needed for vLLM model-serving nodes: brew install --cask macfuse)."
 ask "Enable ClawFS? (true/false) [true]: "
 read -r CLAWFS_ENABLED
 CLAWFS_ENABLED="${CLAWFS_ENABLED:-true}"

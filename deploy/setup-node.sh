@@ -361,10 +361,11 @@ elif [[ "$PLATFORM" == "linux" ]]; then
   warn "JuiceFS not found — bootstrap.sh will install it automatically"
   warn "  Or install manually: curl -sSL https://juicefs.com/static/juicefs -o /usr/local/bin/juicefs && chmod +x /usr/local/bin/juicefs"
 else
-  warn "JuiceFS not found — to enable ClawFS on macOS:"
-  warn "  1. brew install --cask macfuse   (reboot + approve system extension)"
-  warn "  2. brew install juicefs"
-  warn "  3. juicefs mount --background --cache-dir /tmp/jfscache \${CLAWFS_REDIS_URL:-redis://ccc-server.service.consul:6379/1} ~/clawfs"
+  # macOS: FUSE mount is optional. Memory sync uses the S3 gateway (port 9100 on hub)
+  # via clawfs-sync — no macFUSE needed for normal agent operation.
+  # Only install macFUSE if you need POSIX path access (e.g. vLLM model serving).
+  info "ClawFS POSIX mount not available on macOS without macFUSE — memory sync via S3 gateway still works."
+  info "  Optional (GPU/model-serving nodes only): brew install --cask macfuse && brew install juicefs"
 fi
 
 # Check FUSE availability (Linux)
