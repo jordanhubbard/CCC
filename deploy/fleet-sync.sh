@@ -3,7 +3,9 @@
 #
 # Run this after committing and pushing changes to GitHub:
 #
-#   git push && bash deploy/fleet-sync.sh
+#   git push && bash deploy/fleet-sync.sh --ccc=http://<hub>:8788 --token=<token>
+#
+# If ~/.ccc/.env exists with CCC_URL and CCC_AGENT_TOKEN set, flags are optional.
 #
 # What it does:
 #   1. Mirrors ~/.ccc/workspace → MinIO (agentfs) so it's available via mc
@@ -12,6 +14,8 @@
 #   3. Reports online agents from /bus/presence
 #
 # Flags:
+#   --ccc=URL       Hub URL (overrides CCC_URL from .env)
+#   --token=TOKEN   Agent token (overrides CCC_AGENT_TOKEN from .env)
 #   --dry-run       Show what would happen without doing it
 #   --skip-mirror   Skip the MinIO mirror step (just send the bus message)
 #   --branch=NAME   Specify branch (default: current git branch)
@@ -24,15 +28,19 @@ DRY_RUN=false
 SKIP_MIRROR=false
 BRANCH=""
 COMPONENT="workspace"
+CCC_URL_ARG=""
+CCC_TOKEN_ARG=""
 
 for arg in "$@"; do
   case "$arg" in
+    --ccc=*)          CCC_URL_ARG="${arg#--ccc=}" ;;
+    --token=*)        CCC_TOKEN_ARG="${arg#--token=}" ;;
     --dry-run)        DRY_RUN=true ;;
     --skip-mirror)    SKIP_MIRROR=true ;;
     --branch=*)       BRANCH="${arg#--branch=}" ;;
     --component=*)    COMPONENT="${arg#--component=}" ;;
     -h|--help)
-      echo "Usage: fleet-sync.sh [--dry-run] [--skip-mirror] [--branch=NAME] [--component=NAME]"
+      echo "Usage: fleet-sync.sh [--ccc=URL] [--token=TOKEN] [--dry-run] [--skip-mirror] [--branch=NAME] [--component=NAME]"
       exit 0 ;;
   esac
 done
@@ -52,8 +60,12 @@ CCC_AGENT_TOKEN="${CCC_AGENT_TOKEN:-}"
 AGENT_NAME="${AGENT_NAME:-jkh}"
 MINIO_ALIAS="${MINIO_ALIAS:-ccc-hub}"
 
+# CLI flags override .env
+[[ -n "$CCC_URL_ARG"   ]] && CCC_URL="$CCC_URL_ARG"
+[[ -n "$CCC_TOKEN_ARG" ]] && CCC_AGENT_TOKEN="$CCC_TOKEN_ARG"
+
 if [[ -z "$CCC_URL" ]]; then
-  echo "ERROR: CCC_URL not set. Source ~/.ccc/.env or set CCC_URL." >&2
+  echo "ERROR: CCC_URL not set. Pass --ccc=<url> or add CCC_URL to ~/.ccc/.env" >&2
   exit 1
 fi
 
