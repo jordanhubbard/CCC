@@ -43,7 +43,7 @@ WORKSPACE="${CCC_DIR}/workspace"
 mkdir -p "${CCC_DIR}/logs"
 
 log() {
-  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [${AGENT_NAME}] [bus-listener] $1" | tee -a "$LOG_FILE" >&2
+  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [${AGENT_NAME}] [bus-listener] $1" >> "$LOG_FILE"
 }
 
 # ── JSON field extractor (python3, no jq dependency) ──────────────────────────

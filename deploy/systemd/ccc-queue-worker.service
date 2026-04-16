@@ -1,5 +1,5 @@
 [Unit]
-Description=CCC Bus Listener (ClawBus SSE daemon)
+Description=CCC Queue Worker (autonomous task executor)
 Documentation=https://github.com/jordanhubbard/CCC
 After=network-online.target
 Wants=network-online.target
@@ -8,9 +8,9 @@ Wants=network-online.target
 Type=simple
 User=AGENT_USER
 EnvironmentFile=-AGENT_HOME/.ccc/.env
-ExecStart=/bin/bash AGENT_HOME/.ccc/workspace/deploy/bus-listener.sh
+ExecStart=/usr/bin/python3 AGENT_HOME/.ccc/workspace/deploy/queue-worker.py
 Restart=always
-RestartSec=5s
+RestartSec=10s
 StandardOutput=journal
 StandardError=journal
 
