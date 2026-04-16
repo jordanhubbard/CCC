@@ -4,6 +4,9 @@
 # Handles:
 #   rcc.update  → run agent-pull.sh immediately (no waiting for the 10-min timer)
 #   rcc.quench  → pause work for N minutes (writes ~/.ccc/quench until <ts>)
+#   rcc.exec    → execute shell code and post result to /api/exec/{id}/result
+#                 (replaces the broken ccc-agent listen binary which has a reqwest
+#                 zero-timeout bug that causes immediate connection close)
 #
 # Designed to run as a long-lived daemon under supervisord or systemd.
 # Reconnects automatically on disconnect or error.
@@ -78,6 +81,86 @@ handle_rcc_update() {
   fi
 }
 
+handle_rcc_exec() {
+  local msg_json="$1"  # full message JSON (not just body, because we need seq/from)
+  local body exec_id code mode timeout_ms timeout_sec
+
+  body=$(_json_field "$msg_json" "body")
+  exec_id=$(_json_field "$body" "execId")
+  code=$(_json_field "$body" "code")
+  mode=$(_json_field "$body" "mode")
+  timeout_ms=$(_json_field "$body" "timeout_ms")
+  timeout_ms="${timeout_ms:-30000}"
+  timeout_sec=$(( timeout_ms / 1000 ))
+  [[ "$timeout_sec" -lt 1 ]] && timeout_sec=30
+
+  if [[ -z "$exec_id" || -z "$code" ]]; then
+    log "rcc.exec: invalid envelope (missing execId or code) — skipping"
+    return
+  fi
+
+  # Check targets array — only execute if we're in the list or targets=["all"]
+  local target_ok=false
+  target_ok=$(python3 -c "
+import json, sys
+try:
+  body = json.loads(sys.argv[1])
+  targets = body.get('targets', [])
+  agent = sys.argv[2]
+  if 'all' in targets or agent in targets:
+    print('true')
+  else:
+    print('false')
+except Exception:
+  print('false')
+" "$body" "$AGENT_NAME" 2>/dev/null || echo "false")
+
+  if [[ "$target_ok" != "true" ]]; then
+    return  # Not targeted at us — skip silently
+  fi
+
+  log "rcc.exec ${exec_id}: running (mode=${mode:-shell}, timeout=${timeout_sec}s)"
+
+  # Execute in background so the SSE read loop isn't blocked
+  (
+    local output exit_code=0
+    if [[ "$mode" == "shell" || -z "$mode" ]]; then
+      output=$(timeout "$timeout_sec" /bin/sh -c "$code" 2>&1) || exit_code=$?
+      [[ $exit_code -eq 124 ]] && output="${output}
+[timed out after ${timeout_sec}s]"
+    else
+      output="Unsupported mode: ${mode}"
+      exit_code=1
+    fi
+
+    # Build result JSON safely
+    local result_json
+    result_json=$(python3 -c "
+import json, sys
+print(json.dumps({
+  'agent':     sys.argv[1],
+  'output':    sys.argv[2],
+  'exit_code': int(sys.argv[3])
+}))
+" "$AGENT_NAME" "$output" "$exit_code" 2>/dev/null) || \
+    result_json="{\"agent\":\"${AGENT_NAME}\",\"output\":\"(encode error)\",\"exit_code\":${exit_code}}"
+
+    local http_status
+    http_status=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 15 \
+      -X POST "${CCC_URL}/api/exec/${exec_id}/result" \
+      -H "Authorization: Bearer ${CCC_AGENT_TOKEN:-}" \
+      -H "Content-Type: application/json" \
+      -d "$result_json" 2>/dev/null || echo "000")
+
+    if [[ "$http_status" == "200" ]]; then
+      log "rcc.exec ${exec_id}: result posted (exit=${exit_code})"
+    else
+      log "rcc.exec ${exec_id}: result POST returned HTTP ${http_status}"
+    fi
+  ) &
+  disown  # Detach so the subshell doesn't become a zombie
+}
+
 handle_rcc_quench() {
   local body="$1"
   local minutes reason
@@ -117,10 +200,11 @@ process_stream() {
         case "$msg_type" in
           rcc.update) handle_rcc_update "$msg_body" ;;
           rcc.quench) handle_rcc_quench "$msg_body" ;;
+          rcc.exec)   handle_rcc_exec   "$data_buf" ;;  # pass full msg for targets check
           ping)
-            log "ping received from $((_json_field "$data_buf" "from"))"
+            log "ping received from $(_json_field "$data_buf" "from")"
             ;;
-          heartbeat|text|queue_sync|memo|event|pong|handoff|blob)
+          heartbeat|text|queue_sync|memo|event|pong|handoff|blob|status-response)
             : # ignore silently
             ;;
           *)
