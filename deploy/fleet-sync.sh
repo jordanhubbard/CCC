@@ -71,12 +71,22 @@ fi
 
 CCC_URL="${CCC_URL%/}"
 
+# Resolve git repo — prefer the directory containing this script, then WORKSPACE
+SCRIPT_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || echo "")"
+for _candidate in "$SCRIPT_REPO" "$WORKSPACE" "$(pwd)"; do
+  if [[ -d "${_candidate}/.git" ]]; then
+    GIT_REPO="$_candidate"
+    break
+  fi
+done
+GIT_REPO="${GIT_REPO:-$WORKSPACE}"
+
 # Resolve branch
 if [[ -z "$BRANCH" ]]; then
-  BRANCH=$(git -C "${WORKSPACE}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+  BRANCH=$(git -C "${GIT_REPO}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 fi
 
-REV=$(git -C "${WORKSPACE}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+REV=$(git -C "${GIT_REPO}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # ── Colors ─────────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; BLUE='\033[0;34m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -122,7 +132,9 @@ fi
 
 # ── Step 2: Show online agents from ClawBus presence ─────────────────────────
 info "Checking agent presence..."
-PRESENCE_JSON=$(curl -sf --max-time 10 "${CCC_URL}/bus/presence" 2>/dev/null || echo "")
+PRESENCE_JSON=$(curl -sf --max-time 10 \
+  -H "Authorization: Bearer ${CCC_AGENT_TOKEN}" \
+  "${CCC_URL}/bus/presence" 2>/dev/null || echo "")
 if [[ -n "$PRESENCE_JSON" ]]; then
   ONLINE_AGENTS=$(python3 -c "
 import json, sys
