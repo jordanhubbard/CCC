@@ -22,7 +22,7 @@ jobs:
 
       - name: Run CCC API tests
         run: |
-          cd.ccc/tests
+          cd tests
           for f in $(find . -name '*.test.mjs' -not -path '*/gpu/*' -not -path '*/integration*'); do
             echo "::group::$f"
             node --test "$f" || echo "::warning::$f failed"
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory:.ccc/dashboard/ccc-server
+        working-directory: ccc-server
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +45,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces:.ccc/dashboard/ccc-server
+          workspaces: ccc-server
 
       - name: cargo check
         run: cargo check --all-targets
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory:.ccc/dashboard/dashboard-ui
+        working-directory: dashboard-ui
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +68,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces:.ccc/dashboard/dashboard-ui
+          workspaces: dashboard-ui
 
       - name: Install trunk
         run: cargo install trunk --locked || true

@@ -2,14 +2,14 @@
 # docker compose up    → starts the full stack
 # docker compose up -d → detached
 #
-# First run: make init-ccc (generates config in ./ccc-data/)
+# First run: make init (generates config in ~/.ccc/.env)
 #
 # See GETTING_STARTED.md for the full operator walkthrough.
 #
 # Notes:
-# - ccc-data/ is a bind-mount dir created by make init-ccc (contains .env + runtime data)
+# - ccc-data/ is a bind-mount dir for runtime data (queue, registry, secrets)
 # - logs/ is a shared bind-mount for all service logs
-# - The WASM dashboard dist is bind-mounted from ccc/dashboard/dist/ (pre-built, committed to repo)
+# - The WASM dashboard dist is bind-mounted from dist/ (pre-built, committed to repo)
 
 services:
 
@@ -41,7 +41,7 @@ services:
       - ccc-net
 
   # ── Dashboard (WASM static) ────────────────────────────────────────────
-  # Serves the pre-built Leptos/WASM frontend from ccc/dashboard/dist/.
+  # Serves the pre-built Leptos/WASM frontend from dist/.
   # The dist/ is committed to the repo and kept current by the wasm-build CI workflow.
   # Proxies /api and /bus (SSE) to ccc-api.
   dashboard:
@@ -51,7 +51,7 @@ services:
     ports:
       - "${DASHBOARD_PORT:-8788}:80"
     volumes:
-      - ./ccc/dashboard/dist:/usr/share/nginx/html:ro        # pre-built WASM dist
+      - ./dist:/usr/share/nginx/html:ro                      # pre-built WASM dist
       - ./deploy/nginx/dashboard.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - ccc-api

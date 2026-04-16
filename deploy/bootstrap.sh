@@ -196,8 +196,8 @@ fi
 info "Extracting secrets from bootstrap response..."
 [[ -z "$NVIDIA_KEY"     ]] && NVIDIA_KEY=$(echo    "$BOOTSTRAP_JSON" | _json_get .secrets.NVIDIA_API_KEY     .secrets.nvidia_api_key)
 [[ -z "$TOKENHUB_URL"   ]] && TOKENHUB_URL=$(echo  "$BOOTSTRAP_JSON" | _json_get .secrets.TOKENHUB_URL       .secrets.tokenhub_url)
-[[ -z "$TOKENHUB_KEY"   ]] && TOKENHUB_KEY=$(echo  "$BOOTSTRAP_JSON" | _json_get .secrets.TOKENHUB_AGENT_KEY .secrets.tokenhub_agent_key)
-[[ -z "$TELEGRAM_TOKEN" ]] && TELEGRAM_TOKEN=$(echo "$BOOTSTRAP_JSON" | _json_get .secrets.TELEGRAM_BOT_TOKEN .secrets.telegram_token)
+[[ -z "$TOKENHUB_KEY"   ]] && TOKENHUB_KEY=$(echo  "$BOOTSTRAP_JSON" | _json_get .secrets.TOKENHUB_API_KEY .secrets.TOKENHUB_AGENT_KEY .secrets.tokenhub_agent_key)
+[[ -z "$TELEGRAM_TOKEN" ]] && TELEGRAM_TOKEN=$(echo "$BOOTSTRAP_JSON" | _json_get .secrets.TELEGRAM_TOKEN .secrets.TELEGRAM_BOT_TOKEN .secrets.telegram_token)
 
 # Fetch per-agent Slack tokens from CCC (stored as <agent>_slack bundle)
 SLACK_BOT_TOKEN=""
@@ -251,7 +251,8 @@ mkdir -p "$HOME/.ccc"
 ENV_FILE="$HOME/.ccc/.env"
 touch "$ENV_FILE"
 for key in AGENT_NAME CCC_AGENT_TOKEN CCC_URL AGENT_HOST NVIDIA_API_KEY NVIDIA_API_BASE \
-           SLACK_BOT_TOKEN SLACK_APP_TOKEN TELEGRAM_BOT_TOKEN; do
+           SLACK_BOT_TOKEN SLACK_APP_TOKEN TELEGRAM_TOKEN TELEGRAM_BOT_TOKEN \
+           TOKENHUB_API_KEY TOKENHUB_AGENT_KEY; do
   sed -i "/^${key}=/d" "$ENV_FILE" 2>/dev/null || true
 done
 cat >> "$ENV_FILE" <<ENVEOF
@@ -263,13 +264,13 @@ NVIDIA_API_BASE=https://inference-api.nvidia.com/v1
 NVIDIA_API_KEY=${NVIDIA_KEY}
 # TokenHub — preferred inference router (aggregates local vLLM + NVIDIA NIM)
 TOKENHUB_URL=${TOKENHUB_URL:-http://localhost:8090}
-TOKENHUB_AGENT_KEY=${TOKENHUB_KEY}
+TOKENHUB_API_KEY=${TOKENHUB_KEY}
 ENVEOF
 
 # Write channel tokens if obtained
 [[ -n "$SLACK_BOT_TOKEN"  ]] && echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}"   >> "$ENV_FILE"
 [[ -n "$SLACK_APP_TOKEN"  ]] && echo "SLACK_APP_TOKEN=${SLACK_APP_TOKEN}"   >> "$ENV_FILE"
-[[ -n "$TELEGRAM_TOKEN"   ]] && echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}" >> "$ENV_FILE"
+[[ -n "$TELEGRAM_TOKEN"   ]] && echo "TELEGRAM_TOKEN=${TELEGRAM_TOKEN}"     >> "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 # Smoke test: verify critical vars are non-empty

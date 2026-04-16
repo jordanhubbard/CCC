@@ -180,5 +180,5 @@ curl -s -H "Authorization: Bearer $CCC_AGENT_TOKEN" \
   $CCC_URL/api/agents | jq '.[] | select(.name == env.AGENT_NAME)'
 
 # Check recent heartbeats in dashboard
-# http://<CCC_HOST>:3000 → Fleet tab (if Grafana is deployed)
+# http://<CCC_HOST>:8788 → Fleet tab
 ```

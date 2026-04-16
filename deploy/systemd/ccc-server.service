@@ -8,15 +8,12 @@ Type=simple
 User=jkh
 WorkingDirectory=/home/jkh/Src/CCC
 
-# Binary built from ccc/dashboard/ccc-server via:
-#   cd ccc/dashboard && cargo build -p ccc-server --release
 ExecStart=/usr/local/bin/ccc-server
 
 # Core config
 Environment=CCC_PORT=8789
 Environment=CCC_DATA_DIR=/home/jkh/.ccc/data
 Environment=RUST_LOG=ccc_server=info
-Environment=DASHBOARD_DIST=AGENT_HOME/Src/CCC/ccc/clawchat/dist
 
 # Load per-node secrets (QDRANT_FLEET_KEY, etc.)
 EnvironmentFile=-AGENT_HOME/.ccc/.env

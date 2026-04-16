@@ -1,22 +1,20 @@
 [Unit]
-Description=CCC Dashboard Server (nginx + WASM SPA)
+Description=CCC Dashboard (nginx serving WASM SPA)
 Documentation=https://github.com/jordanhubbard/rockyandfriends
 After=network.target ccc-server.service
 Wants=ccc-server.service
 
 [Service]
-Type=simple
-User=jkh
-WorkingDirectory=/home/jkh/Src/CCC
+Type=forking
+User=root
+PIDFile=/run/nginx-ccc-dashboard.pid
 
-# Serves the Leptos WASM SPA from ccc/dashboard/dist/
-# Build with: cd ccc/dashboard && make release-ui
-ExecStart=/home/jkh/Src/CCC/ccc/dashboard/target/release/dashboard-server
-
-Environment=RCC_DASHBOARD_PORT=8788
-Environment=RCC_URL=http://127.0.0.1:8789
-Environment=DASHBOARD_DIST=/home/jkh/Src/CCC/ccc/dashboard/dist
-Environment=CCC_AGENT_TOKEN=
+# Serves the pre-built Leptos/WASM dist/ via nginx.
+# Config: deploy/nginx/dashboard.conf  (proxies /api and /bus to ccc-server on 8789)
+ExecStartPre=/usr/sbin/nginx -t -c /etc/nginx/sites-available/ccc-dashboard.conf
+ExecStart=/usr/sbin/nginx -g 'daemon on;' -c /etc/nginx/sites-available/ccc-dashboard.conf
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
 
 Restart=on-failure
 RestartSec=5s

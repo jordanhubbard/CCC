@@ -588,7 +588,7 @@ Hermes handles all messaging channels. CCC itself does not implement channel con
 
 **Channels observed in running deployments:**
 - **Slack** — Multiple workspace bot tokens per node, configured via `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` in `.env`
-- **Telegram** — `TELEGRAM_BOT_TOKEN` env var; active status node-dependent
+- **Telegram** — `TELEGRAM_TOKEN` env var; active status node-dependent
 - **Mattermost** — Configured at `chat.yourmom.photos` on some nodes
 
 ---

@@ -153,7 +153,7 @@ rocky/
 ├── workqueue/              # Queue schema, spec, agent instructions
 ├── squirrelbus/            # Bus protocol spec + plugin
 ├── lib/                    # Shared utilities
-├── dashboard/              # Current dashboard (being refactored into.ccc/dashboard)
+├── dist/                   # Pre-built WASM dashboard (Leptos/trunk, committed to repo)
 ├── docs/                   # Architecture docs, setup guides
 │   └── ARCHITECTURE.md     # This file
 └── deploy/                 # Azure deployment scripts, systemd units, etc.

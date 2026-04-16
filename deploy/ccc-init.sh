@@ -206,14 +206,16 @@ read -r CHANNEL_SELECTION
 CHANNEL_SELECTION="${CHANNEL_SELECTION:-squirrelchat}"
 
 # Parse channel selection
-SLACK_TOKEN=""
+SLACK_BOT_TOKEN=""
+SLACK_APP_TOKEN=""
 SLACK_SIGNING_SECRET=""
 TELEGRAM_TOKEN=""
 
 if echo "$CHANNEL_SELECTION" | grep -qi "slack"; then
   echo ""
   info "Configuring Slack..."
-  prompt SLACK_TOKEN "Slack bot token (xoxb-...)" ""
+  prompt SLACK_BOT_TOKEN "Slack bot token (xoxb-...)" ""
+  prompt SLACK_APP_TOKEN "Slack app-level token (xapp-...)" ""
   prompt SLACK_SIGNING_SECRET "Slack signing secret (from app settings → Basic Information)" ""
 fi
 
@@ -284,7 +286,7 @@ NVIDIA_API_BASE=https://inference-api.nvidia.com/v1
 NVIDIA_API_KEY=${NVIDIA_API_KEY}
 # TokenHub — preferred inference router (aggregates local vLLM + NVIDIA NIM)
 TOKENHUB_URL=http://localhost:8090
-TOKENHUB_AGENT_KEY=${TOKENHUB_API_KEY:-}
+TOKENHUB_API_KEY=${TOKENHUB_API_KEY:-}
 TOKENHUB_ADMIN_TOKEN=${TOKENHUB_ADMIN_TOKEN:-}
 
 # ── Storage: MinIO ─────────────────────────────────────────────────────────
@@ -299,7 +301,8 @@ AZURE_BLOB_SAS_TOKEN=
 
 # ── Channel Integrations ───────────────────────────────────────────────────
 # Channels selected during init: ${CHANNEL_SELECTION}
-SLACK_TOKEN=${SLACK_TOKEN}
+SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
 SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
 MATTERMOST_URL=${MATTERMOST_URL}
 MATTERMOST_TOKEN=${MATTERMOST_TOKEN}
@@ -397,7 +400,6 @@ SVCEOF
     INSTALL_LAUNCH="${INSTALL_LAUNCH:-y}"
     if [ "$INSTALL_LAUNCH" = "y" ]; then
       PLIST="$HOME/Library/LaunchAgents/com.ccc.api.plist"
-      NODE_BIN="$(command -v node)"
       cat > "$PLIST" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -409,7 +411,7 @@ SVCEOF
   <array>
     <string>/bin/bash</string>
     <string>-c</string>
-    <string>set -a; source ${ENV_FILE}; set +a; exec ${NODE_BIN} ${WORKSPACE_DIR}.ccc/api/index.mjs</string>
+    <string>set -a; source ${ENV_FILE}; set +a; exec /usr/local/bin/ccc-server</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

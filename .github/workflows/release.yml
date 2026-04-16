@@ -27,50 +27,50 @@ jobs:
         include:
           # ── squirrelchat-server ───────────────────────────────────────────
           - binary: squirrelchat-server
-            crate_dir:.ccc/dashboard/squirrelchat-server
+            crate_dir: squirrelchat-server
             target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
             cross: false
 
           - binary: squirrelchat-server
-            crate_dir:.ccc/dashboard/squirrelchat-server
+            crate_dir: squirrelchat-server
             target: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
             cross: true
 
           - binary: squirrelchat-server
-            crate_dir:.ccc/dashboard/squirrelchat-server
+            crate_dir: squirrelchat-server
             target: x86_64-apple-darwin
             runner: macos-latest
             cross: false
 
           - binary: squirrelchat-server
-            crate_dir:.ccc/dashboard/squirrelchat-server
+            crate_dir: squirrelchat-server
             target: aarch64-apple-darwin
             runner: macos-latest
             cross: false
 
           # ── dashboard-server ─────────────────────────────────────────────
           - binary: dashboard-server
-            crate_dir:.ccc/dashboard/dashboard-server
+            crate_dir: dashboard-server
             target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
             cross: false
 
           - binary: dashboard-server
-            crate_dir:.ccc/dashboard/dashboard-server
+            crate_dir: dashboard-server
             target: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
             cross: true
 
           - binary: dashboard-server
-            crate_dir:.ccc/dashboard/dashboard-server
+            crate_dir: dashboard-server
             target: x86_64-apple-darwin
             runner: macos-latest
             cross: false
 
           - binary: dashboard-server
-            crate_dir:.ccc/dashboard/dashboard-server
+            crate_dir: dashboard-server
             target: aarch64-apple-darwin
             runner: macos-latest
             cross: false

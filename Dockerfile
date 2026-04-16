@@ -1,7 +1,7 @@
 # CCC — Claw Command Center
 # Multi-stage build: Rust ccc-server API binary.
 #
-# The WASM dashboard static files (ccc/dashboard/dist/) are NOT baked into
+# The WASM dashboard static files (dist/) are NOT baked into
 # this image — they are bind-mounted at runtime from the repo checkout.
 # The dist/ is pre-built and committed; kept current by wasm-build.yml CI.
 #
@@ -17,14 +17,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Cache deps first
-COPY ccc/dashboard/Cargo.toml ccc/dashboard/Cargo.lock ./ccc/dashboard/
-COPY ccc/dashboard/ccc-server/Cargo.toml ./ccc/dashboard/ccc-server/
-RUN mkdir -p ccc/dashboard/ccc-server/src && echo 'fn main(){}' > ccc/dashboard/ccc-server/src/main.rs
-RUN cd ccc/dashboard && cargo build --release --bin ccc-server 2>/dev/null || true
+COPY Cargo.toml Cargo.lock ./
+COPY ccc-server/Cargo.toml ./ccc-server/
+RUN mkdir -p ccc-server/src && echo 'fn main(){}' > ccc-server/src/main.rs
+RUN cargo build --release --bin ccc-server 2>/dev/null || true
 
 # Full source
-COPY ccc/dashboard/ ./ccc/dashboard/
-RUN cd ccc/dashboard && cargo build --release --bin ccc-server
+COPY ccc-server/ ./ccc-server/
+RUN cargo build --release --bin ccc-server
 
 # ── Stage 2: final image ─────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/ccc/dashboard/target/release/ccc-server /usr/local/bin/ccc-server
+COPY --from=builder /build/target/release/ccc-server /usr/local/bin/ccc-server
 
 # Deploy assets (scripts, templates)
 COPY deploy/ ./deploy/

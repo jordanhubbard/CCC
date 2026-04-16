@@ -106,7 +106,7 @@ make docker-up
 
 This brings up two containers:
 - **ccc-api** (port 8789) — the coordination API (Rust/Axum binary)
-- **dashboard** (port 8788) — WASM web UI (nginx serving pre-built static files from `ccc/dashboard/dist/`)
+- **dashboard** (port 8788) — WASM web UI (nginx serving pre-built static files from `dist/`)
 
 #### Step 3: Verify
 
@@ -203,7 +203,7 @@ cd rockyandfriends
 make init   # configure a local dev instance
 ```
 
-The API server is a Rust binary (built from `ccc/dashboard/`). The dashboard is Leptos WASM (pre-built dist committed at `ccc/dashboard/dist/`).
+The API server is a Rust binary (`ccc-server`). The dashboard is Leptos WASM (pre-built dist committed at `dist/`).
 
 ```bash
 make build   # build ccc-server Rust binary
