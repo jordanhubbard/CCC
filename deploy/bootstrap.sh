@@ -576,6 +576,75 @@ HCONF
   fi
 fi
 
+# ── 9b. Register ccc-bus-listener with supervisord ────────────────────────────
+# Subscribes to ClawBus SSE and triggers immediate agent-pull on rcc.update.
+BUS_LISTENER="${CCC_WORKSPACE}/deploy/bus-listener.sh"
+BUS_LOG="$HOME/.ccc/logs/bus-listener.log"
+mkdir -p "$HOME/.ccc/logs"
+
+if [[ -f "$BUS_LISTENER" ]]; then
+  _bus_listener_block() {
+    cat <<BCONF
+[program:ccc-bus-listener]
+command=/bin/bash ${BUS_LISTENER}
+user=$(whoami)
+environment=HOME="${HOME}"
+directory=${HOME}
+stdout_logfile=${BUS_LOG}
+stdout_logfile_maxbytes=5MB
+stdout_logfile_backups=2
+redirect_stderr=true
+autostart=true
+autorestart=true
+startsecs=5
+startretries=10
+priority=5
+BCONF
+  }
+
+  _bus_registered=false
+  for _confd in "/etc/supervisor/conf.d" "/etc/supervisord.d"; do
+    if [[ -d "$_confd" ]]; then
+      _bconf="$_confd/ccc-bus-listener.conf"
+      if [[ ! -f "$_bconf" ]]; then
+        _bus_listener_block | sudo tee "$_bconf" > /dev/null
+        sudo supervisorctl reread 2>/dev/null && sudo supervisorctl update 2>/dev/null || true
+        success "ccc-bus-listener supervisor conf: $_bconf"
+      else
+        success "ccc-bus-listener supervisor conf already exists: $_bconf"
+      fi
+      _bus_registered=true
+      break
+    fi
+  done
+
+  if [[ "$_bus_registered" == false ]]; then
+    for _mainconf in "/etc/supervisord.conf" "/etc/supervisor/supervisord.conf"; do
+      if [[ -f "$_mainconf" ]]; then
+        if ! grep -q "\[program:ccc-bus-listener\]" "$_mainconf" 2>/dev/null; then
+          { echo ""; _bus_listener_block; } | sudo tee -a "$_mainconf" > /dev/null
+          sudo supervisorctl reread 2>/dev/null && sudo supervisorctl update 2>/dev/null || true
+          success "ccc-bus-listener appended to $_mainconf"
+        else
+          success "ccc-bus-listener already in $_mainconf"
+        fi
+        _bus_registered=true
+        break
+      fi
+    done
+  fi
+
+  if [[ "$_bus_registered" == false ]]; then
+    warn "No supervisord config found — start bus-listener manually: bash ${BUS_LISTENER}"
+    warn "  Or add it to your process manager. Log: ${BUS_LOG}"
+    # Nohup fallback
+    nohup bash "$BUS_LISTENER" >> "$BUS_LOG" 2>&1 &
+    success "ccc-bus-listener started (nohup fallback)"
+  fi
+else
+  warn "bus-listener.sh not found at ${BUS_LISTENER} — ClawBus-triggered sync disabled"
+fi
+
 # ── 10. Hardware fingerprint + heartbeat ──────────────────────────────────
 info "Collecting hardware fingerprint..."
 
