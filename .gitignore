@@ -128,4 +128,5 @@ target/
 rcc/dashboard/data/
 __pycache__/
 skills/agent-skills/
+skills/superpowers/
 ccc/

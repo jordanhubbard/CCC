@@ -472,6 +472,31 @@ if command -v hermes &>/dev/null; then
     success "agent-skills: ${_count} engineering workflow skills installed into Hermes"
   fi
 
+  # superpowers orchestration skills — complements agent-skills with multi-agent
+  # coordination, git worktrees, systematic debugging, and two-stage review
+  SUPERPOWERS_CACHE="$HOME/.ccc/superpowers"
+  if [[ -d "$SUPERPOWERS_CACHE/.git" ]]; then
+    git -C "$SUPERPOWERS_CACHE" pull --ff-only 2>/dev/null || \
+      warn "superpowers update failed — using cached version"
+  else
+    info "Cloning superpowers..."
+    git clone --depth=1 https://github.com/obra/superpowers.git \
+      "$SUPERPOWERS_CACHE" 2>/dev/null || \
+      warn "superpowers clone failed (non-fatal — skills will be missing)"
+  fi
+  if [[ -d "$SUPERPOWERS_CACHE/skills" ]]; then
+    _count=0
+    for _skill_file in "$SUPERPOWERS_CACHE/skills"/*.md; do
+      [[ -f "$_skill_file" ]] || continue
+      _skill_name="$(basename "$_skill_file" .md)"
+      # Skip meta-skills that are only about the framework itself
+      [[ "$_skill_name" == "using-superpowers" ]] && continue
+      cp "$_skill_file" "$HOME/.hermes/skills/${_skill_name}.md"
+      _count=$((_count + 1))
+    done
+    success "superpowers: ${_count} orchestration skills installed into Hermes"
+  fi
+
   # Write ~/.hermes/config.yaml with CCC env vars and channel tokens.
   # Hermes reads this on startup — tokens are NOT baked into the supervisor conf.
   HERMES_CONFIG="$HOME/.hermes/config.yaml"
