@@ -129,13 +129,28 @@ else
     pipx install 'hermes-agent[slack]' 2>/dev/null && success "Hermes installed (pipx)" || true
   fi
   if ! command -v hermes &>/dev/null; then
-    pip3 install 'hermes-agent[slack]' 2>/dev/null && success "Hermes installed (pip3)" || true
+    pip3 install --user 'hermes-agent[slack]' 2>/dev/null && success "Hermes installed (pip3)" || true
   fi
   export PATH="$HOME/.local/bin:$PATH"
+  # Fallback: clone from GitHub source if pip failed (package may not be on PyPI)
+  if ! command -v hermes &>/dev/null; then
+    HERMES_SRC="$HOME/.ccc/hermes-src"
+    if [[ ! -d "$HERMES_SRC/.git" ]]; then
+      info "Cloning hermes-agent from source..."
+      git clone --depth=1 https://github.com/jordanhubbard/hermes-agent.git "$HERMES_SRC" 2>/dev/null || \
+        warn "hermes-agent source clone failed — install manually"
+    fi
+    if [[ -d "$HERMES_SRC" ]]; then
+      python3 -m venv "$HOME/.ccc/hermes-venv" 2>/dev/null || true
+      "$HOME/.ccc/hermes-venv/bin/pip" install -e "$HERMES_SRC[slack]" 2>/dev/null || \
+        "$HOME/.ccc/hermes-venv/bin/pip" install -e "$HERMES_SRC" 2>/dev/null || true
+      ln -sf "$HOME/.ccc/hermes-venv/bin/hermes" "$HOME/.local/bin/hermes" 2>/dev/null || true
+    fi
+  fi
   if command -v hermes &>/dev/null; then
     success "Hermes agent installed"
   else
-    warn "Hermes agent install failed — install manually: pipx install 'hermes-agent[slack]'"
+    warn "Hermes agent install failed — install manually from: https://github.com/jordanhubbard/hermes-agent"
   fi
 fi
 
@@ -262,6 +277,10 @@ CCC_URL=${CCC_URL}
 AGENT_HOST=$(hostname)
 NVIDIA_API_BASE=https://inference-api.nvidia.com/v1
 NVIDIA_API_KEY=${NVIDIA_KEY}
+# Claude Code — uses NVIDIA inference as backend (Anthropic-compatible proxy)
+ANTHROPIC_BASE_URL=https://inference-api.nvidia.com
+ANTHROPIC_API_KEY=${NVIDIA_KEY}
+CLAUDE_CODE_DEFAULT_MODEL=azure/anthropic/claude-sonnet-4-6
 # TokenHub — preferred inference router (aggregates local vLLM + NVIDIA NIM)
 TOKENHUB_URL=${TOKENHUB_URL:-http://localhost:8090}
 TOKENHUB_API_KEY=${TOKENHUB_KEY}
@@ -577,73 +596,56 @@ HCONF
   fi
 fi
 
-# ── 9b. Register ccc-bus-listener with supervisord ────────────────────────────
-# Subscribes to ClawBus SSE and triggers immediate agent-pull on rcc.update.
-BUS_LISTENER="${CCC_WORKSPACE}/deploy/bus-listener.sh"
-BUS_LOG="$HOME/.ccc/logs/bus-listener.log"
-mkdir -p "$HOME/.ccc/logs"
+# ── 9b. Install ccc-bus-listener (systemd/launchd/supervisord) ───────────────
+# Subscribes to ClawBus SSE stream and triggers agent-pull on rcc.update.
+# Uses install-bus-listener.sh which picks the right process manager.
+info "Installing ccc-bus-listener..."
+INSTALL_BUS="${CCC_WORKSPACE}/deploy/install-bus-listener.sh"
+if [[ -x "$INSTALL_BUS" ]]; then
+  bash "$INSTALL_BUS" 2>&1 | grep -E "✓|⚠|ERROR|Done|active" | while read -r l; do info "$l"; done || true
+  success "ccc-bus-listener installed"
+else
+  warn "install-bus-listener.sh not found — ClawBus-triggered sync disabled"
+fi
 
-if [[ -f "$BUS_LISTENER" ]]; then
-  _bus_listener_block() {
-    cat <<BCONF
-[program:ccc-bus-listener]
-command=/bin/bash ${BUS_LISTENER}
-user=$(whoami)
-environment=HOME="${HOME}"
-directory=${HOME}
-stdout_logfile=${BUS_LOG}
-stdout_logfile_maxbytes=5MB
-stdout_logfile_backups=2
-redirect_stderr=true
-autostart=true
-autorestart=true
-startsecs=5
-startretries=10
-priority=5
-BCONF
-  }
+# ── 9c. Install ccc-queue-worker (systemd/launchd/supervisord) ───────────────
+# Polls /api/queue and autonomously executes pending items via claude/hermes.
+info "Installing ccc-queue-worker..."
+INSTALL_QW="${CCC_WORKSPACE}/deploy/install-queue-worker.sh"
+if [[ -x "$INSTALL_QW" ]]; then
+  bash "$INSTALL_QW" 2>&1 | grep -E "✓|⚠|ERROR|Done|active" | while read -r l; do info "$l"; done || true
+  success "ccc-queue-worker installed"
+else
+  warn "install-queue-worker.sh not found — queue processing disabled"
+fi
 
-  _bus_registered=false
-  for _confd in "/etc/supervisor/conf.d" "/etc/supervisord.d"; do
-    if [[ -d "$_confd" ]]; then
-      _bconf="$_confd/ccc-bus-listener.conf"
-      if [[ ! -f "$_bconf" ]]; then
-        _bus_listener_block | sudo tee "$_bconf" > /dev/null
-        sudo supervisorctl reread 2>/dev/null && sudo supervisorctl update 2>/dev/null || true
-        success "ccc-bus-listener supervisor conf: $_bconf"
-      else
-        success "ccc-bus-listener supervisor conf already exists: $_bconf"
-      fi
-      _bus_registered=true
-      break
-    fi
-  done
-
-  if [[ "$_bus_registered" == false ]]; then
-    for _mainconf in "/etc/supervisord.conf" "/etc/supervisor/supervisord.conf"; do
-      if [[ -f "$_mainconf" ]]; then
-        if ! grep -q "\[program:ccc-bus-listener\]" "$_mainconf" 2>/dev/null; then
-          { echo ""; _bus_listener_block; } | sudo tee -a "$_mainconf" > /dev/null
-          sudo supervisorctl reread 2>/dev/null && sudo supervisorctl update 2>/dev/null || true
-          success "ccc-bus-listener appended to $_mainconf"
-        else
-          success "ccc-bus-listener already in $_mainconf"
-        fi
-        _bus_registered=true
-        break
-      fi
-    done
-  fi
-
-  if [[ "$_bus_registered" == false ]]; then
-    warn "No supervisord config found — start bus-listener manually: bash ${BUS_LISTENER}"
-    warn "  Or add it to your process manager. Log: ${BUS_LOG}"
-    # Nohup fallback
-    nohup bash "$BUS_LISTENER" >> "$BUS_LOG" 2>&1 &
-    success "ccc-bus-listener started (nohup fallback)"
+# ── 9d. Install MinIO client (mc) for AgentFS workspace lifecycle ────────────
+if ! command -v mc &>/dev/null; then
+  info "Installing MinIO client (mc)..."
+  mkdir -p "$HOME/.local/bin"
+  _MC_URL="https://dl.min.io/client/mc/release/linux-amd64/mc"
+  [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]] && \
+    _MC_URL="https://dl.min.io/client/mc/release/linux-arm64/mc"
+  [[ "$(uname -s)" == "Darwin" ]] && \
+    _MC_URL="https://dl.min.io/client/mc/release/darwin-arm64/mc"
+  if curl -sf --max-time 60 "$_MC_URL" -o "$HOME/.local/bin/mc" 2>/dev/null; then
+    chmod +x "$HOME/.local/bin/mc"
+    success "mc installed at $HOME/.local/bin/mc"
+  else
+    warn "mc download failed — AgentFS workspace sync will be skipped"
   fi
 else
-  warn "bus-listener.sh not found at ${BUS_LISTENER} — ClawBus-triggered sync disabled"
+  success "mc already installed: $(command -v mc)"
+fi
+
+# Configure mc if MINIO_* vars are available
+if command -v mc &>/dev/null && [[ -n "${MINIO_ENDPOINT:-}" ]]; then
+  mc alias set "${MINIO_ALIAS:-ccc-hub}" "$MINIO_ENDPOINT" \
+    "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" 2>/dev/null \
+    && success "mc alias '${MINIO_ALIAS:-ccc-hub}' configured" \
+    || warn "mc alias configuration failed (non-fatal)"
+elif command -v mc &>/dev/null; then
+  warn "MINIO_ENDPOINT not set — mc installed but AgentFS sync unconfigured"
 fi
 
 # ── 10. Hardware fingerprint + heartbeat ──────────────────────────────────
