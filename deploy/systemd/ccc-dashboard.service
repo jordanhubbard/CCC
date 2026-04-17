@@ -1,6 +1,6 @@
 [Unit]
 Description=CCC Dashboard (nginx serving WASM SPA)
-Documentation=https://github.com/jordanhubbard/rockyandfriends
+Documentation=https://github.com/jordanhubbard/CCC
 After=network.target ccc-server.service
 Wants=ccc-server.service
 

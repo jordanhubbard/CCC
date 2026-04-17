@@ -11,13 +11,13 @@ If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out w
 CCC spans multiple repos. On any new command node, clone them **without waiting to be asked**:
 
 ```bash
-git clone https://github.com/jordanhubbard/rockyandfriends ~/Src/rockyandfriends
-git clone https://github.com/jordanhubbard/tokenhub        ~/Src/tokenhub
-git clone https://github.com/jordanhubbard/nanolang        ~/Src/nanolang
-git clone https://github.com/jordanhubbard/agentos         ~/Src/agentos
+git clone https://github.com/jordanhubbard/CCC      ~/Src/CCC
+git clone https://github.com/jordanhubbard/tokenhub  ~/Src/tokenhub
+git clone https://github.com/jordanhubbard/nanolang  ~/Src/nanolang
+git clone https://github.com/jordanhubbard/agentos   ~/Src/agentos
 ```
 
-Minimum for a command node (no GPU, no dev): `rockyandfriends` + `tokenhub`.
+Minimum for a command node (no GPU, no dev): `CCC` + `tokenhub`.
 Full dev node (Natasha/Bullwinkle): all four.
 
 The human should only need to hand you `CCC_URL` and `CCC_AGENT_TOKEN`. Everything else you figure out.

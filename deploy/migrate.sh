@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# migrate.sh — Migrate an existing agent workspace to current rockyandfriends baseline
+# migrate.sh — Migrate an existing agent workspace to current CCC baseline
 # Usage: bash migrate.sh --agent=bullwinkle --ccc=http://<CCC_HOST>:8789 --token=<static-agent-token>
 # Run ON the agent machine (not remotely)
 set -euo pipefail
@@ -45,12 +45,12 @@ echo "CCC: $CCC"
 echo "Workspace: $WORKSPACE"
 echo ""
 
-# ── Step 1: Verify rockyandfriends repo ─────────────────────────────────────
-echo "[1/7] Verifying workspace is a rockyandfriends repo..."
+# ── Step 1: Verify CCC repo ─────────────────────────────────────
+echo "[1/7] Verifying workspace is a CCC repo..."
 cd "$WORKSPACE"
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
-if [[ "$REMOTE_URL" != *"rockyandfriends"* ]]; then
-  echo "Error: workspace remote is not a rockyandfriends repo: $REMOTE_URL" >&2
+if [[ "$REMOTE_URL" != *"CCC"* ]]; then
+  echo "Error: workspace remote is not a CCC repo: $REMOTE_URL" >&2
   exit 1
 fi
 echo "      Remote: $REMOTE_URL — OK"

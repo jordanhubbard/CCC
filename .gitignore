@@ -7,31 +7,19 @@ hermes-agent/
 
 # Sensitive / personal
 memory/
-!rcc/memory/
 MEMORY.md
 USER.md
 BOOTSTRAP.md
-openclaw.json
 *.env
 .env.*
 .env
 !deploy/.env.template
 
-# RCC runtime state
-rcc/api/agents.json
-rcc/api/projects.json
-rcc/data/github-key.json
-rcc/data/secrets.json
-brain-state.json
-rcc/brain/brain-state.json
-
 # Generated configs (rendered from *.tmpl by make init-rcc)
 # These contain real hostnames/tokens — never commit them
 onboarding/ONBOARD_*.rendered.md
 
-# Docker operator data dir (contains .env with real secrets)
-rcc-data/
-squirrelchat-data/
+# Runtime data dirs (contain secrets / ephemeral state)
 logs/
 
 # Queue state (runtime data, not source)
@@ -45,7 +33,6 @@ memory/channel-state.json
 *.log
 *.bak
 workqueue/*.bak*
-squirrelbus/bus.jsonl
 crash-reports/
 
 # Build artifacts
@@ -84,9 +71,6 @@ build_*.py
 # Lock files
 renders/hf_cache/hub/.locks/
 
-# OpenClaw internal state
-.openclaw/
-
 # Scratch/temp
 tmp/
 scratch/
@@ -109,23 +93,13 @@ workqueue/proposals/
 # Internal session files
 suraj_songs.txt
 grievances/
-rcc/api/data/heartbeat-history/*.jsonl
-rcc/api/data/heartbeat-history/*.jsonl
-squirrelchat/squirrelchat.db
-
-# Instance-specific project registry (contains deployment URLs)
-rcc/api/projects.json
-
-
-# init-rcc rendered outputs (generated from *.tmpl — never commit instance configs)
-.rcc-init
+# init-acc rendered outputs (generated from *.tmpl — never commit instance configs)
 HEARTBEAT.md
 workqueue/WORKQUEUE_AGENT_NATASHA.md
 
 # Rust build artifacts
 target/
 **/target/
-rcc/dashboard/data/
 __pycache__/
 skills/agent-skills/
 skills/superpowers/

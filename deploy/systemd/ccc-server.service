@@ -1,6 +1,6 @@
 [Unit]
 Description=CCC API Server (Rust/Axum)
-Documentation=https://github.com/jordanhubbard/rockyandfriends
+Documentation=https://github.com/jordanhubbard/CCC
 After=network.target
 
 [Service]

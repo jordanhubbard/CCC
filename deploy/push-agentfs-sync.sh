@@ -63,7 +63,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "agentfs-sync is now at s3://agents/shared/bin/agentfs-sync"
 echo ""
 echo "To deploy to all agents, run bootstrap on each agent:"
-echo "  curl -sSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/deploy/bootstrap.sh | \\"
+echo "  curl -sSL https://raw.githubusercontent.com/jordanhubbard/CCC/main/deploy/bootstrap.sh | \\"
 echo "    bash -s -- --ccc=<CCC_URL> --token=<bootstrap-token> --agent=<name>"
 echo ""
 echo "Or if already bootstrapped, re-run just the agentfs-sync install step:"

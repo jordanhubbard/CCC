@@ -3,7 +3,7 @@
 # Installs hermes-agent, seeds workspace, configures agent identity.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/jordanhubbard/rockyandfriends/main/deploy/bootstrap.sh | \
+#   curl -sSL https://raw.githubusercontent.com/jordanhubbard/CCC/main/deploy/bootstrap.sh | \
 #     bash -s -- --ccc=http://<your-ccc-hub-url>:8789 --token=<bootstrap-token> --agent=boris
 #
 # If you have a pre-known agent token, pass --agent-token=<token> to skip the bootstrap API call.
@@ -162,7 +162,7 @@ info "Setting up ACC workspace at $ACC_WORKSPACE..."
 if [[ -d "$ACC_WORKSPACE/.git" ]]; then
   git -C "$ACC_WORKSPACE" pull --ff-only || warn "git pull failed"
 else
-  git clone "${CCC_REPO:-https://github.com/jordanhubbard/rockyandfriends.git}" "$ACC_WORKSPACE"
+  git clone "${CCC_REPO:-https://github.com/jordanhubbard/CCC.git}" "$ACC_WORKSPACE"
 fi
 success "CCC workspace ready"
 

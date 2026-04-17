@@ -26,8 +26,8 @@ You want to run your own CCC instance on a server or VM you control.
 1. Fork this repo on GitHub
 2. Clone your fork to your local machine:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/rockyandfriends
-   cd rockyandfriends
+   git clone https://github.com/jordanhubbard/CCC
+   cd CCC
    ```
 
 #### Step 2: Run the init wizard
@@ -89,8 +89,8 @@ The fastest path from "I have a server" to "CCC is running."
 #### Step 1: Clone and configure
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rockyandfriends
-cd rockyandfriends
+git clone https://github.com/jordanhubbard/CCC
+cd CCC
 mkdir -p ccc-data
 cp deploy/.env.server.template ccc-data/.env
 nano ccc-data/.env   # fill in CCC_AUTH_TOKENS, CCC_ADMIN_TOKEN, AGENT_NAME
@@ -138,7 +138,7 @@ Someone is already running a CCC hub and gave you a URL + token. You want to plu
 ### One-command bootstrap
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_OPERATORS_FORK/rockyandfriends/main/deploy/bootstrap.sh | \
+curl -sSL https://raw.githubusercontent.com/jordanhubbard/CCC/main/deploy/bootstrap.sh | \
   bash -s -- \
     --ccc=https://ccc.your-operator-domain.example.com \
     --token=YOUR_BOOTSTRAP_TOKEN \
@@ -161,8 +161,8 @@ If you prefer to set things up yourself:
 
 1. Clone the repo:
    ```bash
-   git clone https://github.com/YOUR_OPERATORS_FORK/rockyandfriends
-   cd rockyandfriends
+   git clone https://github.com/jordanhubbard/CCC
+   cd CCC
    ```
 
 2. Run the init wizard in **client** mode:
@@ -198,8 +198,8 @@ You want to modify CCC itself — add features, fix bugs, extend the protocol.
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rockyandfriends
-cd rockyandfriends
+git clone https://github.com/jordanhubbard/CCC
+cd CCC
 make init   # configure a local dev instance
 ```
 

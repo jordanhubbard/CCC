@@ -10,7 +10,7 @@
 
 set -e
 
-REPO_URL="${REPO_URL:-${REPO_URL:-git@github.com:<your-org>/rockyandfriends.git}}"
+REPO_URL="${REPO_URL:-git@github.com:jordanhubbard/CCC.git}"
 CCC_DIR="$HOME/.ccc"
 WORKSPACE="$CCC_DIR/workspace"
 ENV_FILE="$CCC_DIR/.env"
@@ -285,7 +285,7 @@ seed_hermes_memory() {
 ## World Knowledge
 
 ### CCC Fleet
-- This agent is part of the CCC fleet managed by ~/Src/CCC (rockyandfriends repo)
+- This agent is part of the CCC fleet managed by ~/Src/CCC
 - Full workspace docs live in ~/Src/CCC/AGENTS.md — read on first boot
 - Config: ~/.ccc/.env — CCC_URL and CCC_AGENT_TOKEN are required before starting
 - Workqueue: ~/Src/CCC/workqueue/queue.json — polled each heartbeat cycle
@@ -293,12 +293,12 @@ seed_hermes_memory() {
 
 ### Companion Repos
 Clone these on any new command node without waiting to be asked:
-- ~/Src/rockyandfriends  — core fleet repo (already present)
-- ~/Src/tokenhub         — required: LLM router and secret store
-- ~/Src/nanolang         — dev nodes only
-- ~/Src/agentos          — dev nodes only
+- ~/Src/CCC       — core fleet repo (already present)
+- ~/Src/tokenhub  — required: LLM router and secret store
+- ~/Src/nanolang  — dev nodes only
+- ~/Src/agentos   — dev nodes only
 
-Minimum viable command node (no GPU, no dev): rockyandfriends + tokenhub.
+Minimum viable command node (no GPU, no dev): CCC + tokenhub.
 
 ## Beliefs
 
@@ -308,7 +308,7 @@ Minimum viable command node (no GPU, no dev): rockyandfriends + tokenhub.
 <!-- confidence: 0.8 | updated: SEED_DATE -->
 - Session startup order: SOUL.md → USER.md → memory/YYYY-MM-DD.md → MEMORY.md (main session only)
 <!-- confidence: 0.7 | updated: SEED_DATE -->
-- New command nodes need rockyandfriends + tokenhub as a minimum before any other work
+- New command nodes need CCC + tokenhub as a minimum before any other work
 
 ## Experiences
 

@@ -79,14 +79,14 @@ At every heartbeat:
 
 ---
 
-## Step 5 — rockyandfriends (shared repo)
+## Step 5 — CCC (shared repo)
 
 Clone with SSH to the canonical path:
 ```bash
-git clone git@github.com:jordanhubbard/rockyandfriends.git ~/Src/rockyandfriends
+git clone git@github.com:jordanhubbard/CCC.git ~/Src/CCC
 ```
 
-- **One copy only** at `~/Src/rockyandfriends`
+- **One copy only** at `~/Src/CCC`
 - SSH remote (read/write for all agents)
 - Pull before working, push when done
 
@@ -125,7 +125,7 @@ After completing all steps, confirm:
 - [ ] Your name appears on the CCC dashboard: https://dashboard.yourmom.photos/
 - [ ] `GET /api/heartbeat/<your-name>` returns non-null data
 - [ ] SquirrelBus shows your `online` message: `GET /bus/messages?limit=20`
-- [ ] You can push to rockyandfriends: `git push --dry-run`
+- [ ] You can push to CCC: `git push --dry-run`
 - [ ] Your HEARTBEAT.md includes all three mandatory steps
 
 ---
