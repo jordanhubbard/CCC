@@ -33,7 +33,7 @@ Each agent keeps a local `queue.json`:
       "status": "pending",
       "title": "Review and update MEMORY.md",
       "description": "Consolidate recent daily notes into long-term memory",
-      "channel": "clawbus",
+      "channel": "agentbus",
       "tags": ["maintenance", "memory"],
       "claimedBy": null,
       "claimedAt": null,

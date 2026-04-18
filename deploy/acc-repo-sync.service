@@ -1,5 +1,5 @@
 [Unit]
-Description=ACC repo sync — pull/commit/push shared ClawFS repo
+Description=ACC repo sync — pull/commit/push shared AccFS repo
 After=network-online.target
 Wants=network-online.target
 

@@ -30,7 +30,7 @@ Required services on the hub:
 - `tokenhub` — LLM routing proxy (port 8090)
 - `agentfs-sync` — Workspace ↔ MinIO sync daemon
 - `dashboard-server` — Dashboard UI (port 8790)
-- `ccc-agent listen` — ClawBus exec listener
+- `ccc-agent listen` — AgentBus exec listener
 
 ### Agent Node
 
@@ -38,7 +38,7 @@ Runs `hermes-agent` as the primary runtime. Connects to the hub via HTTP. Polls 
 
 Typical services on an agent node:
 - `hermes gateway` — Channel gateway (Slack, Telegram); supervisord-managed
-- `ccc-agent listen` — ClawBus exec listener
+- `ccc-agent listen` — AgentBus exec listener
 - `qdrant` — Local vector DB (optional, for local memory)
 - `tokenhub` — Local LLM router (optional)
 - `ollama` — Local model serving (GPU nodes only)
@@ -67,7 +67,7 @@ State is stored as JSON files, loaded into memory at startup and periodically fl
 | `queue.json` | Work queue — all pending, in-progress, and completed items |
 | `agents.json` | Agent registry — names, capabilities, last heartbeat |
 | `secrets.json` | Key-value secret store |
-| `bus.jsonl` | ClawBus message log (append-only JSONL) |
+| `bus.jsonl` | AgentBus message log (append-only JSONL) |
 | `exec.jsonl` | Remote execution log |
 | `brain-state.json` | Brain/LLM queue state |
 | `lessons.jsonl` | Shared lessons/knowledge entries |
@@ -83,7 +83,7 @@ State is stored as JSON files, loaded into memory at startup and periodically fl
 
 ### API Routes
 
-All routes confirmed present in source (Rust server lives in ClawFS at `/home/jkh/clawfs/repos/CCC`, accessed via `mc`):
+All routes confirmed present in source (Rust server lives in AccFS at `/home/jkh/accfs/repos/CCC`, accessed via `mc`):
 
 **Workqueue** (`queue.rs`):
 
@@ -121,7 +121,7 @@ Stale thresholds vary by executor type: `claude_cli` = 45 min, `gpu` = 120 min, 
 
 **Online detection:** Agent is considered online if `lastSeen` is within **300 seconds** (5 minutes), confirmed in `agents.rs:28`.
 
-**ClawBus** (`bus.rs`):
+**AgentBus** (`bus.rs`):
 
 | Method | Path | Description |
 |---|---|---|
@@ -130,7 +130,7 @@ Stale thresholds vary by executor type: `claude_cli` = 45 min, `gpu` = 120 min, 
 | GET | `/api/bus/messages` | Query messages (params: `limit`, `subject`, `type`, `thread_id`, `to`, `from`) |
 | GET | `/api/bus/presence` | Agent presence (online/offline status) |
 
-All four routes are duplicated under `/bus/*` for reverse-proxy compatibility. ClawBus is **not a separate process** — it runs inside `acc-server` on port 8789. The viewer at port 8790 is the dashboard-server proxy.
+All four routes are duplicated under `/bus/*` for reverse-proxy compatibility. AgentBus is **not a separate process** — it runs inside `acc-server` on port 8789. The viewer at port 8790 is the dashboard-server proxy.
 
 **Secrets** (`secrets.rs`): GET/POST/PUT/DELETE on `/api/secrets` and `/api/secrets/:key`
 
@@ -259,9 +259,9 @@ The work queue is the primary coordination mechanism between agents. The hub hol
 
 ---
 
-## 6. ClawBus (Message Bus)
+## 6. AgentBus (Message Bus)
 
-ClawBus is the inter-agent message bus. The hub maintains an in-memory broadcast channel (Tokio `broadcast::channel`, capacity 256) and appends all messages to `bus.jsonl`.
+AgentBus is the inter-agent message bus. The hub maintains an in-memory broadcast channel (Tokio `broadcast::channel`, capacity 256) and appends all messages to `bus.jsonl`.
 
 ### Message Format
 
@@ -375,7 +375,7 @@ env:
 **LLM routing:** Hermes supports multiple provider backends. In the observed deployments, model requests are routed through NVIDIA's inference API for Claude models, and through local TokenHub for routing across backends. Claude Code CLI (when running alongside hermes) also routes through the same NVIDIA endpoint via `ANTHROPIC_BASE_URL`.
 
 **Skills installed by bootstrap.sh:**
-- `ccc-node` — fleet connectivity (heartbeat, workqueue, ClawBus)
+- `ccc-node` — fleet connectivity (heartbeat, workqueue, AgentBus)
 - 20+ engineering workflow skills from `addyosmani/agent-skills` (cloned to `~/.ccc/agent-skills`, pulled fresh on each bootstrap run) — domain implementation: spec, planning, TDD, frontend, API, security, CI/CD, shipping
 - 13 orchestration skills from `obra/superpowers` (cloned to `~/.ccc/superpowers`) — coordination discipline: parallel agent dispatch, git worktrees, systematic debugging, two-stage review, verification gates
 
@@ -409,7 +409,7 @@ RCC Dashboard v2 starting port=8790 rcc_url=http://localhost:8789 sc_url=http://
 
 It proxies requests to `acc-server` (8789) and optionally to SquirrelChat (8793, a separate chat service that has its own codebase not in this repo).
 
-**Alternative frontend:** `acc-server` can serve a WASM/Leptos SPA directly as a fallback when `DASHBOARD_DIST` is set. The SPA source lives in ClawFS alongside the Rust server source. As of audit, the `dashboard-server` binary approach is what's running.
+**Alternative frontend:** `acc-server` can serve a WASM/Leptos SPA directly as a fallback when `DASHBOARD_DIST` is set. The SPA source lives in AccFS alongside the Rust server source. As of audit, the `dashboard-server` binary approach is what's running.
 
 ---
 
@@ -435,7 +435,7 @@ make sync
 `fleet-sync.sh` / `make sync`:
 1. Mirrors `~/.ccc/workspace/` → MinIO (`agents/shared/workspace/`) via `mc mirror` — workspace is in agentfs and accessible to agents via `mc` without git
 2. Checks `/bus/presence` to show which agents are currently online
-3. Broadcasts `rcc.update` to ClawBus — agents running `bus-listener.sh` run `agent-pull.sh` within seconds
+3. Broadcasts `rcc.update` to AgentBus — agents running `bus-listener.sh` run `agent-pull.sh` within seconds
 
 Agents without `bus-listener.sh` running fall back to the 10-minute pull timer.
 
@@ -456,7 +456,7 @@ Runs every 10 minutes via cron on all nodes. Steps:
 4. Sync secrets from hub via `secrets-sync.sh`
 5. Post heartbeat to hub with current git revision and hardware info
 
-### ClawBus Listener (bus-listener.sh)
+### AgentBus Listener (bus-listener.sh)
 
 Long-lived daemon registered by `bootstrap.sh` as `ccc-bus-listener` under supervisord. Subscribes to `GET /bus/stream` (SSE). On `rcc.update` runs `agent-pull.sh` immediately — eliminates the 10-minute polling gap for triggered deploys. Log: `~/.ccc/logs/bus-listener.log`.
 
@@ -476,13 +476,13 @@ Runs daily at midnight via cron. Stages `MEMORY.md` and `memory/` directory and 
 | 0004 | Install Node.js services (superseded) |
 | 0005 | Install hub API services |
 | 0006 | Remove Node.js services |
-| 0007 | Switch to Rust ccc-server, remove old dashboard |
-| 0008 | Rebuild ccc-server with auth, install auth.db |
+| 0007 | Switch to Rust acc-server, remove old dashboard |
+| 0008 | Rebuild acc-server with auth, install auth.db |
 | 0009 | Install Consul service discovery |
 | 0010 | Configure Consul DNS |
 | 0011 | Build ccc-agent binary |
 | 0012 | Install ccc-exec-listen service |
-| 0013 | Remove ClawFS FUSE mount (use S3 gateway only) |
+| 0013 | Remove AccFS FUSE mount (use S3 gateway only) |
 | 0014 | Stop and disable Consul; remove stale env vars (`RCC_*`, `CONSUL_*`, legacy paths); fix consul DNS URLs to use `localhost` |
 
 **Consul:** Installed by migrations 0009/0010, torn down by migration 0014. Not in use — all services use `localhost` directly.
@@ -521,7 +521,7 @@ Idempotent node setup script (as opposed to first-time bootstrap). Installs:
 
 ### Agent Connectivity Model
 
-Agents only need outbound HTTP to the hub. The hub does not initiate connections to agents — all work is delivered via the ClawBus SSE stream that agents subscribe to, or via the exec-listener which also polls inbound.
+Agents only need outbound HTTP to the hub. The hub does not initiate connections to agents — all work is delivered via the AgentBus SSE stream that agents subscribe to, or via the exec-listener which also polls inbound.
 
 **Supported access paths:**
 - Direct LAN or private IP
@@ -538,7 +538,7 @@ Agents only need outbound HTTP to the hub. The hub does not initiate connections
 | 8789 | acc-server | Main CCC API (all agents connect here) |
 | 8790 | dashboard-server | Operator dashboard |
 | 9000 | MinIO | Object storage (typically localhost-only) |
-| 9100 | ClawFS S3 gateway | JuiceFS S3 API — all agents access ClawFS here via `mc` |
+| 9100 | AccFS S3 gateway | JuiceFS S3 API — all agents access AccFS here via `mc` |
 | 8090 | tokenhub | LLM router |
 | 6333/6334 | qdrant | Vector DB |
 
@@ -635,7 +635,7 @@ The `ccc-node` skill (`skills/ccc-node/SKILL.md`) is installed into hermes on ea
 **Provides HTTP procedures for:**
 - Posting heartbeats
 - Pulling and updating workqueue items
-- Sending and receiving ClawBus messages
+- Sending and receiving AgentBus messages
 - Fetching secrets from the hub
 - Posting remote execution results
 

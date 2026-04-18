@@ -26,7 +26,7 @@ Example path (default alias + bucket): `ccc-hub/agents/projects/my-repo/project.
   "github_repo":     "owner/my-repo",
   "github_branch":   "main",
   "github_sha":      "abc1234",
-  "clawfs_path":     "ccc-hub/agents/projects/my-repo/workspace",
+  "accfs_path":     "ccc-hub/agents/projects/my-repo/workspace",
   "created_at":      "2026-04-16T00:00:00Z",
   "created_by":      "rocky",
   "task_ids":        ["wq-20260416-001", "wq-20260416-002"],
@@ -47,7 +47,7 @@ Example path (default alias + bucket): `ccc-hub/agents/projects/my-repo/project.
 | `github_repo` | string | GitHub repo in `owner/repo` form, or full clone URL. |
 | `github_branch` | string | Branch that was cloned (default: `main`). |
 | `github_sha` | string | Short SHA of HEAD at onboard time, or `"local"` for `--local` clones. |
-| `clawfs_path` | string | AgentFS path to the mirrored workspace (used by agents as the shared working directory). |
+| `accfs_path` | string | AgentFS path to the mirrored workspace (used by agents as the shared working directory). |
 | `created_at` | ISO-8601 string | When the project was onboarded. |
 | `created_by` | string | Agent name that ran `project-onboard.py`. |
 | `task_ids` | string[] | IDs of all queue items generated from PLAN.md and/or beads. |
@@ -82,7 +82,7 @@ Queue items that belong to a project carry two additional fields understood by
 | Field | Type | Notes |
 |-------|------|-------|
 | `project_id` | string | Links the item back to a project record (`proj-<hash>`). |
-| `project_clawfs_path` | string | AgentFS path of the shared project workspace. When set, `queue-worker.py` mirrors this path locally instead of cloning from git. |
+| `project_accfs_path` | string | AgentFS path of the shared project workspace. When set, `queue-worker.py` mirrors this path locally instead of cloning from git. |
 
 Both fields are set by `project-onboard.py` when posting tasks. Normal (non-project)
 queue items omit them and follow the standard git-clone workspace lifecycle.
@@ -106,7 +106,7 @@ queue items omit them and follow the standard git-clone workspace lifecycle.
    bus-listener.sh receives project.arrived → touches ~/.ccc/work-signal
    queue-worker.py (SSE thread) receives project.arrived → touches ~/.ccc/work-signal
    queue-worker.py wakes from interruptible sleep → polls /api/queue
-   Items with project_clawfs_path are claimed; workspace is mirrored from AgentFS
+   Items with project_accfs_path are claimed; workspace is mirrored from AgentFS
    rather than cloned from git.
 
 3. Tasks Complete
@@ -151,7 +151,7 @@ When `project-onboard.py` completes, it broadcasts on AgentBus:
   "to":      "all",
   "type":    "project.arrived",
   "subject": "work",
-  "body": "{\"project_id\":\"proj-a1b2c3d4\",\"name\":\"My Repo\",\"slug\":\"my-repo\",\"clawfs_path\":\"ccc-hub/agents/projects/my-repo/workspace\",\"github_repo\":\"owner/my-repo\",\"task_count\":5,\"milestone_id\":\"wq-20260416-006\"}"
+  "body": "{\"project_id\":\"proj-a1b2c3d4\",\"name\":\"My Repo\",\"slug\":\"my-repo\",\"accfs_path\":\"ccc-hub/agents/projects/my-repo/workspace\",\"github_repo\":\"owner/my-repo\",\"task_count\":5,\"milestone_id\":\"wq-20260416-006\"}"
 }
 ```
 
@@ -162,7 +162,7 @@ When `project-onboard.py` completes, it broadcasts on AgentBus:
 | `project_id` | string | Stable project identifier. |
 | `name` | string | Human-readable project name. |
 | `slug` | string | AgentFS directory slug. |
-| `clawfs_path` | string | AgentFS workspace path. |
+| `accfs_path` | string | AgentFS workspace path. |
 | `github_repo` | string | Source GitHub repo. |
 | `task_count` | integer | Number of work tasks posted (excludes milestone). |
 | `milestone_id` | string\|null | ID of the milestone task, or null if no tasks were generated. |

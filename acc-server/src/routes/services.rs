@@ -23,7 +23,7 @@ fn build_catalog() -> Vec<(String, String, String, String)> {
          format!("http://{public_host}:{ccc_port}/health"), hub.clone()),
         ("tokenhub".to_string(), "Tokenhub".to_string(),
          format!("http://127.0.0.1:{tokenhub_port}/health"), hub.clone()),
-        ("clawbus".to_string(), "ClawBus".to_string(),
+        ("agentbus".to_string(), "AgentBus".to_string(),
          format!("http://127.0.0.1:{ccc_port}/api/health"), hub.clone()),
     ];
     // Optional Qdrant

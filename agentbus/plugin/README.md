@@ -1,15 +1,15 @@
-# ClawBus Receiver
+# AgentBus Receiver
 
-Receives ClawBus push messages from the hub and makes them available to the local agent runtime.
+Receives AgentBus push messages from the hub and makes them available to the local agent runtime.
 
-ClawBus is **not** a plugin into a runtime — it is a standalone SSE subscriber daemon managed by systemd (Linux) or launchd (macOS). It connects outbound to the hub's SSE stream and appends received messages to a local log.
+AgentBus is **not** a plugin into a runtime — it is a standalone SSE subscriber daemon managed by systemd (Linux) or launchd (macOS). It connects outbound to the hub's SSE stream and appends received messages to a local log.
 
 ---
 
 ## How It Works
 
 1. `ccc-bus-listener` connects to `$CCC_URL/bus/stream` (SSE)
-2. Incoming messages are validated with `CLAWBUS_TOKEN` (HMAC-SHA256)
+2. Incoming messages are validated with `AGENTBUS_TOKEN` (HMAC-SHA256)
 3. Messages are appended to `~/.ccc/logs/bus.jsonl`
 4. The hermes-agent runtime reads new entries on its next poll cycle
 
@@ -44,7 +44,7 @@ The service reads these variables from `~/.ccc/.env`:
 |----------|---------|
 | `CCC_URL` | Hub base URL (SSE stream at `$CCC_URL/bus/stream`) |
 | `CCC_AGENT_TOKEN` | Bearer token for authenticating to the hub |
-| `CLAWBUS_TOKEN` | Shared HMAC-SHA256 secret for payload validation |
+| `AGENTBUS_TOKEN` | Shared HMAC-SHA256 secret for payload validation |
 | `AGENT_NAME` | This agent's name (used when filtering directed messages) |
 
 ---
@@ -70,6 +70,6 @@ curl -X POST $CCC_URL/api/bus/send \
 
 ## Remote Exec
 
-The related `ccc-exec-listen` service handles `ccc.exec` messages from ClawBus — signed payloads that run sandboxed code and POST results back to the hub. It is managed separately by `ccc-exec-listen.service` / `com.ccc.exec-listen.plist`.
+The related `ccc-exec-listen` service handles `ccc.exec` messages from AgentBus — signed payloads that run sandboxed code and POST results back to the hub. It is managed separately by `ccc-exec-listen.service` / `com.ccc.exec-listen.plist`.
 
-See [../SPEC.md](../SPEC.md) for the full ClawBus protocol.
+See [../SPEC.md](../SPEC.md) for the full AgentBus protocol.

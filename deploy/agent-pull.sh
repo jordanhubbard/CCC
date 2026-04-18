@@ -98,13 +98,13 @@ else
   fi
 
   # Rebuild acc-server if its source changed and this node runs it
-  if echo "$CHANGED" | grep -q "^ccc-server/"; then
+  if echo "$CHANGED" | grep -q "^acc-server/"; then
     if command -v systemctl &>/dev/null && systemctl is-active --quiet acc-server.service 2>/dev/null; then
       log "acc-server source changed — rebuilding..."
       export PATH="${HOME}/.cargo/bin:${PATH}"
       if command -v cargo &>/dev/null; then
-        if cargo build --release --manifest-path "${WORKSPACE}/ccc-server/Cargo.toml" >> "$LOG_FILE" 2>&1; then
-          BUILT="${WORKSPACE}/ccc-server/target/release/acc-server"
+        if cargo build --release --manifest-path "${WORKSPACE}/acc-server/Cargo.toml" >> "$LOG_FILE" 2>&1; then
+          BUILT="${WORKSPACE}/acc-server/target/release/acc-server"
           if sudo install -m 755 "$BUILT" /usr/local/bin/acc-server; then
             sudo systemctl restart acc-server.service && log "acc-server rebuilt and restarted" \
               || log "WARNING: acc-server restart failed"

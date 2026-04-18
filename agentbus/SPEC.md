@@ -1,15 +1,15 @@
-# ClawBus v1 — Inter-Agent Communication Protocol
+# AgentBus v1 — Inter-Agent Communication Protocol
 
 **Status:** Live  
 **Hub:** Runs inside `acc-server` on port **8789** (not a separate process)  
 **Viewer:** `http://<CCC_HOST>:8790/bus` (dashboard-server proxy)  
-**Log:** `~/.ccc/data/bus.jsonl` on hub; mirrored to `agents/shared/clawbus.jsonl` on MinIO  
+**Log:** `~/.ccc/data/bus.jsonl` on hub; mirrored to `agents/shared/agentbus.jsonl` on MinIO  
 
 ---
 
 ## Overview
 
-ClawBus is a lightweight message bus embedded in `acc-server` for real-time agent coordination. It is **not a separate process or port** — all bus routes live under `acc-server` (port 8789) at `/api/bus/*`, with aliases at `/bus/*` for reverse-proxy compatibility.
+AgentBus is a lightweight message bus embedded in `acc-server` for real-time agent coordination. It is **not a separate process or port** — all bus routes live under `acc-server` (port 8789) at `/api/bus/*`, with aliases at `/bus/*` for reverse-proxy compatibility.
 
 Agents subscribe to the SSE stream (`GET /bus/stream`) and post messages via `POST /bus/send`. The hub broadcasts directives (e.g., `rcc.update`) and agents react immediately — no polling delay.
 
@@ -201,11 +201,11 @@ Always set `enc: "base64"` when sending binary blobs.
 
 All messages are appended to:
 - **Hub local:** `~/.ccc/data/bus.jsonl`
-- **MinIO:** `agents/shared/clawbus.jsonl` (synced by agentfs-sync after each write)
+- **MinIO:** `agents/shared/agentbus.jsonl` (synced by agentfs-sync after each write)
 
 ```bash
 # Read via MinIO
-mc cat ccc-hub/agents/shared/clawbus.jsonl | jq -s 'reverse | .[0:10]'
+mc cat ccc-hub/agents/shared/agentbus.jsonl | jq -s 'reverse | .[0:10]'
 
 # Read locally on hub
 tail -f ~/.ccc/data/bus.jsonl | jq .
@@ -213,4 +213,4 @@ tail -f ~/.ccc/data/bus.jsonl | jq .
 
 ---
 
-*ClawBus v1 — because Mattermost is for people, not squirrels.* 🐿️📡
+*AgentBus v1 — because Mattermost is for people, not squirrels.* 🐿️📡

@@ -1,10 +1,10 @@
 #!/bin/bash
-# ccc-repo-sync.sh — Git pull + auto-commit + push for the ClawFS shared CCC repo
+# ccc-repo-sync.sh — Git pull + auto-commit + push for the AccFS shared CCC repo
 #
 # This runs on exactly ONE node (the designated CCC_REPO_PUSHER, typically Rocky).
-# It keeps the shared ClawFS repo in sync with GitHub:
+# It keeps the shared AccFS repo in sync with GitHub:
 #   1. Pull latest from origin (ff-only)
-#   2. Auto-commit any local changes (from agents editing files on ClawFS)
+#   2. Auto-commit any local changes (from agents editing files on AccFS)
 #   3. Push to origin
 #
 # Usage:

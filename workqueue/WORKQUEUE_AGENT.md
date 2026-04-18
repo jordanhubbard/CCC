@@ -97,11 +97,11 @@ If you encounter or receive an item with `priority: "urgent"`:
 Try channels in this order (stop at first success for each peer):
 
 ### Bullwinkle
-1. **AgentBus** — `POST $CCC_URL/bus/send` with `{subject:"ops", body:"WORKQUEUE_SYNC ..."}` (channel=clawbus)
+1. **AgentBus** — `POST $CCC_URL/bus/send` with `{subject:"ops", body:"WORKQUEUE_SYNC ..."}` (channel=agentbus)
 2. **Peer-to-peer** — `POST $BULLWINKLE_URL/v1/chat/completions` (auth: Bearer token — check MEMORY.md or your .env)
 
 ### Natasha
-1. **AgentBus** — `POST $CCC_URL/bus/send` with `{subject:"ops", body:"WORKQUEUE_SYNC ..."}` (channel=clawbus)
+1. **AgentBus** — `POST $CCC_URL/bus/send` with `{subject:"ops", body:"WORKQUEUE_SYNC ..."}` (channel=agentbus)
 2. **Peer-to-peer** — `POST $PEER_GATEWAY_URL/v1/chat/completions` (auth: `Bearer $PEER_TOKEN`)
 
 ### Sync Message Format

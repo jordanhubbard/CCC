@@ -33,7 +33,7 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md)
 | `acc-server` | Rust/Axum REST API — work queue, agent registry, secrets | 8789 |
 | `ccc-dashboard` | Leptos WASM web UI | 8788 |
 | `ccc-queue-worker` | Claims and executes queue items | — |
-| `ccc-bus-listener` | ClawBus SSE receiver | — |
+| `ccc-bus-listener` | AgentBus SSE receiver | — |
 | `ccc-exec-listen` | Remote exec handler (sandboxed) | — |
 | `hermes gateway` | Channel gateway (Slack, Telegram) — per-agent | — |
 | TokenHub | LLM routing proxy (OpenAI-compatible) | 8090 |
@@ -150,7 +150,7 @@ Agent: `cp deploy/.env.template ~/.ccc/.env`
 
 | Variable | Purpose |
 |----------|---------|
-| `CLAWBUS_TOKEN` | HMAC-SHA256 secret for ClawBus exec payloads |
+| `AGENTBUS_TOKEN` | HMAC-SHA256 secret for AgentBus exec payloads |
 | `QDRANT_URL` | Qdrant endpoint (default `http://localhost:6333`) |
 | `QDRANT_API_KEY` | Qdrant API key (if remote) |
 | `CCC_TAILSCALE_URL` | Tailscale fallback URL for hub |
@@ -170,7 +170,7 @@ Full reference: `deploy/.env.template` (agents) · `deploy/.env.server.template`
 | `acc-server.service` | API server (port 8789) |
 | `ccc-dashboard.service` | Web dashboard (port 8788) |
 | `ccc-queue-worker.service` | Queue processor |
-| `ccc-bus-listener.service` | ClawBus SSE receiver |
+| `ccc-bus-listener.service` | AgentBus SSE receiver |
 | `ccc-exec-listen.service` | Remote exec handler |
 | `ccc-agent.service` + `ccc-agent.timer` | Periodic `agent-pull.sh` + heartbeat |
 | `consul.service` | Service discovery + DNS |
@@ -185,7 +185,7 @@ Full reference: `deploy/.env.template` (agents) · `deploy/.env.server.template`
 |-------|---------|
 | `com.ccc.agent.plist` | Agent pull (every 600s) |
 | `com.ccc.queue-worker.plist` | Queue processor |
-| `com.ccc.bus-listener.plist` | ClawBus receiver |
+| `com.ccc.bus-listener.plist` | AgentBus receiver |
 | `com.ccc.exec-listen.plist` | Remote exec handler |
 | `com.ccc.claude-main.plist` | Claude Code tmux session |
 | `com.ccc.consul.plist` | Consul |
@@ -219,16 +219,16 @@ Port assignment: `GET /api/agents/:name/tunnel-port`. See `deploy/systemd/sparky
 
 ---
 
-## ClawBus (P2P Messaging)
+## AgentBus (P2P Messaging)
 
-Direct agent-to-agent messages, HMAC-SHA256 signed with `CLAWBUS_TOKEN`. The hub fans messages out to registered peers via SSE.
+Direct agent-to-agent messages, HMAC-SHA256 signed with `AGENTBUS_TOKEN`. The hub fans messages out to registered peers via SSE.
 
-Remote execution flows over ClawBus:
+Remote execution flows over AgentBus:
 ```
-POST /api/exec  →  ClawBus (ccc.exec)  →  ccc-exec-listen  →  POST /api/exec/:id/result
+POST /api/exec  →  AgentBus (ccc.exec)  →  ccc-exec-listen  →  POST /api/exec/:id/result
 ```
 
-See [clawbus/SPEC.md](clawbus/SPEC.md).
+See [agentbus/SPEC.md](agentbus/SPEC.md).
 
 ---
 
@@ -255,7 +255,7 @@ State is stored as JSON files in `~/.ccc/data/` on the hub:
 | `queue.json` | Work queue — all pending, in-progress, completed items |
 | `agents.json` | Agent registry + last heartbeat |
 | `secrets.json` | Key-value secret store |
-| `bus.jsonl` | ClawBus message log (append-only) |
+| `bus.jsonl` | AgentBus message log (append-only) |
 | `exec.jsonl` | Remote execution log |
 | `lessons.jsonl` | Shared fleet lessons |
 

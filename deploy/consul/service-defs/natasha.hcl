@@ -19,13 +19,13 @@ service {
 }
 
 service {
-  name = "clawfs"
-  id   = "clawfs-natasha"
+  name = "accfs"
+  id   = "accfs-natasha"
   port = 8791
   tags = ["storage", "fuse"]
   meta {
     node = "natasha"
-    desc = "ClawFS FUSE filesystem (mounts /mnt/clawfs)"
+    desc = "AccFS FUSE filesystem (mounts /mnt/accfs)"
   }
   check {
     http     = "http://127.0.0.1:8791/health"

@@ -97,14 +97,14 @@ def check_core_services():
     """Probe all core infrastructure services on do-host1."""
     results = []
     results.append(probe_service("ccc-api", f"{CCC_API}/api/health", expect_in_body="ok"))
-    results.append(probe_service("clawbus", f"{CCC_API}/api/health", expect_in_body="ok"))
+    results.append(probe_service("agentbus", f"{CCC_API}/api/health", expect_in_body="ok"))
     results.append(probe_service("qdrant", f"{QDRANT_URL}/healthz",
                                  headers={"api-key": QDRANT_API_KEY} if QDRANT_API_KEY else None))
     results.append(probe_service("minio", f"{MINIO_ENDPOINT}/minio/health/live"))
     results.append(probe_service("tokenhub", f"{TOKENHUB_URL}/v1/models"))
     results.append(probe_service("searxng", f"{SEARXNG_URL}/healthz"))
 
-    # Redis — required by ClawFS (JuiceFS metadata store)
+    # Redis — required by AccFS (JuiceFS metadata store)
     try:
         r = subprocess.run(["redis-cli", "-h", "127.0.0.1", "-p", "6379", "ping"],
                           capture_output=True, text=True, timeout=5)
@@ -121,18 +121,18 @@ def check_core_services():
         results.append({"name": "redis", "url": "redis://127.0.0.1:6379",
                         "ok": False, "status": 0, "latency_ms": 0, "error": str(e)})
 
-    # ClawFS S3 gateway (port 9100) — how remote nodes access shared filesystem
-    results.append(probe_service("clawfs-gateway", "http://127.0.0.1:9100/minio/health/live"))
+    # AccFS S3 gateway (port 9100) — how remote nodes access shared filesystem
+    results.append(probe_service("accfs-gateway", "http://127.0.0.1:9100/minio/health/live"))
 
-    # ClawFS FUSE mount — local POSIX access on rocky
-    clawfs_mounted = os.path.ismount("/mnt/clawfs")
+    # AccFS FUSE mount — local POSIX access on rocky
+    accfs_mounted = os.path.ismount("/mnt/accfs")
     results.append({
-        "name": "clawfs-fuse",
-        "url": "/mnt/clawfs",
-        "ok": clawfs_mounted,
-        "status": "mounted" if clawfs_mounted else "not mounted",
+        "name": "accfs-fuse",
+        "url": "/mnt/accfs",
+        "ok": accfs_mounted,
+        "status": "mounted" if accfs_mounted else "not mounted",
         "latency_ms": 0,
-        "error": None if clawfs_mounted else "/mnt/clawfs is not mounted",
+        "error": None if accfs_mounted else "/mnt/accfs is not mounted",
     })
 
     # Docker containers
@@ -260,44 +260,44 @@ def read_sentinel():
         pass
     return None
 
-# ── Remote Node ClawFS Access ─────────────────────────────────────
+# ── Remote Node AccFS Access ─────────────────────────────────────
 FLEET_NODES = {
     "sparky": {"ip": "100.87.229.125", "user": "jkh", "mc_path": "~/bin/mc"},
     "puck": {"ip": "100.87.68.11", "user": "jkh", "mc_path": "~/bin/mc"},
 }
 
-def check_remote_clawfs():
-    """Verify remote fleet nodes can reach the ClawFS S3 gateway."""
+def check_remote_accfs():
+    """Verify remote fleet nodes can reach the AccFS S3 gateway."""
     results = []
     for node, cfg in FLEET_NODES.items():
         try:
             # Use a command that outputs a known marker on success
-            cmd = f"{cfg['mc_path']} ls clawfs/clawfs/ >/dev/null 2>&1 && echo CLAWFS_OK || echo CLAWFS_FAIL"
+            cmd = f"{cfg['mc_path']} ls accfs/accfs/ >/dev/null 2>&1 && echo ACCFS_OK || echo ACCFS_FAIL"
             r = subprocess.run(
                 ["ssh", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no",
                  f"{cfg['user']}@{cfg['ip']}", cmd],
                 capture_output=True, text=True, timeout=15,
             )
             output = r.stdout.strip()
-            ok = "CLAWFS_OK" in output
+            ok = "ACCFS_OK" in output
             error = None
             if not ok:
                 # Grab stderr for diagnostics
                 error = r.stderr.strip()[:200] or output[:200] or "mc ls failed (no output)"
             results.append({
-                "name": f"clawfs-access:{node}",
+                "name": f"accfs-access:{node}",
                 "ok": ok,
                 "error": error,
             })
         except subprocess.TimeoutExpired:
             results.append({
-                "name": f"clawfs-access:{node}",
+                "name": f"accfs-access:{node}",
                 "ok": False,
                 "error": f"SSH to {node} timed out",
             })
         except Exception as e:
             results.append({
-                "name": f"clawfs-access:{node}",
+                "name": f"accfs-access:{node}",
                 "ok": False,
                 "error": str(e)[:200],
             })
@@ -396,11 +396,11 @@ def main():
     if tokenhub_providers:
         report["tokenhub_providers"] = tokenhub_providers
 
-    # 6. Remote node ClawFS access
-    remote_clawfs = check_remote_clawfs()
-    if remote_clawfs:
-        report["remote_clawfs"] = remote_clawfs
-        failed_remote = [r["name"] for r in remote_clawfs if not r["ok"]]
+    # 6. Remote node AccFS access
+    remote_accfs = check_remote_accfs()
+    if remote_accfs:
+        report["remote_accfs"] = remote_accfs
+        failed_remote = [r["name"] for r in remote_accfs if not r["ok"]]
         if failed_remote:
             report["summary"]["failed_services"].extend(failed_remote)
 

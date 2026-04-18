@@ -122,15 +122,15 @@ register: ## Register this agent with the CCC hub
 
 # ── Build ──────────────────────────────────────────────────────────────────
 
-build: ## Build all Rust binaries (acc-agent, ccc-server)
+build: ## Build all Rust binaries (acc-agent, acc-server)
 	@cargo build --release --manifest-path agent/Cargo.toml
-	@cargo build --release --manifest-path ccc-server/Cargo.toml
+	@cargo build --release --manifest-path acc-server/Cargo.toml
 
 # ── Testing ────────────────────────────────────────────────────────────────
 
 test: ## Run all Rust tests
 	@cargo test --manifest-path agent/Cargo.toml
-	@cargo test --manifest-path ccc-server/Cargo.toml
+	@cargo test --manifest-path acc-server/Cargo.toml
 
 # ── Release ────────────────────────────────────────────────────────────────
 
@@ -161,5 +161,5 @@ docker-logs: ## Tail logs from all CCC containers
 
 clean: ## Remove build artifacts
 	@cargo clean --manifest-path agent/Cargo.toml
-	@cargo clean --manifest-path ccc-server/Cargo.toml
+	@cargo clean --manifest-path acc-server/Cargo.toml
 	@echo "Cleaned build artifacts."

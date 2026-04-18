@@ -12,7 +12,7 @@
 #   2. Symlinks ~/.ccc/workspace → this repo (if not already set up)
 #   3. Creates ~/.ccc/ccc-pull-loop.sh (a while-true pull loop)
 #   4. Registers ccc-pull-loop with supervisord (or falls back to nohup)
-#   5. Registers ccc-exec-listener (ClawBus remote exec) with supervisord
+#   5. Registers ccc-exec-listener (AgentBus remote exec) with supervisord
 #   6. Sets up Tailscale (userspace networking for container environments)
 #   7. Starts a 'claude-main' tmux session with Claude Code
 #   8. Prints a summary
@@ -232,7 +232,7 @@ EOF
     PULL_REGISTERED=true
   fi
 
-  # Register ccc-exec-listener (ClawBus remote exec)
+  # Register ccc-exec-listener (AgentBus remote exec)
   if grep -q "\[program:ccc-exec-listener\]" "$SUPERVISORD_CONF" 2>/dev/null; then
     success "ccc-exec-listener already in supervisord.conf — skipping"
     EXEC_REGISTERED=true
@@ -329,7 +329,7 @@ else
       success "Exec listener started via nohup (PID: $EXEC_PID)"
       echo "$EXEC_PID" > "$CCC_DIR/exec-listener.pid"
     else
-      warn "Exec listener may have exited — check $EXEC_LOG (CLAWBUS_TOKEN required in .env)"
+      warn "Exec listener may have exited — check $EXEC_LOG (AGENTBUS_TOKEN required in .env)"
     fi
     EXEC_REGISTERED=true
   fi
@@ -564,7 +564,7 @@ fi
 
 echo ""
 echo "  Verify these manually:"
-echo "  1. ~/.ccc/.env exists with AGENT_NAME, CCC_URL, CCC_AGENT_TOKEN, CLAWBUS_TOKEN"
+echo "  1. ~/.ccc/.env exists with AGENT_NAME, CCC_URL, CCC_AGENT_TOKEN, AGENTBUS_TOKEN"
 echo "  2. Pull loop running:      tail -f $LOG_FILE"
 echo "  3. Exec listener running:  tail -f $EXEC_LOG"
 echo "  4. Tailscale status:       tailscale --socket=${TS_SOCK} status"
@@ -575,8 +575,8 @@ echo "    cp $REPO_DIR/deploy/.env.template ~/.ccc/.env"
 echo "    nano ~/.ccc/.env"
 echo ""
 echo "  Required .env keys for exec listener:"
-echo "    CLAWBUS_TOKEN       — shared bus secret (get from Rocky/CCC admin)"
-echo "    CLAWBUS_URL         — http://<CCC_HOST>:8788"
+echo "    AGENTBUS_TOKEN       — shared bus secret (get from Rocky/CCC admin)"
+echo "    AGENTBUS_URL         — http://<CCC_HOST>:8788"
 echo "    CCC_URL             — http://<CCC_HOST>:8789"
 echo "    CCC_AGENT_TOKEN     — your agent bearer token"
 echo "    AGENT_NAME          — your agent name (peabody, sherman, etc.)"

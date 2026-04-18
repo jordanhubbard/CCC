@@ -1,11 +1,11 @@
 ---
 name: ccc-node
-description: Connect this agent to the CCC (Command and Control Center) fleet. Handles ClawBus registration, heartbeat, remote exec dispatch, and workqueue lifecycle. Use when setting up a new agent node, checking fleet connectivity, or managing workqueue items via the CCC API.
+description: Connect this agent to the CCC (Command and Control Center) fleet. Handles AgentBus registration, heartbeat, remote exec dispatch, and workqueue lifecycle. Use when setting up a new agent node, checking fleet connectivity, or managing workqueue items via the CCC API.
 version: 1.0.0
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [ccc, clawbus, fleet, ccc, workqueue]
+    tags: [ccc, agentbus, fleet, ccc, workqueue]
     category: infrastructure
 required_environment_variables:
   - name: CCC_URL
@@ -27,14 +27,14 @@ required_environment_variables:
 Connects a Hermes agent to the CCC fleet.
 
 CCC = the Command and Control Center. The hub runs `acc-server` (Rust/Axum) on port 8789.
-ClawBus is the inter-agent message bus. All fleet coordination goes through the hub.
+AgentBus is the inter-agent message bus. All fleet coordination goes through the hub.
 
 ## When to Use
 
 - First-time setup of a new agent node on the fleet
 - Checking whether this agent is registered and heartbeating
 - Pulling or completing workqueue items
-- Sending or receiving ClawBus messages
+- Sending or receiving AgentBus messages
 - Diagnosing connectivity to the hub
 
 ## Architecture
@@ -44,7 +44,7 @@ Agent (you) ──HTTP──▶ CCC Hub ($CCC_URL)
                          ├── /api/heartbeat/<name>    POST — heartbeat
                          ├── /api/workqueue           GET — pull items
                          ├── /api/workqueue/<id>      PATCH — update status
-                         ├── /api/bus/send            POST — ClawBus message
+                         ├── /api/bus/send            POST — AgentBus message
                          ├── /api/exec/<id>/result    POST — exec result
                          └── /api/secrets/<key>       GET — secrets store
 ```
@@ -109,7 +109,7 @@ curl -s -X PATCH \
   $CCC_URL/api/workqueue/<item-id>
 ```
 
-### 5. Send a ClawBus message
+### 5. Send a AgentBus message
 
 ```bash
 curl -s -X POST \
@@ -159,7 +159,7 @@ curl -s -X POST \
 The required env vars (`CCC_URL`, `CCC_AGENT_TOKEN`, `AGENT_NAME`) are loaded from `~/.ccc/.env`
 automatically when hermes-agent starts via `agent-pull.sh`. No manual config needed after setup.
 
-**ClawBus plugin note:** Use the curl commands above, or wrap them in a Hermes hook script for
+**AgentBus plugin note:** Use the curl commands above, or wrap them in a Hermes hook script for
 automatic polling. The `ccc-agent listen` daemon handles inbound exec dispatch independently
 of the agent runtime.
 
@@ -222,7 +222,7 @@ mc cat "${MC_ALIAS}/${BUCKET}/tasks/${TASK_ID}/meta.json" | jq .
 ## Pitfalls
 
 - **Wrong token type:** Use `ccc-agent-*` tokens, NOT `wq-*` workqueue tokens. They're different.
-- **ClawBus SSE:** Use `$CCC_URL` directly, not a proxy URL — proxies may return 502 on SSE endpoints.
+- **AgentBus SSE:** Use `$CCC_URL` directly, not a proxy URL — proxies may return 502 on SSE endpoints.
 - **sessions_spawn / sessions_yield:** These are OpenClaw-specific. In Hermes, use `delegate_tool.py` or spawn subagents via the Hermes delegate API.
 - **git during task:** Do not commit or push. Any changes you make inside `$TASK_WORKSPACE_LOCAL` will be committed by the queue-worker on completion. Committing yourself creates duplicate history on the task branch.
 

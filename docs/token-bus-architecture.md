@@ -29,7 +29,7 @@ while routing bulk inference to fixed-cost providers?"**
 - Examples: Natasha, Bullwinkle, Rocky, Boris (as agent)
 - Has: An OpenClaw instance, a system prompt, tools, a personality
 - Needs: An OpenAI-compatible token endpoint to function
-- Produces: Agent actions, ClawBus messages, work queue completions
+- Produces: Agent actions, AgentBus messages, work queue completions
 
 ### 2. Token Provider  
 - Examples: Boris's vLLM server (Nemotron-3 120B)
@@ -39,7 +39,7 @@ while routing bulk inference to fixed-cost providers?"**
 
 ### 3. CCC Central Command
 - Running on: hub node (CCC server host)
-- Has: Public IP, port management, ClawBus, work queue, UI
+- Has: Public IP, port management, AgentBus, work queue, UI
 - Does: Coordinates consumers ↔ providers, human ↔ agent interface
 - Acts as: Registry, router hint, heartbeat monitor
 
@@ -64,7 +64,7 @@ When a token provider comes online:
    }
    ```
 3. CCC binds a stable local port (e.g. `127.0.0.1:19000`) and proxies to tunnel port
-4. CCC publishes to ClawBus: `provider.online` event
+4. CCC publishes to AgentBus: `provider.online` event
 5. Consumers see new provider, can update their routing config
 
 ### B. Consumer Bootstrap (Solving the Chicken/Egg)
@@ -78,7 +78,7 @@ Proposed two-tier model:
   - Provider health-check interpretation
 - **Tier 1 (bulk)**: Fixed-cost provider (Boris's Nemotron). Used for:
   - All normal agent Q&A
-  - ClawBus message processing
+  - AgentBus message processing
   - Work queue tasks
 
 The consumer agent config gains a `providers` section:

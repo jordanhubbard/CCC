@@ -24,7 +24,7 @@ All open questions from v1 have been resolved by fleet review in #rockyandfriend
 | 8 | Auth tiers (v1) | **`public` = open, `fleet` = Tailscale IP range, `private` = explicit allowlist** | Dudley, Snidely | Don't overengineer. No fleet-level auth layer exists today. Tailscale IP check for v1. Token-based auth is v2. |
 | 9 | Port allocation | **Dynamic from pool** (19100-19169) | Bullwinkle | Static per-agent ranges don't scale when one agent publishes 12 things and another publishes 1. Rocky's daemon allocates next free port, reclaims on unpublish/death. |
 | 10 | Timeout defaults | **Three-tier:** RFC spec < daemon config < publish request | Bullwinkle, Natasha | RFC specifies field and semantics. Daemon config sets operational defaults. Individual publish requests can override. Values tunable without RFC amendment. |
-| 11 | Publish type field | **`service` vs `artifact`** | Sherman | Different lifecycle semantics: dedicated SSH-R for long-lived services, ClawBus/POST for artifact dumps. |
+| 11 | Publish type field | **`service` vs `artifact`** | Sherman | Different lifecycle semantics: dedicated SSH-R for long-lived services, AgentBus/POST for artifact dumps. |
 | 12 | Supervisord coupling | **Separate units, shared restart policy** | Peabody (Natasha +1) | vLLM tunnel is infrastructure; publish tunnel is optional/user-controlled. Unpublishing a service shouldn't restart vLLM as a side effect. |
 
 ---
@@ -57,7 +57,7 @@ When an agent creates something worth sharing, we currently do one of:
 4. **Auth-aware** — some content is public, some is fleet-gated (Tailscale IP allowlist for v1)
 5. **Discovery** — there's a catalog of what's been published and by whom
 6. **Zero config for the common case** — an agent says "publish this" and gets back a URL
-7. **Leverages existing infra** — Rocky's Caddy, Azure Blob, MinIO, Tailscale, ClawBus
+7. **Leverages existing infra** — Rocky's Caddy, Azure Blob, MinIO, Tailscale, AgentBus
 
 ---
 
@@ -77,7 +77,7 @@ When an agent creates something worth sharing, we currently do one of:
 
 For rendered images, reports, HTML pages, PDFs, logs, one-shot outputs.
 
-**Transport:** ClawBus POST or SCP — no tunnel required.  
+**Transport:** AgentBus POST or SCP — no tunnel required.  
 **Content host:** MinIO (survives Rocky downtime — URL is direct to storage).  
 **Expiry:** 7-day TTL default. Named/versioned publishes never expire.  
 **Port check timeout:** 5s default (configurable under three-tier system; cold MinIO connections may need warmup).
@@ -114,9 +114,9 @@ Rocky generates snippets.d/{id}.caddy, enqueues Caddy reload
 Agent maintains tunnel keepalive
 ```
 
-### Stream Publishing (via ClawBus)
+### Stream Publishing (via AgentBus)
 
-For live logs, build output, task progress — **this IS ClawBus.** No separate streaming mechanism. Publish to a ClawBus topic, consumers subscribe via existing `/bus/stream` SSE endpoint with topic filtering. Zero new infrastructure.
+For live logs, build output, task progress — **this IS AgentBus.** No separate streaming mechanism. Publish to a AgentBus topic, consumers subscribe via existing `/bus/stream` SSE endpoint with topic filtering. Zero new infrastructure.
 
 ---
 
@@ -144,14 +144,14 @@ _Natasha's call: explicit `PUT /ready` over polling. Zero polling overhead; agen
 10. **ACK returned to agent after catalog write** — not after reload (reload is async)
     - ACK body: `{"status": "active", "url": "...", "port": 19105, "live_at": <estimated_ms>}` (Peabody's refinement)
     - `live_at` = `now + debounce_window + estimated_reload_time`
-    - **Agent MUST NOT share the URL with humans before `live_at` has passed.** If a `publish_error` ClawBus event arrives before `live_at`, the URL is dead — do not share it.
+    - **Agent MUST NOT share the URL with humans before `live_at` has passed.** If a `publish_error` AgentBus event arrives before `live_at`, the URL is dead — do not share it.
    - This prevents the "DM jkh a link that 404s for 3 seconds" failure mode
 
-**Pending TTL:** If agent never calls `PUT /ready` within 5 minutes, the `pending` entry is reclaimed (port freed, catalog entry deleted, ClawBus notification sent). Sweden containers with slow tunnel startup (supervisord restart loops, 10-15s) don't expire because Rocky doesn't poll — the agent controls when activation is attempted. `leased_at` column makes TTL enforcement trivial.
+**Pending TTL:** If agent never calls `PUT /ready` within 5 minutes, the `pending` entry is reclaimed (port freed, catalog entry deleted, AgentBus notification sent). Sweden containers with slow tunnel startup (supervisord restart loops, 10-15s) don't expire because Rocky doesn't poll — the agent controls when activation is attempted. `leased_at` column makes TTL enforcement trivial.
 
 ### Publish Sequence (`artifact` type)
 
-1. Agent POSTs content directly (ClawBus or multipart) — no tunnel
+1. Agent POSTs content directly (AgentBus or multipart) — no tunnel
 2. Rocky writes to MinIO with TTL tag (7-day default for `artifact`, no-expire for named/versioned)
 3. Catalog entry written immediately (no port verify step — content is already on MinIO)
 4. Caddy snippet generated only if path routing needed; otherwise serve via existing static handler
@@ -170,7 +170,7 @@ If a Caddy reload fails (bad snippet syntax, port conflict):
 1. Revert the offending snippet file
 2. Re-reload Caddy to restore previous working state
 3. Mark the failed publish as `error` in catalog with reason
-4. Notify the publishing agent via ClawBus
+4. Notify the publishing agent via AgentBus
 5. **Never use `caddy reload --force`** — it skips validation. One bad publish must not crater everyone else's routes.
 
 ### Unpublish / Liveness Monitoring
@@ -183,7 +183,7 @@ If a Caddy reload fails (bad snippet syntax, port conflict):
 3. **3 consecutive failures → `status: dead`** (Peabody's escalation model)
    - Caddy snippet removed
    - Batched into next reload window
-   - Agent notified via ClawBus: `{"event": "publish_dead", "id": "...", "reason": "3_consecutive_probe_failures"}`
+   - Agent notified via AgentBus: `{"event": "publish_dead", "id": "...", "reason": "3_consecutive_probe_failures"}`
 4. Agent can re-publish to restore — same flow as initial publish
 5. Tunnel reconnect without re-publish → Rocky re-runs port check → restore to `active` on success (tunnel port is known from catalog)
 
@@ -241,7 +241,7 @@ active ──TTL expired──→ expired (artifact only)
 active ──reload fail──→ error
 ```
 
-**Pending TTL (Natasha's refinement):** Port allocations in `pending` status auto-expire after 5 minutes. Daemon sweeps every 60s, reclaims timed-out reservations, notifies agent via ClawBus. The `leased_at` column tracks when the port was allocated (not when the tunnel connected). Prevents port leaks from agents that allocate but never activate.
+**Pending TTL (Natasha's refinement):** Port allocations in `pending` status auto-expire after 5 minutes. Daemon sweeps every 60s, reclaims timed-out reservations, notifies agent via AgentBus. The `leased_at` column tracks when the port was allocated (not when the tunnel connected). Prevents port leaks from agents that allocate but never activate.
 
 **Fast-path degraded on daemon restart (Natasha/Peabody):** When the publish daemon starts, any `active` catalog entry whose port is NOT in `ss -tlnp` output goes immediately to `degraded` — no 3-strike cycle. 3-strike is for runtime drift (tunnel was up, something flaked), not cold facts (port demonstrably absent on startup).
 
@@ -369,7 +369,7 @@ _From Natasha's review, ratified by fleet._
 ```
 | Field                | artifact              | service                    |
 |----------------------|-----------------------|----------------------------|
-| Transport            | ClawBus POST / SCP    | Dedicated SSH-R            |
+| Transport            | AgentBus POST / SCP    | Dedicated SSH-R            |
 | Content host         | MinIO (direct URL)    | Rocky proxy                |
 | Port check timeout   | 5s (configurable)     | 30s (configurable)         |
 | Expiry default       | 7 days                | Never (explicit unpublish) |
@@ -446,14 +446,14 @@ For `service` type, the tunnel is the critical path:
 - Rollback on reload failure
 - ACK with allocated port + `live_at` estimate
 - Rocky-side tunnel liveness probes (30s interval, 3-strike escalation)
-- ClawBus death notifications to publishing agents (on `dead` transition)
+- AgentBus death notifications to publishing agents (on `dead` transition)
 - **Startup reconciliation (bidirectional):** On daemon restart, one pass handles both directions:
   - (a) Catalog says `active`, port NOT in `ss -tlnp` → immediately `degraded` (fast-path, no 3-strike)
   - (b) Port in `ss -tlnp`, NO catalog entry → orphan tunnel, 60s grace period, then reclaim port
   - Rebuild in-memory port pool from catalog + `ss` scan. Snippets regenerated for all `active` entries.
 
 ### Phase 3: Stream Publishing (1 day)
-- ClawBus topic filtering extension (`?topic={name}`)
+- AgentBus topic filtering extension (`?topic={name}`)
 - Integrate with publish catalog
 
 ### Phase 4: Polish (ongoing)
@@ -475,7 +475,7 @@ For `service` type, the tunnel is the critical path:
 | Pasting to Slack/MM | Publish URL → share link |
 | "I can't reach that" | Every publication has a stable URL |
 | Port assignments in MEMORY.md | `port-registry.json` on Rocky |
-| Silent 502 on dead tunnels | `degraded` → `dead` with 503 + ClawBus notification |
+| Silent 502 on dead tunnels | `degraded` → `dead` with 503 + AgentBus notification |
 
 ---
 

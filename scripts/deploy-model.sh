@@ -54,12 +54,12 @@ if ! which mc &>/dev/null; then
 fi
 
 # ── 2. Configure mc ───────────────────────────────────────────
-mc alias set clawfs "${MINIO_ENDPOINT}" "${MINIO_ACCESS}" "${MINIO_SECRET}" --no-color 2>/dev/null
+mc alias set accfs "${MINIO_ENDPOINT}" "${MINIO_ACCESS}" "${MINIO_SECRET}" --no-color 2>/dev/null
 
 # ── 3. Download model ─────────────────────────────────────────
 mkdir -p "${MODEL_DIR}"
-echo "Syncing from ClawFS MinIO -> ${MODEL_DIR}"
-mc mirror --overwrite "clawfs/${MINIO_PATH}" "${MODEL_DIR}" --no-color
+echo "Syncing from AccFS MinIO -> ${MODEL_DIR}"
+mc mirror --overwrite "accfs/${MINIO_PATH}" "${MODEL_DIR}" --no-color
 echo "Download complete. Size: $(du -sh ${MODEL_DIR} | cut -f1)"
 echo ""
 

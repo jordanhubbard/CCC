@@ -1,6 +1,6 @@
-/// /api/exec — Remote exec dispatch via ClawBus (Rust port of services.mjs exec routes)
+/// /api/exec — Remote exec dispatch via AgentBus (Rust port of services.mjs exec routes)
 ///
-/// POST /api/exec      — sign + broadcast exec via ClawBus, log to exec.jsonl
+/// POST /api/exec      — sign + broadcast exec via AgentBus, log to exec.jsonl
 /// GET  /api/exec/:id  — retrieve exec record + results
 /// POST /api/exec/:id/result — agent posts result back
 
@@ -51,12 +51,12 @@ async fn post_exec(
         _ => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error":"code required"}))).into_response(),
     };
 
-    let clawbus_token = std::env::var("CLAWBUS_TOKEN")
+    let agentbus_token = std::env::var("AGENTBUS_TOKEN")
         .or_else(|_| std::env::var("SQUIRRELBUS_TOKEN"))  // backwards compat
         .unwrap_or_default();
-    if clawbus_token.is_empty() {
+    if agentbus_token.is_empty() {
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error":"CLAWBUS_TOKEN not configured"}))).into_response();
+            Json(json!({"error":"AGENTBUS_TOKEN not configured"}))).into_response();
     }
 
     let exec_id = format!("exec-{}", uuid::Uuid::new_v4());
@@ -83,18 +83,18 @@ async fn post_exec(
         "replyTo":    body.get("replyTo").cloned(),
         "ts":         now.clone(),
     });
-    let sig = sign_payload(&payload, &clawbus_token);
+    let sig = sign_payload(&payload, &agentbus_token);
     let envelope = {
         let mut e = payload.clone();
         e.as_object_mut().unwrap().insert("sig".to_string(), json!(sig));
         e
     };
 
-    // Broadcast via ClawBus
-    let bus_url = std::env::var("CLAWBUS_URL")
+    // Broadcast via AgentBus
+    let bus_url = std::env::var("AGENTBUS_URL")
         .or_else(|_| std::env::var("SQUIRRELBUS_URL"))  // backwards compat
         .unwrap_or_else(|_| format!("http://localhost:{}", std::env::var("ACC_PORT").unwrap_or_else(|_| "8789".to_string())));
-    let bus_token = std::env::var("ACC_AGENT_TOKEN").unwrap_or(clawbus_token.clone());
+    let bus_token = std::env::var("ACC_AGENT_TOKEN").unwrap_or(agentbus_token.clone());
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))

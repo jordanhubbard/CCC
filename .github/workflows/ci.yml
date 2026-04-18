@@ -29,15 +29,15 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Run ClawFS tests
-        run: node --test services/clawfs/clawfs.test.mjs || echo "::warning::ClawFS tests failed"
+      - name: Run AccFS tests
+        run: node --test services/accfs/accfs.test.mjs || echo "::warning::AccFS tests failed"
 
   rust-check:
     name: Rust Check & Test
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ccc-server
+        working-directory: acc-server
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +45,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ccc-server
+          workspaces: acc-server
 
       - name: cargo check
         run: cargo check --all-targets

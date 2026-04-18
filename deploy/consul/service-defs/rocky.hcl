@@ -4,8 +4,8 @@
 # fleet nodes may discover via <name>.service.consul.
 
 service {
-  name = "ccc-server"
-  id   = "ccc-server-rocky"
+  name = "acc-server"
+  id   = "acc-server-rocky"
   port = 8789
   tags = ["hub", "api", "dashboard"]
   meta {
@@ -60,7 +60,7 @@ service {
   meta {
     node    = "rocky"
     console = "9001"
-    desc    = "MinIO S3-compatible object storage (ClawFS backend)"
+    desc    = "MinIO S3-compatible object storage (AccFS backend)"
   }
   check {
     http     = "http://127.0.0.1:9000/minio/health/live"

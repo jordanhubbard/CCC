@@ -1,7 +1,7 @@
 # Agent Quench Protocol
 
 The **quench** mechanism lets any agent (or operator) send a pause signal to one
-or all agents in the fleet via ClawBus. Receivers finish their current work unit,
+or all agents in the fleet via AgentBus. Receivers finish their current work unit,
 then block for the specified duration before resuming.
 
 ## Design Goals
@@ -12,7 +12,7 @@ then block for the specified duration before resuming.
 - **Self-healing**: quench expires automatically — no manual resume required
 - **Auditable**: every quench event is appended to `~/.ccc/logs/quench.jsonl`
 
-## ClawBus Message Schema
+## AgentBus Message Schema
 
 ```json
 {
@@ -63,7 +63,7 @@ async function agentWorkLoop() {
 ### handleQuenchMessage()
 
 `agent-listener.mjs` already wires `handleQuenchMessage()` to `ccc.quench`
-ClawBus messages. No additional wiring is needed in the listener.
+AgentBus messages. No additional wiring is needed in the listener.
 
 ## Log Format
 
@@ -84,5 +84,5 @@ Event types: `quenched`, `ignored`, `pausing`, `resumed`.
 | Max duration | 30 minutes |
 | Min duration | 1 minute |
 | First-wins | Yes (subsequent ignored while active) |
-| Target `all` | Applies to every agent subscribed to ClawBus |
+| Target `all` | Applies to every agent subscribed to AgentBus |
 | Interruption | Never — current work unit always completes first |

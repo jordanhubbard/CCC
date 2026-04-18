@@ -216,7 +216,7 @@ make test    # run Rust tests
 |------|-----------|
 | `deploy/` | Setup scripts and systemd/launchd service units |
 | `workqueue/` | Queue schema, executors, claude-worker.mjs |
-| `clawbus/` | P2P message bus protocol + bus-listener |
+| `agentbus/` | P2P message bus protocol + bus-listener |
 | `skills/` | Shared agent skill configs |
 | `scripts/` | Operator utilities (fleet monitor, Slack ingest, Qdrant tools) |
 | `docs/` | Architecture and design docs |

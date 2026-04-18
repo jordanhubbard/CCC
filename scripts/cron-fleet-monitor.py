@@ -59,15 +59,15 @@ def summarize_health(raw):
         names = ", ".join(a["name"] for a in offline)
         lines.append(f"AGENTS OFFLINE: {names}")
 
-    # Remote ClawFS access
-    remote = data.get("remote_clawfs", [])
+    # Remote AccFS access
+    remote = data.get("remote_accfs", [])
     if remote:
         rfail = [r for r in remote if not r.get("ok")]
         if rfail:
             for r in rfail:
-                lines.append(f"  CLAWFS UNREACHABLE from {r['name']}: {r.get('error', '?')}")
+                lines.append(f"  ACCFS UNREACHABLE from {r['name']}: {r.get('error', '?')}")
         else:
-            lines.append(f"Remote ClawFS: all {len(remote)} nodes OK")
+            lines.append(f"Remote AccFS: all {len(remote)} nodes OK")
 
     return "\n".join(lines)
 
