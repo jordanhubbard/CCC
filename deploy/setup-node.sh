@@ -121,7 +121,7 @@ fi
 
 # ── Install ops crons (watchdog, nudge, memory snapshot) ──────────────────
 install_ops_crons() {
-  local CRON_FRAGMENT="$WORKSPACE/deploy/crontab-ccc.txt"
+  local CRON_FRAGMENT="$WORKSPACE/deploy/crontab-acc.txt"
   if [ ! -f "$CRON_FRAGMENT" ]; then
     warn "Ops cron fragment not found at $CRON_FRAGMENT — skipping"
     return
@@ -142,7 +142,7 @@ info "Installing ops crons..."
 if [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
   install_ops_crons
 else
-  warn "Unknown platform — install ops crons manually from deploy/crontab-ccc.txt"
+  warn "Unknown platform — install ops crons manually from deploy/crontab-acc.txt"
 fi
 
 # ── Install node dependencies ─────────────────────────────────────────────
@@ -232,15 +232,15 @@ else
   fi
 fi
 
-# Install ccc-node skill into Hermes
-CCC_SKILL_SRC="$WORKSPACE/skills/ccc-node"
+# Install acc-node skill into Hermes
+CCC_SKILL_SRC="$WORKSPACE/skills/acc-node"
 if [ -d "$CCC_SKILL_SRC" ] && [ "$HERMES_INSTALLED" = true ]; then
-  SKILL_DEST="$HOME/.hermes/skills/ccc-node"
+  SKILL_DEST="$HOME/.hermes/skills/acc-node"
   if [ ! -d "$SKILL_DEST" ]; then
     cp -r "$CCC_SKILL_SRC" "$SKILL_DEST"
-    success "ccc-node skill installed into Hermes"
+    success "acc-node skill installed into Hermes"
   else
-    success "ccc-node skill already in Hermes"
+    success "acc-node skill already in Hermes"
   fi
 fi
 

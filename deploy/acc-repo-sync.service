@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=jkh
-Group=jkh
-WorkingDirectory=/home/jkh
-ExecStart=/bin/bash %h/.acc/workspace/deploy/ccc-repo-sync.sh
+User=AGENT_USER
+Group=AGENT_USER
+WorkingDirectory=AGENT_HOME
+ExecStart=/bin/bash %h/.acc/workspace/deploy/acc-repo-sync.sh
 EnvironmentFile=-%h/.acc/.env
 StandardOutput=append:%h/.acc/logs/repo-sync.log
 StandardError=append:%h/.acc/logs/repo-sync.log

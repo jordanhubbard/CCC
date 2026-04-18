@@ -35,7 +35,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - install agent runtime (Hermes/OpenClaw) in setup-node.sh
 - dual-write to fleet Qdrant on file change
 - wire Qdrant dual-ingest into memory-ingest-watcher
-- add ccc-node agentskills.io-compatible skill
+- add acc-node agentskills.io-compatible skill
 - add deploy-gemma4.sh for FP8_BLOCK rolling upgrade
 - use ClawFS ~/clawfs/models as fleet-shared model cache
 - migrate memory.rs from Milvus to Qdrant (SOA-007) (#10)

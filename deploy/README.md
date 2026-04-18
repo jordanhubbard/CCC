@@ -74,7 +74,7 @@ Cost model: coding CLI = fixed monthly subscription, not per-token. CCC's infere
 
 To install the CCC fleet skill into hermes-agent:
 ```bash
-cp -r ~/.ccc/workspace/skills/ccc-node/ ~/.hermes/skills/ccc-node/
+cp -r ~/.ccc/workspace/skills/acc-node/ ~/.hermes/skills/acc-node/
 ```
 
 Without the coding CLI turbocharger, `claude_cli` work items stay pending forever.

@@ -4,7 +4,7 @@ description: >
   Create a new deploy/migrations/NNNN_*.sh migration file for any incompatible
   CCC change (new/removed/modified service files, cron changes, config updates).
   Invoke whenever you add, remove, or meaningfully change a file in deploy/systemd/,
-  deploy/launchd/, or deploy/crontab-ccc.txt — or whenever a change requires
+  deploy/launchd/, or deploy/crontab-acc.txt — or whenever a change requires
   action on already-deployed nodes to stay current.
 ---
 
@@ -34,10 +34,10 @@ Analyze the detected changes and determine the appropriate action. Common patter
 **Service unit file changed** (ExecStart, paths, etc.):
 → Migration re-installs the unit: `systemd_teardown` then `systemd_install` (or just `systemd_install` which does restart)
 
-**Cron added** (`deploy/crontab-ccc.txt` gained a new entry):
+**Cron added** (`deploy/crontab-acc.txt` gained a new entry):
 → Migration appends it if not already present using inline cron logic
 
-**Cron removed** (`deploy/crontab-ccc.txt` lost an entry):
+**Cron removed** (`deploy/crontab-acc.txt` lost an entry):
 → Migration calls `cron_remove PATTERN`
 
 **Config file changed** (any deploy script that affects running state):

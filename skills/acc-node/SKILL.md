@@ -1,5 +1,5 @@
 ---
-name: ccc-node
+name: acc-node
 description: Connect this agent to the CCC (Command and Control Center) fleet. Handles AgentBus registration, heartbeat, remote exec dispatch, and workqueue lifecycle. Use when setting up a new agent node, checking fleet connectivity, or managing workqueue items via the CCC API.
 version: 1.0.0
 platforms: [linux, macos]
@@ -22,7 +22,7 @@ required_environment_variables:
     required_for: heartbeat and workqueue routing
 ---
 
-# CCC Node
+# ACC Node
 
 Connects a Hermes agent to the CCC fleet.
 

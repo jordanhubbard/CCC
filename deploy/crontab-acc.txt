@@ -1,7 +1,7 @@
-# crontab-ccc.txt — CCC ops cron fragment
+# crontab-acc.txt — CCC ops cron fragment
 # Install with:
 #   WORKSPACE=$HOME/Src/CCC LOG_DIR=$HOME/.ccc/logs
-#   (crontab -l 2>/dev/null; sed "s|WORKSPACE|$WORKSPACE|g; s|LOG_DIR|$LOG_DIR|g" deploy/crontab-ccc.txt) | crontab -
+#   (crontab -l 2>/dev/null; sed "s|WORKSPACE|$WORKSPACE|g; s|LOG_DIR|$LOG_DIR|g" deploy/crontab-acc.txt) | crontab -
 # Or run setup-node.sh — it installs these automatically.
 
 # Memory git snapshot — daily at midnight, commit MEMORY.md to git history

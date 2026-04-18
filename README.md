@@ -236,7 +236,7 @@ See [agentbus/SPEC.md](agentbus/SPEC.md).
 
 Sequential idempotent scripts in `deploy/migrations/` (0001–0015). Each checks whether it's already been applied before making changes.
 
-Use the `/add-migration` skill whenever you add, remove, or change files in `deploy/systemd/`, `deploy/launchd/`, or `deploy/crontab-ccc.txt`.
+Use the `/add-migration` skill whenever you add, remove, or change files in `deploy/systemd/`, `deploy/launchd/`, or `deploy/crontab-acc.txt`.
 
 ---
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# ccc-repo-sync.sh — Git pull + auto-commit + push for the AccFS shared CCC repo
+# acc-repo-sync.sh — Git pull + auto-commit + push for the AccFS shared CCC repo
 #
 # This runs on exactly ONE node (the designated CCC_REPO_PUSHER, typically Rocky).
 # It keeps the shared AccFS repo in sync with GitHub:
@@ -8,16 +8,16 @@
 #   3. Push to origin
 #
 # Usage:
-#   bash deploy/ccc-repo-sync.sh           # one-shot
-#   CCC_REPO_SYNC_DRY_RUN=1 bash deploy/ccc-repo-sync.sh  # dry run
+#   bash deploy/acc-repo-sync.sh           # one-shot
+#   ACC_REPO_SYNC_DRY_RUN=1 bash deploy/acc-repo-sync.sh  # dry run
 #
 # Designed to run via systemd timer or cron every 30 minutes.
 
 set -euo pipefail
 
-CCC_DIR="$HOME/.ccc"
-ENV_FILE="$CCC_DIR/.env"
-LOG_FILE="$CCC_DIR/logs/repo-sync.log"
+ACC_DIR="$HOME/.acc"
+ENV_FILE="$ACC_DIR/.env"
+LOG_FILE="$ACC_DIR/logs/repo-sync.log"
 MAX_LOG_LINES=500
 
 # Load .env if it exists
@@ -28,9 +28,9 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 AGENT_NAME="${AGENT_NAME:-unknown}"
-DRY_RUN="${CCC_REPO_SYNC_DRY_RUN:-0}"
+DRY_RUN="${ACC_REPO_SYNC_DRY_RUN:-0}"
 
-WORKSPACE="$CCC_DIR/workspace"
+WORKSPACE="$ACC_DIR/workspace"
 
 if [ ! -d "$WORKSPACE/.git" ]; then
   echo "ERROR: No repo found at $WORKSPACE — run setup-node.sh first" >&2

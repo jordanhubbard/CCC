@@ -124,7 +124,7 @@ if $IS_CCC_HOST; then
 else
   info "This node is a CLIENT — connecting to an existing CCC host."
   echo ""
-  prompt CCC_HOST_INPUT "CCC host URL (e.g. https://ccc.example.com or http://10.0.0.1:8789)" ""
+  prompt CCC_HOST_INPUT "CCC host URL (e.g. https://acc.example.com or http://10.0.0.1:8789)" ""
   while [ -z "$CCC_HOST_INPUT" ]; do
     warn "CCC URL cannot be empty for a client node."
     prompt CCC_HOST_INPUT "CCC host URL" ""

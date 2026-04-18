@@ -116,7 +116,7 @@ if [ "$NO_MIGRATIONS" = false ]; then
 fi
 
 # ── 4. Reinstall ops crons ────────────────────────────────────────────────
-CRON_FRAGMENT="$WORKSPACE/deploy/crontab-ccc.txt"
+CRON_FRAGMENT="$WORKSPACE/deploy/crontab-acc.txt"
 if [ -f "$CRON_FRAGMENT" ]; then
   if crontab -l 2>/dev/null | grep -q "ccc-api-watchdog.mjs"; then
     info "Ops crons already present — skipping"

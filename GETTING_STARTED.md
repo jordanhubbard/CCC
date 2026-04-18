@@ -149,7 +149,7 @@ This will:
 - Install hermes-agent (the standard agent runtime)
 - Clone the CCC workspace to `~/.ccc/workspace`
 - Write `~/.ccc/.env` with your hub credentials and any secrets from the bootstrap API
-- Install hermes skills (ccc-node, agent-skills, superpowers)
+- Install hermes skills (acc-node, agent-skills, superpowers)
 - Register hermes-gateway and ccc-bus-listener with supervisord
 - Post a hardware fingerprint + heartbeat to the hub
 

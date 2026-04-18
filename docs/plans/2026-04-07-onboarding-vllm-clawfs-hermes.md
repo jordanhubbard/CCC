@@ -44,6 +44,6 @@
 ### Hermes-Agent
 - **Primary runtime** — install via pipx (preferred) or pip
 - **Migrate OpenClaw config** if present (hermes claw migrate)
-- **Install ccc-node skill** automatically
+- **Install acc-node skill** automatically
 - **Env vars:** already covered by existing .env.template
 - **OpenClaw still installed** (for backward compat) but hermes is the launcher

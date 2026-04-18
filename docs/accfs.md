@@ -158,7 +158,7 @@ The CCC repo is seeded on AccFS at `/mnt/accfs/repos/CCC` (accessible via
 `mc` as `accfs/accfs/repos/CCC/`).
 
 - Rocky is the designated pusher (CCC_REPO_PUSHER=true)
-- A 30-min sync timer (`ccc-repo-sync.timer`) auto-commits and pushes changes
+- A 30-min sync timer (`acc-repo-sync.timer`) auto-commits and pushes changes
 - Other agents can read the repo via mc but should NOT do git operations on it
 - Rocky's workspace symlink: `~/.ccc/workspace -> ~/accfs/repos/CCC`
 

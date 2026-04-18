@@ -443,8 +443,8 @@ if command -v hermes &>/dev/null; then
   mkdir -p "$HOME/.hermes/skills"
 
   # CCC fleet skill
-  if [[ -d "$ACC_WORKSPACE/skills/ccc-node" ]]; then
-    cp -r "$ACC_WORKSPACE/skills/ccc-node/" "$HOME/.hermes/skills/ccc-node/"
+  if [[ -d "$ACC_WORKSPACE/skills/acc-node" ]]; then
+    cp -r "$ACC_WORKSPACE/skills/acc-node/" "$HOME/.hermes/skills/acc-node/"
     success "CCC-node skill installed into Hermes"
   fi
 
