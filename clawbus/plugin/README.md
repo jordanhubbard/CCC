@@ -19,7 +19,7 @@ No inbound port is required. The agent reaches out to the hub; the hub does not 
 
 ## Setup
 
-The listener is installed and started by `deploy/setup-node.sh` / `deploy/ccc-init.sh`. To install manually:
+The listener is installed and started by `deploy/setup-node.sh` / `deploy/acc-init.sh`. To install manually:
 
 ### Linux (systemd)
 

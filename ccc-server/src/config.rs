@@ -1,4 +1,4 @@
-/// ccc-server configuration — loads from ccc.json then falls back to env vars.
+/// acc-server configuration — loads from ccc.json then falls back to env vars.
 ///
 /// Priority (highest first):
 ///   1. Environment variables (allow CI/systemd overrides without touching the file)
@@ -58,7 +58,7 @@ pub struct ResolvedConfig {
     pub bus_log_path: String,
     pub projects_path: String,
     pub auth_tokens: std::collections::HashSet<String>,
-    /// When set, ccc-server uses SQLite for persistent state instead of JSON files.
+    /// When set, acc-server uses SQLite for persistent state instead of JSON files.
     /// On first start, existing JSON data is migrated automatically.
     pub db_path: Option<String>,
     /// Path to the auth SQLite database (always-on, regardless of db_path).

@@ -21,10 +21,10 @@ CCC supports two node roles. A fleet of any size can run one hub and any number 
 
 ### Hub Node
 
-Runs the central services: `ccc-server`, `minio`, `qdrant`, `tokenhub`, and `agentfs-sync`. The hub is the single source of truth for the work queue, message bus, agent registry, and secrets store. It is the only node that must be reachable by other agents.
+Runs the central services: `acc-server`, `minio`, `qdrant`, `tokenhub`, and `agentfs-sync`. The hub is the single source of truth for the work queue, message bus, agent registry, and secrets store. It is the only node that must be reachable by other agents.
 
 Required services on the hub:
-- `ccc-server` — Rust/Axum API server (port 8789)
+- `acc-server` — Rust/Axum API server (port 8789)
 - `minio` — S3-compatible object storage (port 9000, typically localhost-only)
 - `qdrant` — Vector database (port 6333/6334)
 - `tokenhub` — LLM routing proxy (port 8090)
@@ -48,9 +48,9 @@ An agent node requires only outbound HTTP access to the hub. It does not need to
 
 ---
 
-## 3. ccc-server (Hub API)
+## 3. acc-server (Hub API)
 
-**Binary:** `ccc-server` (Rust, Axum), installed at `/usr/local/bin/ccc-server`  
+**Binary:** `acc-server` (Rust, Axum), installed at `/usr/local/bin/acc-server`  
 **Port:** 8789  
 **Config file:** `~/.ccc/ccc.json`  
 **Auth:** Bearer token required on all routes  
@@ -130,7 +130,7 @@ Stale thresholds vary by executor type: `claude_cli` = 45 min, `gpu` = 120 min, 
 | GET | `/api/bus/messages` | Query messages (params: `limit`, `subject`, `type`, `thread_id`, `to`, `from`) |
 | GET | `/api/bus/presence` | Agent presence (online/offline status) |
 
-All four routes are duplicated under `/bus/*` for reverse-proxy compatibility. ClawBus is **not a separate process** — it runs inside `ccc-server` on port 8789. The viewer at port 8790 is the dashboard-server proxy.
+All four routes are duplicated under `/bus/*` for reverse-proxy compatibility. ClawBus is **not a separate process** — it runs inside `acc-server` on port 8789. The viewer at port 8790 is the dashboard-server proxy.
 
 **Secrets** (`secrets.rs`): GET/POST/PUT/DELETE on `/api/secrets` and `/api/secrets/:key`
 
@@ -160,7 +160,7 @@ All four routes are duplicated under `/bus/*` for reverse-proxy compatibility. C
 
 ### Optional Process Supervisor
 
-ccc-server can optionally manage a `tokenhub` child process with restart-on-failure semantics. Disabled by default; enabled via config.
+acc-server can optionally manage a `tokenhub` child process with restart-on-failure semantics. Disabled by default; enabled via config.
 
 ---
 
@@ -407,9 +407,9 @@ A Rust binary that provides the operator dashboard UI. Observed startup log:
 RCC Dashboard v2 starting port=8790 rcc_url=http://localhost:8789 sc_url=http://localhost:8793 operator=jkh
 ```
 
-It proxies requests to `ccc-server` (8789) and optionally to SquirrelChat (8793, a separate chat service that has its own codebase not in this repo).
+It proxies requests to `acc-server` (8789) and optionally to SquirrelChat (8793, a separate chat service that has its own codebase not in this repo).
 
-**Alternative frontend:** `ccc-server` can serve a WASM/Leptos SPA directly as a fallback when `DASHBOARD_DIST` is set. The SPA source lives in ClawFS alongside the Rust server source. As of audit, the `dashboard-server` binary approach is what's running.
+**Alternative frontend:** `acc-server` can serve a WASM/Leptos SPA directly as a fallback when `DASHBOARD_DIST` is set. The SPA source lives in ClawFS alongside the Rust server source. As of audit, the `dashboard-server` binary approach is what's running.
 
 ---
 
@@ -535,7 +535,7 @@ Agents only need outbound HTTP to the hub. The hub does not initiate connections
 
 | Port | Service | Notes |
 |---|---|---|
-| 8789 | ccc-server | Main CCC API (all agents connect here) |
+| 8789 | acc-server | Main CCC API (all agents connect here) |
 | 8790 | dashboard-server | Operator dashboard |
 | 9000 | MinIO | Object storage (typically localhost-only) |
 | 9100 | ClawFS S3 gateway | JuiceFS S3 API — all agents access ClawFS here via `mc` |
@@ -647,7 +647,7 @@ This section records what was actually running on the inspected nodes. It is a p
 
 ### Hub Node
 
-**Active services:** ccc-server (port 8789), dashboard-server (port 8790), qdrant (6333/6334), minio (9000 localhost), tokenhub (8090), ccc-agent listen, agentfs-sync, hermes-agent, claude (Claude Code CLI session)
+**Active services:** acc-server (port 8789), dashboard-server (port 8790), qdrant (6333/6334), minio (9000 localhost), tokenhub (8090), ccc-agent listen, agentfs-sync, hermes-agent, claude (Claude Code CLI session)
 
 **Cron:** `agent-pull.sh` every 10 minutes; `memory-git-commit.sh` daily at midnight
 

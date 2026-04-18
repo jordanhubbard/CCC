@@ -53,8 +53,8 @@ if [[ -z "$SECRETS_RESPONSE" ]]; then
   exit 0  # non-fatal; agent can still operate with cached .env
 fi
 
-CCC_AGENT="${CCC_AGENT:-$ACC_DEST/bin/ccc-agent}"
-[ ! -x "$CCC_AGENT" ] && CCC_AGENT="$(command -v ccc-agent 2>/dev/null || echo "")"
+CCC_AGENT="${CCC_AGENT:-$ACC_DEST/bin/acc-agent}"
+[ ! -x "$CCC_AGENT" ] && CCC_AGENT="$(command -v acc-agent 2>/dev/null || echo "")"
 
 KEYS=$(echo "$SECRETS_RESPONSE" | "$CCC_AGENT" json lines .keys 2>/dev/null || echo "")
 

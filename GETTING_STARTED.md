@@ -52,9 +52,9 @@ It writes `~/.ccc/.env` with your answers. That file is never committed to git.
 
 Install and start the CCC API server (systemd, Linux):
 ```bash
-sudo cp deploy/systemd/ccc-server.service /etc/systemd/system/
+sudo cp deploy/systemd/acc-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now ccc-server
+sudo systemctl enable --now acc-server
 ```
 
 macOS:
@@ -203,10 +203,10 @@ cd CCC
 make init   # configure a local dev instance
 ```
 
-The API server is a Rust binary (`ccc-server`). The dashboard is Leptos WASM (pre-built dist committed at `dist/`).
+The API server is a Rust binary (`acc-server`). The dashboard is Leptos WASM (pre-built dist committed at `dist/`).
 
 ```bash
-make build   # build ccc-server Rust binary
+make build   # build acc-server Rust binary
 make test    # run Rust tests
 ```
 

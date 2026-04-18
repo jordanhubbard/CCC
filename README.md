@@ -30,7 +30,7 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md)
 
 | Component | Role | Port |
 |-----------|------|------|
-| `ccc-server` | Rust/Axum REST API — work queue, agent registry, secrets | 8789 |
+| `acc-server` | Rust/Axum REST API — work queue, agent registry, secrets | 8789 |
 | `ccc-dashboard` | Leptos WASM web UI | 8788 |
 | `ccc-queue-worker` | Claims and executes queue items | — |
 | `ccc-bus-listener` | ClawBus SSE receiver | — |
@@ -167,7 +167,7 @@ Full reference: `deploy/.env.template` (agents) · `deploy/.env.server.template`
 
 | Unit | Purpose |
 |------|---------|
-| `ccc-server.service` | API server (port 8789) |
+| `acc-server.service` | API server (port 8789) |
 | `ccc-dashboard.service` | Web dashboard (port 8788) |
 | `ccc-queue-worker.service` | Queue processor |
 | `ccc-bus-listener.service` | ClawBus SSE receiver |

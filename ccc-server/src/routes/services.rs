@@ -19,7 +19,7 @@ fn build_catalog() -> Vec<(String, String, String, String)> {
     let tokenhub_port = std::env::var("TOKENHUB_PORT").unwrap_or_else(|_| "8090".to_string());
     let public_host = std::env::var("PUBLIC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let mut entries = vec![
-        ("ccc-server".to_string(),  "CCC Server".to_string(),
+        ("acc-server".to_string(),  "ACC Server".to_string(),
          format!("http://{public_host}:{ccc_port}/health"), hub.clone()),
         ("tokenhub".to_string(), "Tokenhub".to_string(),
          format!("http://127.0.0.1:{tokenhub_port}/health"), hub.clone()),

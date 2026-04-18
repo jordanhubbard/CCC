@@ -97,25 +97,25 @@ else
     fi
   fi
 
-  # Rebuild ccc-server if its source changed and this node runs it
+  # Rebuild acc-server if its source changed and this node runs it
   if echo "$CHANGED" | grep -q "^ccc-server/"; then
-    if command -v systemctl &>/dev/null && systemctl is-active --quiet ccc-server.service 2>/dev/null; then
-      log "ccc-server source changed — rebuilding..."
+    if command -v systemctl &>/dev/null && systemctl is-active --quiet acc-server.service 2>/dev/null; then
+      log "acc-server source changed — rebuilding..."
       export PATH="${HOME}/.cargo/bin:${PATH}"
       if command -v cargo &>/dev/null; then
         if cargo build --release --manifest-path "${WORKSPACE}/ccc-server/Cargo.toml" >> "$LOG_FILE" 2>&1; then
-          BUILT="${WORKSPACE}/ccc-server/target/release/ccc-server"
-          if sudo install -m 755 "$BUILT" /usr/local/bin/ccc-server; then
-            sudo systemctl restart ccc-server.service && log "ccc-server rebuilt and restarted" \
-              || log "WARNING: ccc-server restart failed"
+          BUILT="${WORKSPACE}/ccc-server/target/release/acc-server"
+          if sudo install -m 755 "$BUILT" /usr/local/bin/acc-server; then
+            sudo systemctl restart acc-server.service && log "acc-server rebuilt and restarted" \
+              || log "WARNING: acc-server restart failed"
           else
-            log "WARNING: ccc-server install (sudo) failed"
+            log "WARNING: acc-server install (sudo) failed"
           fi
         else
-          log "WARNING: ccc-server cargo build failed"
+          log "WARNING: acc-server cargo build failed"
         fi
       else
-        log "WARNING: cargo not found — cannot rebuild ccc-server"
+        log "WARNING: cargo not found — cannot rebuild acc-server"
       fi
     fi
   fi

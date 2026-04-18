@@ -19,7 +19,7 @@ All services use `localhost` with their standard ports:
 
 | Service     | Port  | Used via             |
 |-------------|-------|----------------------|
-| ccc-server  | 8789  | `CCC_URL` in .env    |
+| acc-server  | 8789  | `CCC_URL` in .env    |
 | tokenhub    | 8090  | `TOKENHUB_URL` in .env |
 | qdrant      | 6333  | `QDRANT_URL` in .env |
 | minio       | 9000  | `MINIO_ENDPOINT` in .env |

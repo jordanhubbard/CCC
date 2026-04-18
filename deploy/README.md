@@ -9,10 +9,10 @@ This directory contains everything needed to bootstrap a new agent node and keep
 git clone git@github.com:yourorg/your-ccc-repo.git ~/.ccc/workspace
 
 # 2. Run the interactive onboarding script (recommended)
-bash ~/.ccc/workspace/deploy/ccc-init.sh
+bash ~/.ccc/workspace/deploy/acc-init.sh
 ```
 
-`ccc-init.sh` handles everything: it asks for your agent name, whether this node is the CCC host or a client, configures `~/.ccc/.env`, sets up data dirs, and optionally installs the API as a system service.
+`acc-init.sh` handles everything: it asks for your agent name, whether this node is the CCC host or a client, configures `~/.ccc/.env`, sets up data dirs, and optionally installs the API as a system service.
 
 ### Manual path (if you prefer)
 
@@ -34,9 +34,9 @@ tmux new-session -d -s claude-main
 tmux send-keys -t claude-main 'claude --dangerously-skip-permissions' Enter
 ```
 
-## ccc-init.sh — Interactive Onboarding
+## acc-init.sh — Interactive Onboarding
 
-`ccc-init.sh` is the recommended entry point for any new node. It:
+`acc-init.sh` is the recommended entry point for any new node. It:
 
 1. Prompts for `AGENT_NAME` and `AGENT_HOST`
 2. Asks whether this node **is the CCC host** or a **client** connecting to one
@@ -101,7 +101,7 @@ tail -f ~/.acc/logs/pull.log
 
 - Template: `deploy/.env.template` (in git — safe, no real values)
 - Live config: `~/.acc/.env` (never in git — chmod 600)
-- Quickest setup: `bash deploy/ccc-init.sh`
+- Quickest setup: `bash deploy/acc-init.sh`
 
 Required fields:
 | Field | Description |
@@ -181,7 +181,7 @@ sudo systemctl enable --now ccc-agent.timer
 
 ### macOS
 ```bash
-# ccc-init.sh handles this automatically.
+# acc-init.sh handles this automatically.
 # Or manually:
 cp deploy/launchd/com.ccc.agent.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.ccc.agent.plist

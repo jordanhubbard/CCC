@@ -6,7 +6,7 @@
 #   REPO_URL=git@github.com:yourorg/your-ccc-repo.git bash deploy/setup-node.sh
 #   OR (from inside an existing clone): bash deploy/setup-node.sh
 #
-# Tip: run deploy/ccc-init.sh after this to configure your .env interactively.
+# Tip: run deploy/acc-init.sh after this to configure your .env interactively.
 
 set -e
 

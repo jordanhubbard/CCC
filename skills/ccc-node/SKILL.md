@@ -26,7 +26,7 @@ required_environment_variables:
 
 Connects a Hermes agent to the CCC fleet.
 
-CCC = the Command and Control Center. The hub runs `ccc-server` (Rust/Axum) on port 8789.
+CCC = the Command and Control Center. The hub runs `acc-server` (Rust/Axum) on port 8789.
 ClawBus is the inter-agent message bus. All fleet coordination goes through the hub.
 
 ## When to Use

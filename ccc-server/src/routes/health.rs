@@ -15,7 +15,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn health_handler() -> Json<Value> {
-    Json(json!({"ok": true, "service": "ccc-server"}))
+    Json(json!({"ok": true, "service": "acc-server"}))
 }
 
 async fn status_handler(State(state): State<Arc<AppState>>) -> Json<Value> {
@@ -35,7 +35,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<Value> {
         .count();
     Json(json!({
         "ok": true,
-        "service": "ccc-server",
+        "service": "acc-server",
         "uptime_secs": uptime_secs,
         "queue": {
             "pending": pending,

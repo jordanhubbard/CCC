@@ -112,7 +112,7 @@ async fn put_config(
     Json(json!({
         "ok": true,
         "applied": applied,
-        "note": "Runtime-only. Restart ccc-server or persist to .env for permanence."
+        "note": "Runtime-only. Restart acc-server or persist to .env for permanence."
     }))
     .into_response()
 }

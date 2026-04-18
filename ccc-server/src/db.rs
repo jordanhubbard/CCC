@@ -1,4 +1,4 @@
-/// SQLite database layer for ccc-server.
+/// SQLite database layer for acc-server.
 ///
 /// Enabled by setting `CCC_DB_PATH` to a `.db` file path.
 /// On first start, data is migrated from existing JSON files automatically.

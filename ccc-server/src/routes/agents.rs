@@ -162,7 +162,7 @@ async fn agent_heartbeat(
         }
     } else {
         let host = body.get("host").and_then(|h| h.as_str()).unwrap_or("unknown").to_string();
-        let token = format!("ccc-agent-{}-{}", agent_name, uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let token = format!("acc-agent-{}-{}",agent_name, uuid::Uuid::new_v4().to_string().replace('-', ""));
         agents_map.insert(agent_name.clone(), json!({
             "name": agent_name,
             "host": host,
@@ -198,7 +198,7 @@ async fn register_agent(
         .and_then(|t| t.as_str())
         .map(|s| s.to_string());
     let token = existing_token.unwrap_or_else(|| {
-        format!("rcc-agent-{}-{}", name, uuid::Uuid::new_v4().to_string().replace('-', ""))
+        format!("acc-agent-{}-{}", name, uuid::Uuid::new_v4().to_string().replace('-', ""))
     });
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -267,7 +267,7 @@ async fn upsert_agent(
     let now = chrono::Utc::now().to_rfc3339();
 
     if !agents_map.contains_key(&name) {
-        let token = format!("ccc-agent-{}-{}", name, uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let token = format!("acc-agent-{}-{}",name, uuid::Uuid::new_v4().to_string().replace('-', ""));
         agents_map.insert(name.clone(), json!({
             "name": name,
             "host": body.get("host").and_then(|h| h.as_str()).unwrap_or("unknown"),

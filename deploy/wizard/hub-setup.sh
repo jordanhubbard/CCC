@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # hub-setup.sh — Interactive setup wizard for CCC hub node.
-# Run once on the machine that will host ccc-server and AccFS.
+# Run once on the machine that will host acc-server and AccFS.
 # Generates ~/.acc/.env, /srv/accfs, and registers SMB secrets.
 
 set -euo pipefail
@@ -21,7 +21,7 @@ bold "════════════════════════�
 bold " CCC Hub Setup Wizard"
 bold "═══════════════════════════════════════════════════════"
 echo
-echo "This wizard configures the hub node that runs ccc-server,"
+echo "This wizard configures the hub node that runs acc-server,"
 echo "the AccFS (Samba) share, and all central services."
 echo
 
@@ -130,7 +130,7 @@ else
 fi
 
 # ── Store secrets in tokenhub (once it's running) ─────────────────────────────
-# Secrets will be stored via /api/secrets after ccc-server starts
+# Secrets will be stored via /api/secrets after acc-server starts
 cat >> "${ENV_FILE}" << EOF
 
 # Populated by wizard — store in tokenhub after first start:
@@ -140,7 +140,7 @@ EOF
 
 echo
 bold "══ Next Steps ═══════════════════════════════════════════"
-info "1. Install and start ccc-server:   sudo systemctl enable --now ccc-server"
+info "1. Install and start acc-server:   sudo systemctl enable --now acc-server"
 info "2. Install tokenhub:               cd ~/Src/tokenhub && ./install.sh"
 info "3. Register this hub agent:        bash deploy/register-agent.sh"
 info "4. Push SMB password to secrets:   bash deploy/migrations/0019_migrate_minio_to_accfs.sh"

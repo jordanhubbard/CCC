@@ -17,7 +17,7 @@ pub use state::AppState;
 async fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "ccc_server=info,tower_http=info".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "acc_server=info,tower_http=info".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -170,7 +170,7 @@ async fn main() {
         .merge(routes::auth::router());
 
     // Serve WASM SPA as fallback if DASHBOARD_DIST is set.
-    // This allows ccc-server to serve the dashboard directly (no dashboard-server needed).
+    // This allows acc-server to serve the dashboard directly (no dashboard-server needed).
     if let Ok(dist) = std::env::var("DASHBOARD_DIST") {
         if !dist.is_empty() && std::path::Path::new(&dist).exists() {
             use tower_http::services::{ServeDir, ServeFile};
@@ -188,7 +188,7 @@ async fn main() {
         .await
         .expect("Failed to bind port");
 
-    tracing::info!("ccc-server listening on port {}", port);
+    tracing::info!("acc-server listening on port {}", port);
     tracing::info!(
         "Auth: {} token(s) configured",
         if app_state.auth_tokens.is_empty() {

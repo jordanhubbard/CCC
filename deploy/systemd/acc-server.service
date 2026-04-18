@@ -1,5 +1,5 @@
 [Unit]
-Description=CCC API Server (Rust/Axum)
+Description=ACC API Server (Rust/Axum)
 Documentation=https://github.com/{OWNER}/CCC
 After=network.target
 
@@ -8,12 +8,12 @@ Type=simple
 User=AGENT_USER
 WorkingDirectory=AGENT_HOME/Src/CCC
 
-ExecStart=/usr/local/bin/ccc-server
+ExecStart=/usr/local/bin/acc-server
 
 # Core config
 Environment=CCC_PORT=8789
 Environment=CCC_DATA_DIR=AGENT_HOME/.acc/data
-Environment=RUST_LOG=ccc_server=info
+Environment=RUST_LOG=acc_server=info
 
 # Load per-node secrets
 EnvironmentFile=-AGENT_HOME/.acc/.env
@@ -25,7 +25,7 @@ RestartSec=5s
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ccc-server
+SyslogIdentifier=acc-server
 
 [Install]
 WantedBy=multi-user.target
