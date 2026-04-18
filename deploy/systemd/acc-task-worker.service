@@ -1,0 +1,20 @@
+[Unit]
+Description=ACC Task Worker (fleet task executor)
+Documentation=https://github.com/{OWNER}/CCC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=AGENT_USER
+EnvironmentFile=-AGENT_HOME/.acc/.env
+Environment=PATH=AGENT_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=AGENT_HOME/.acc/bin/acc-agent tasks
+Restart=always
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=acc-task-worker
+
+[Install]
+WantedBy=multi-user.target

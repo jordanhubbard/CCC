@@ -200,9 +200,27 @@ async fn create_project(
     };
     let id = format!("proj-{}", chrono::Utc::now().timestamp_millis());
     let now = chrono::Utc::now().to_rfc3339();
+
+    // Compute slug: lowercase, spaces → hyphens, strip non-alphanumeric except hyphens
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c == ' ' { '-' } else { c })
+        .filter(|c| c.is_alphanumeric() || *c == '-')
+        .collect();
+
+    let git_url = body.get("git_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let agentfs_path = format!("/srv/accfs/{}", slug);
+
+    let clone_status = if git_url.is_some() { "pending" } else { "none" };
+
     let project = json!({
         "id":           id,
         "name":         name,
+        "slug":         slug.clone(),
+        "agentfs_path": agentfs_path.clone(),
+        "git_url":      git_url.clone().map(Value::String).unwrap_or(Value::Null),
+        "clone_status": clone_status,
         "description":  body.get("description").cloned().unwrap_or(json!("")),
         "repoUrl":      body.get("repoUrl").cloned().unwrap_or(json!(null)),
         "slackChannels": body.get("slackChannels").cloned().unwrap_or(json!([])),
@@ -214,6 +232,44 @@ async fn create_project(
     let mut projects = read_projects(&state).await;
     projects.push(project.clone());
     write_projects(&state, projects).await;
+
+    // Broadcast project registration
+    let proj_id = id.clone();
+    let proj_slug = slug.clone();
+    let _ = state.bus_tx.send(json!({"type":"projects:registered","project_id":proj_id,"slug":proj_slug}).to_string());
+
+    // Spawn background git-clone or directory creation
+    let state_clone = state.clone();
+    let agentfs_path_clone = agentfs_path.clone();
+    let id_clone = id.clone();
+    tokio::spawn(async move {
+        if let Some(url) = git_url {
+            // Run git clone
+            let output = tokio::process::Command::new("git")
+                .args(["clone", &url, &agentfs_path_clone])
+                .output()
+                .await;
+            let new_status = match output {
+                Ok(o) if o.status.success() => "ready",
+                _ => "failed",
+            };
+            // Update clone_status in projects list
+            let mut projects = read_projects(&state_clone).await;
+            if let Some(p) = projects.iter_mut().find(|p| {
+                p.get("id").and_then(|v| v.as_str()) == Some(&id_clone)
+            }) {
+                if let Some(obj) = p.as_object_mut() {
+                    obj.insert("clone_status".to_string(), json!(new_status));
+                    obj.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
+                }
+            }
+            write_projects(&state_clone, projects).await;
+        } else {
+            // No git_url — just ensure the directory exists
+            let _ = tokio::fs::create_dir_all(&agentfs_path_clone).await;
+        }
+    });
+
     (axum::http::StatusCode::CREATED, Json(json!({"ok": true, "project": project}))).into_response()
 }
 

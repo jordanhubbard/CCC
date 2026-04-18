@@ -10,7 +10,7 @@ use rusqlite::{Connection, Result, params};
 use serde_json::Value;
 use std::path::Path;
 
-const CURRENT_VERSION: i64 = 1;
+const CURRENT_VERSION: i64 = 2;
 
 /// Open a database connection, create schema if needed, run any pending migrations.
 pub fn open(path: &str) -> Result<Connection> {
@@ -78,6 +78,27 @@ fn init_schema(conn: &Connection) -> Result<()> {
             value TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
+
+        CREATE TABLE IF NOT EXISTS fleet_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            priority INTEGER NOT NULL DEFAULT 2,
+            claimed_by TEXT,
+            claimed_at TEXT,
+            claim_expires_at TEXT,
+            completed_at TEXT,
+            completed_by TEXT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            metadata TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_fleet_tasks_status   ON fleet_tasks(status, priority, created_at);
+        CREATE INDEX IF NOT EXISTS idx_fleet_tasks_project  ON fleet_tasks(project_id);
+        CREATE INDEX IF NOT EXISTS idx_fleet_tasks_agent    ON fleet_tasks(claimed_by, status);
+        CREATE INDEX IF NOT EXISTS idx_fleet_tasks_expires  ON fleet_tasks(claim_expires_at);
 
         CREATE TABLE IF NOT EXISTS projects (
             id TEXT PRIMARY KEY,
@@ -157,8 +178,33 @@ fn run_migrations(conn: &Connection) -> Result<()> {
     }
 
     // Migration v1: initial schema is already created by init_schema.
-    // Add future migrations here as: if version < N { ... }
     tracing::info!("Database schema at version {} (current: {})", version, CURRENT_VERSION);
+
+    if version < 2 {
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS fleet_tasks (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',
+                priority INTEGER NOT NULL DEFAULT 2,
+                claimed_by TEXT,
+                claimed_at TEXT,
+                claim_expires_at TEXT,
+                completed_at TEXT,
+                completed_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                metadata TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_fleet_tasks_status  ON fleet_tasks(status, priority, created_at);
+            CREATE INDEX IF NOT EXISTS idx_fleet_tasks_project ON fleet_tasks(project_id);
+            CREATE INDEX IF NOT EXISTS idx_fleet_tasks_agent   ON fleet_tasks(claimed_by, status);
+            CREATE INDEX IF NOT EXISTS idx_fleet_tasks_expires ON fleet_tasks(claim_expires_at);
+        ")?;
+        set_schema_version(conn, 2)?;
+    }
 
     set_schema_version(conn, CURRENT_VERSION)?;
     tracing::info!("Database schema migrated to version {}", CURRENT_VERSION);
@@ -377,6 +423,11 @@ pub fn open_auth(path: &str) -> Result<Connection> {
     ")?;
     tracing::info!("Auth database opened: {}", path);
     Ok(conn)
+}
+
+/// Always-on fleet database: opens/creates at the given path with fleet_tasks schema.
+pub fn open_fleet(path: &str) -> Result<Connection> {
+    open(path)
 }
 
 /// Load all token hashes from the auth DB (used to seed the in-memory cache).

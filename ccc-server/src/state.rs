@@ -1,5 +1,6 @@
 use crate::brain::BrainQueue;
 use crate::supervisor::SupervisorHandle;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
@@ -21,6 +22,8 @@ pub struct AppState {
     pub user_token_hashes: std::sync::RwLock<HashSet<String>>,
     /// Auth SQLite database (always-on).
     pub auth_db: Arc<tokio::sync::Mutex<rusqlite::Connection>>,
+    /// Fleet task pool SQLite database (always-on).
+    pub fleet_db: Arc<tokio::sync::Mutex<Connection>>,
     pub queue_path: String,
     pub agents_path: String,
     pub secrets_path: String,

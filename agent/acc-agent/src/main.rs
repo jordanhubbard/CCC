@@ -6,6 +6,7 @@ mod json;
 mod migrate;
 mod proxy;
 mod queue;
+mod tasks;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -24,6 +25,7 @@ fn main() {
         "queue" => tokio_run(queue::run(rest)),
         "hermes" => tokio_run(hermes::run(rest)),
         "proxy" => tokio_run(proxy::run(rest)),
+        "tasks" => tokio_run(tasks::run(rest)),
         cmd => {
             eprintln!("Unknown command: {cmd}");
             std::process::exit(1);
@@ -50,6 +52,7 @@ fn print_help() {
     eprintln!("  acc-agent queue   (long-running daemon: queue worker)");
     eprintln!("  acc-agent hermes  (hermes session driver)");
     eprintln!("  acc-agent proxy   (long-running daemon: NVIDIA header-strip proxy)");
+    eprintln!("  acc-agent tasks  [--max=N]  (long-running daemon: fleet task worker)");
     eprintln!();
     eprintln!("MIGRATE:");
     eprintln!("  is-applied <name>            exit 0 if applied, 1 if not");

@@ -5,6 +5,7 @@ pub mod agents;
 pub mod secrets;
 pub mod bus;
 pub mod projects;
+pub mod tasks;
 pub mod brain;
 pub mod services;
 pub mod lessons;

@@ -59,6 +59,18 @@ async fn main() {
     tracing::info!("Auth DB: {} user(s) loaded", initial_hashes.len());
     let auth_db = Arc::new(tokio::sync::Mutex::new(auth_conn));
 
+    // Open fleet DB (always-on)
+    let fleet_db_path = std::env::var("ACC_DATA_DIR")
+        .map(|d| format!("{}/acc.db", d))
+        .or_else(|_| std::env::var("ACC_DB_PATH"))
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/home".to_string());
+            format!("{}/.acc/data/acc.db", home)
+        });
+    let fleet_db = db::open_fleet(&fleet_db_path)
+        .expect("failed to open fleet database");
+    let fleet_db = Arc::new(tokio::sync::Mutex::new(fleet_db));
+
     // Clone paths before they're moved into AppState (needed for SQLite migration below)
     let queue_path_c    = cfg.queue_path.clone();
     let agents_path_c   = cfg.agents_path.clone();
@@ -71,6 +83,7 @@ async fn main() {
         auth_tokens: cfg.auth_tokens,
         user_token_hashes: std::sync::RwLock::new(initial_hashes),
         auth_db,
+        fleet_db: fleet_db.clone(),
         queue_path: cfg.queue_path,
         agents_path: cfg.agents_path,
         secrets_path: cfg.secrets_path,
@@ -152,6 +165,7 @@ async fn main() {
         .merge(routes::secrets::router())
         .merge(routes::bus::router())
         .merge(routes::projects::router())
+        .merge(routes::tasks::router())
         .merge(routes::brain::router())
         .merge(routes::services::router())
         .merge(routes::lessons::router())
@@ -215,6 +229,23 @@ async fn main() {
         .build()
         .expect("Failed to build reqwest client");
     tokio::spawn(brain::run_brain_worker(brain_arc, brain_client));
+
+    // Spawn stale-claim expiry task (runs every 15 minutes)
+    {
+        let db = fleet_db.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(900));
+            loop {
+                interval.tick().await;
+                let conn = db.lock().await;
+                let now = chrono::Utc::now().to_rfc3339();
+                let _ = conn.execute(
+                    "UPDATE fleet_tasks SET status='open', claimed_by=NULL, claimed_at=NULL, claim_expires_at=NULL, updated_at=?1 WHERE status='claimed' AND claim_expires_at IS NOT NULL AND claim_expires_at < ?1",
+                    rusqlite::params![now],
+                );
+            }
+        });
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(app_state.clone()))
