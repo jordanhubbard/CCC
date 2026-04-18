@@ -454,50 +454,39 @@ if command -v hermes &>/dev/null; then
     success "CCC-node skill installed into Hermes"
   fi
 
-  # agent-skills engineering workflows — clone directly (no submodule friction)
-  AGENT_SKILLS_CACHE="$HOME/.acc/agent-skills"
-  if [[ -d "$AGENT_SKILLS_CACHE/.git" ]]; then
-    git -C "$AGENT_SKILLS_CACHE" pull --ff-only 2>/dev/null || \
-      warn "agent-skills update failed — using cached version"
-  else
-    info "Cloning agent-skills..."
-    git clone --depth=1 https://github.com/addyosmani/agent-skills.git \
-      "$AGENT_SKILLS_CACHE" 2>/dev/null || \
-      warn "agent-skills clone failed (non-fatal — skills will be missing)"
-  fi
-  if [[ -d "$AGENT_SKILLS_CACHE/skills" ]]; then
+  # agent-skills engineering workflows — vendored in skills/agent-skills/
+  if [[ -d "$ACC_WORKSPACE/skills/agent-skills" ]]; then
     _count=0
-    for _skill_dir in "$AGENT_SKILLS_CACHE/skills"/*/; do
+    for _skill_dir in "$ACC_WORKSPACE/skills/agent-skills"/*/; do
+      [[ -d "$_skill_dir" ]] || continue
       _skill_name="$(basename "$_skill_dir")"
       cp -r "$_skill_dir" "$HOME/.hermes/skills/${_skill_name}/"
       _count=$((_count + 1))
     done
     success "agent-skills: ${_count} engineering workflow skills installed into Hermes"
+  else
+    warn "skills/agent-skills not found in workspace — agent-skills missing"
   fi
 
-  # superpowers orchestration skills — complements agent-skills with multi-agent
-  # coordination, git worktrees, systematic debugging, and two-stage review
-  SUPERPOWERS_CACHE="$HOME/.acc/superpowers"
-  if [[ -d "$SUPERPOWERS_CACHE/.git" ]]; then
-    git -C "$SUPERPOWERS_CACHE" pull --ff-only 2>/dev/null || \
-      warn "superpowers update failed — using cached version"
-  else
-    info "Cloning superpowers..."
-    git clone --depth=1 https://github.com/obra/superpowers.git \
-      "$SUPERPOWERS_CACHE" 2>/dev/null || \
-      warn "superpowers clone failed (non-fatal — skills will be missing)"
-  fi
-  if [[ -d "$SUPERPOWERS_CACHE/skills" ]]; then
+  # superpowers orchestration skills — vendored in skills/superpowers/
+  if [[ -d "$ACC_WORKSPACE/skills/superpowers" ]]; then
     _count=0
-    for _skill_file in "$SUPERPOWERS_CACHE/skills"/*.md; do
+    for _skill_file in "$ACC_WORKSPACE/skills/superpowers"/*.md; do
       [[ -f "$_skill_file" ]] || continue
       _skill_name="$(basename "$_skill_file" .md)"
-      # Skip meta-skills that are only about the framework itself
       [[ "$_skill_name" == "using-superpowers" ]] && continue
       cp "$_skill_file" "$HOME/.hermes/skills/${_skill_name}.md"
       _count=$((_count + 1))
     done
+    for _skill_dir in "$ACC_WORKSPACE/skills/superpowers"/*/; do
+      [[ -d "$_skill_dir" ]] || continue
+      _skill_name="$(basename "$_skill_dir")"
+      cp -r "$_skill_dir" "$HOME/.hermes/skills/${_skill_name}/"
+      _count=$((_count + 1))
+    done
     success "superpowers: ${_count} orchestration skills installed into Hermes"
+  else
+    warn "skills/superpowers not found in workspace — superpowers missing"
   fi
 
   # Write ~/.hermes/config.yaml with CCC env vars and channel tokens.

@@ -118,8 +118,6 @@ target/
 **/target/
 agent/target/
 __pycache__/
-skills/agent-skills/
-skills/superpowers/
 
 # Dashboard / ClawChat WASM build outputs (source lives on hub, not in this repo)
 dashboard/

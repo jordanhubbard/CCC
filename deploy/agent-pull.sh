@@ -155,6 +155,30 @@ else
     fi
   fi
 
+  # Sync Hermes skills if the vendored skills changed
+  if echo "$CHANGED" | grep -q "^skills/"; then
+    if [[ -d "$HOME/.hermes/skills" ]]; then
+      _skill_count=0
+      for _skill_dir in "$WORKSPACE/skills/agent-skills"/*/; do
+        [[ -d "$_skill_dir" ]] || continue
+        _skill_name="$(basename "$_skill_dir")"
+        cp -r "$_skill_dir" "$HOME/.hermes/skills/${_skill_name}/" && _skill_count=$((_skill_count + 1))
+      done
+      for _skill_file in "$WORKSPACE/skills/superpowers"/*.md; do
+        [[ -f "$_skill_file" ]] || continue
+        _skill_name="$(basename "$_skill_file" .md)"
+        [[ "$_skill_name" == "using-superpowers" ]] && continue
+        cp "$_skill_file" "$HOME/.hermes/skills/${_skill_name}.md" && _skill_count=$((_skill_count + 1))
+      done
+      for _skill_dir in "$WORKSPACE/skills/superpowers"/*/; do
+        [[ -d "$_skill_dir" ]] || continue
+        _skill_name="$(basename "$_skill_dir")"
+        cp -r "$_skill_dir" "$HOME/.hermes/skills/${_skill_name}/" && _skill_count=$((_skill_count + 1))
+      done
+      log "Hermes skills updated: ${_skill_count} skills synced from workspace"
+    fi
+  fi
+
   # Reinstall node deps if package.json changed
   if echo "$CHANGED" | grep -q "package.json"; then
     log "package.json changed — running npm install"
