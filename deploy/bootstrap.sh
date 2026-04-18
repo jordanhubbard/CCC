@@ -3,12 +3,18 @@
 # Installs hermes-agent, seeds workspace, configures agent identity.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/{OWNER}/CCC/main/deploy/bootstrap.sh | \
+#   curl -sSL https://raw.githubusercontent.com/${ACC_OWNER}/${ACC_REPO}/main/deploy/bootstrap.sh | \
 #     bash -s -- --ccc=http://<your-ccc-hub-url>:8789 --token=<bootstrap-token> --agent=boris
 #
 # If you have a pre-known agent token, pass --agent-token=<token> to skip the bootstrap API call.
 # All secrets (NVIDIA key, channel tokens, etc.) are fetched automatically from CCC.
 set -euo pipefail
+
+# Repository coordinates — override via env to fork/rename the ACC hub
+ACC_OWNER="${ACC_OWNER:-jordanhubbard}"
+ACC_REPO="${ACC_REPO:-ACC}"
+HERMES_REPO="${HERMES_REPO:-https://github.com/${ACC_OWNER}/hermes-agent.git}"
+ACC_REPO_URL="${ACC_REPO_URL:-https://github.com/${ACC_OWNER}/${ACC_REPO}.git}"
 
 CCC=""
 TOKEN=""
@@ -143,7 +149,7 @@ else
     HERMES_SRC="$HOME/.acc/hermes-src"
     if [[ ! -d "$HERMES_SRC/.git" ]]; then
       info "Cloning hermes-agent from source..."
-      git clone --depth=1 https://github.com/{OWNER}/hermes-agent.git "$HERMES_SRC" 2>/dev/null || \
+      git clone --depth=1 ${HERMES_REPO} "$HERMES_SRC" 2>/dev/null || \
         warn "hermes-agent source clone failed — install manually"
     fi
     if [[ -d "$HERMES_SRC" ]]; then
@@ -156,7 +162,7 @@ else
   if command -v hermes &>/dev/null; then
     success "Hermes agent installed"
   else
-    warn "Hermes agent install failed — install manually from: https://github.com/{OWNER}/hermes-agent"
+    warn "Hermes agent install failed — install manually from: ${HERMES_REPO%%.git}"
   fi
 fi
 
@@ -166,7 +172,7 @@ info "Setting up ACC workspace at $ACC_WORKSPACE..."
 if [[ -d "$ACC_WORKSPACE/.git" ]]; then
   git -C "$ACC_WORKSPACE" pull --ff-only || warn "git pull failed"
 else
-  git clone "${CCC_REPO:-https://github.com/{OWNER}/CCC.git}" "$ACC_WORKSPACE"
+  git clone "${CCC_REPO:-${ACC_REPO_URL}}" "$ACC_WORKSPACE"
 fi
 success "CCC workspace ready"
 
@@ -190,7 +196,7 @@ else
 
   if [[ -z "$BOOTSTRAP_JSON" ]]; then
     if [[ -n "$ENV_BACKUP" ]]; then
-      PREV_TOKEN=$(grep '^CCC_AGENT_TOKEN=' "$ENV_BACKUP" 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
+      PREV_TOKEN=$(grep '^ACC_AGENT_TOKEN=' "$ENV_BACKUP" 2>/dev/null | cut -d= -f2 | tr -d '"' || true)
       if [[ -n "$PREV_TOKEN" ]]; then
         warn "Bootstrap API failed — re-using previous agent token from .env backup"
         warn "To use a fresh token, re-run with a valid --token or --agent-token"

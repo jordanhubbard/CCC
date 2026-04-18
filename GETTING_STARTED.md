@@ -26,7 +26,7 @@ You want to run your own CCC instance on a server or VM you control.
 1. Fork this repo on GitHub
 2. Clone your fork to your local machine:
    ```bash
-   git clone https://github.com/{OWNER}/CCC
+   git clone https://github.com/jordanhubbard/ACC
    cd CCC
    ```
 
@@ -89,14 +89,14 @@ The fastest path from "I have a server" to "CCC is running."
 #### Step 1: Clone and configure
 
 ```bash
-git clone https://github.com/{OWNER}/CCC
+git clone https://github.com/jordanhubbard/ACC
 cd CCC
-mkdir -p ccc-data
-cp deploy/.env.server.template ccc-data/.env
-nano ccc-data/.env   # fill in CCC_AUTH_TOKENS, CCC_ADMIN_TOKEN, AGENT_NAME
+mkdir -p acc-data
+cp deploy/.env.server.template acc-data/.env
+nano acc-data/.env   # fill in ACC_AUTH_TOKENS, ACC_ADMIN_TOKEN, AGENT_NAME
 ```
 
-Docker Compose reads config from `./ccc-data/.env` (relative to the repo root).
+Docker Compose reads config from `./acc-data/.env` (relative to the repo root).
 
 #### Step 2: Start the stack
 
@@ -105,7 +105,7 @@ make docker-up
 ```
 
 This brings up two containers:
-- **ccc-api** (port 8789) — the coordination API (Rust/Axum binary)
+- **acc-api** (port 8789) — the coordination API (Rust/Axum binary)
 - **dashboard** (port 8788) — WASM web UI (nginx serving pre-built static files from `dist/`)
 
 #### Step 3: Verify
@@ -125,7 +125,7 @@ make docker-down    # stop the stack
 ```
 
 > **Pre-built images:** The CI publishes multi-arch images (amd64 + arm64) to
-> `ghcr.io/{OWNER}/ccc:latest` on every push to main. See
+> `ghcr.io/jordanhubbard/acc:latest` on every push to main. See
 > `.github/workflows/docker-publish.yml` for details. `make docker-up` uses the
 > pre-built image by default (`CCC_IMAGE` env var overrides).
 
@@ -138,7 +138,7 @@ Someone is already running a CCC hub and gave you a URL + token. You want to plu
 ### One-command bootstrap
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/{OWNER}/CCC/main/deploy/bootstrap.sh | \
+curl -sSL https://raw.githubusercontent.com/jordanhubbard/ACC/main/deploy/bootstrap.sh | \
   bash -s -- \
     --ccc=https://ccc.your-operator-domain.example.com \
     --token=YOUR_BOOTSTRAP_TOKEN \
@@ -161,7 +161,7 @@ If you prefer to set things up yourself:
 
 1. Clone the repo:
    ```bash
-   git clone https://github.com/{OWNER}/CCC
+   git clone https://github.com/jordanhubbard/ACC
    cd CCC
    ```
 
@@ -198,7 +198,7 @@ You want to modify CCC itself — add features, fix bugs, extend the protocol.
 ### Setup
 
 ```bash
-git clone https://github.com/{OWNER}/CCC
+git clone https://github.com/jordanhubbard/ACC
 cd CCC
 make init   # configure a local dev instance
 ```
@@ -241,7 +241,7 @@ Key variables:
 | `TOKENHUB_URL` | TokenHub inference proxy URL (default `http://localhost:8090`) |
 | `TOKENHUB_API_KEY` | Agent key for TokenHub |
 
-For Docker deployments, config goes in `./ccc-data/.env` relative to the repo root.
+For Docker deployments, config goes in `./acc-data/.env` relative to the repo root.
 
 ---
 

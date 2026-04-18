@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-node.sh — Bootstrap a new CCC agent node
+# setup-node.sh — Bootstrap a new ACC agent node
 # Run once on a new machine. Safe to re-run (idempotent).
 #
 # Usage:
@@ -10,11 +10,13 @@
 
 set -e
 
-REPO_URL="${REPO_URL:-git@github.com:{OWNER}/CCC.git}"
-CCC_DIR="$HOME/.ccc"
-WORKSPACE="$CCC_DIR/workspace"
-ENV_FILE="$CCC_DIR/.env"
-LOG_DIR="$CCC_DIR/logs"
+ACC_OWNER="${ACC_OWNER:-jordanhubbard}"
+ACC_REPO="${ACC_REPO:-ACC}"
+REPO_URL="${REPO_URL:-git@github.com:${ACC_OWNER}/${ACC_REPO}.git}"
+ACC_DIR="$HOME/.acc"
+WORKSPACE="$ACC_DIR/workspace"
+ENV_FILE="$ACC_DIR/.env"
+LOG_DIR="$ACC_DIR/logs"
 PULL_SCRIPT="$WORKSPACE/deploy/agent-pull.sh"
 
 # Colors
@@ -53,8 +55,8 @@ done
 success "Required tools present (git, node, curl)"
 
 # ── Create directories ─────────────────────────────────────────────────────
-mkdir -p "$CCC_DIR" "$LOG_DIR"
-success "Created $CCC_DIR"
+mkdir -p "$ACC_DIR" "$LOG_DIR"
+success "Created $ACC_DIR"
 
 # ── Clone or update repo ───────────────────────────────────────────────────
 if [ -d "$WORKSPACE/.git" ]; then
@@ -97,8 +99,8 @@ install_cron_linux() {
 }
 
 install_cron_macos() {
-  PLIST_SRC="$WORKSPACE/deploy/launchd/com.ccc.agent.plist"
-  PLIST_DST="$HOME/Library/LaunchAgents/com.ccc.agent.plist"
+  PLIST_SRC="$WORKSPACE/deploy/launchd/com.acc.agent.plist"
+  PLIST_DST="$HOME/Library/LaunchAgents/com.acc.agent.plist"
   if [ -f "$PLIST_DST" ]; then
     warn "LaunchAgent already installed at $PLIST_DST — reloading"
     launchctl unload "$PLIST_DST" 2>/dev/null || true
@@ -370,21 +372,21 @@ if [[ "$PLATFORM" == "linux" ]] && command -v systemctl &>/dev/null; then
 fi
 
 # ── Write onboarding signature ────────────────────────────────────────────
-if [ ! -f "$CCC_DIR/agent.json" ]; then
+if [ ! -f "$ACC_DIR/agent.json" ]; then
   CCC_VERSION=$(cd "$WORKSPACE" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-  _AGENT_BIN="${CCC_AGENT:-$CCC_DIR/bin/ccc-agent}"
+  _AGENT_BIN="${CCC_AGENT:-$ACC_DIR/bin/ccc-agent}"
   [ ! -x "$_AGENT_BIN" ] && _AGENT_BIN="$(command -v ccc-agent 2>/dev/null || echo "")"
 
   if [ -x "$_AGENT_BIN" ]; then
-    "$_AGENT_BIN" agent init "$CCC_DIR/agent.json" \
+    "$_AGENT_BIN" agent init "$ACC_DIR/agent.json" \
       --name="${AGENT_NAME:-unknown}" \
       --host="$(hostname)" \
       --version="$CCC_VERSION" \
       --by="setup-node.sh" \
-      && success "Onboarding signature written to $CCC_DIR/agent.json" \
+      && success "Onboarding signature written to $ACC_DIR/agent.json" \
       || warn "Failed to write agent.json (non-fatal)"
   elif command -v python3 >/dev/null 2>&1; then
-    python3 - "$CCC_DIR/agent.json" "${AGENT_NAME:-unknown}" "$(hostname)" "$CCC_VERSION" << 'PYEOF'
+    python3 - "$ACC_DIR/agent.json" "${AGENT_NAME:-unknown}" "$(hostname)" "$CCC_VERSION" << 'PYEOF'
 import json, sys, os
 from datetime import datetime, timezone
 path, name, host, ver = sys.argv[1:5]
@@ -397,7 +399,7 @@ with open(path, 'w') as f:
     f.write('\n')
 os.chmod(path, 0o600)
 PYEOF
-    success "Onboarding signature written to $CCC_DIR/agent.json"
+    success "Onboarding signature written to $ACC_DIR/agent.json"
   else
     warn "Neither ccc-agent nor python3 found — skipping agent.json write"
   fi

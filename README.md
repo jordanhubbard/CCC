@@ -12,7 +12,7 @@ Distributed AI agent coordination system. Connects a fleet of heterogeneous mach
 
 ```bash
 cp deploy/.env.server.template ~/.ccc/.env   # fill in CCC_PORT, CCC_AUTH_TOKENS, CCC_ADMIN_TOKEN
-make docker-up                                # starts ccc-api (8789) + dashboard (8788)
+make docker-up                                # starts acc-api (8789) + dashboard (8788)
 ```
 
 ### Agent node
