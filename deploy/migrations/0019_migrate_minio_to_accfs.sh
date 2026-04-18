@@ -22,13 +22,12 @@ SMB_PASS=""
 if [[ -n "${ACC_URL:-}" ]] && [[ -n "${ACC_AGENT_TOKEN:-}" ]]; then
   SMB_PASS=$(curl -sf \
     -H "Authorization: Bearer ${ACC_AGENT_TOKEN}" \
-    "${ACC_URL}/api/secrets" 2>/dev/null \
+    "${ACC_URL}/api/secrets/SMB_PASSWORD" 2>/dev/null \
     | python3 -c "
 import json,sys
 try:
     d = json.load(sys.stdin)
-    secs = d.get('secrets', d)
-    print(secs.get('SMB_PASSWORD', secs.get('rocky_smb_password', '')))
+    print(d.get('value', ''))
 except: pass
 " 2>/dev/null || true)
 fi
