@@ -1,5 +1,5 @@
 [Unit]
-Description=CCC Agent Pull Service
+Description=ACC Agent Pull Service
 After=network.target
 Wants=network-online.target
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=CCC Dashboard (nginx serving WASM SPA)
+Description=ACC Dashboard (nginx serving WASM SPA)
 Documentation=https://github.com/{OWNER}/CCC
 After=network.target acc-server.service
 Wants=acc-server.service
@@ -7,12 +7,12 @@ Wants=acc-server.service
 [Service]
 Type=forking
 User=root
-PIDFile=/run/nginx-ccc-dashboard.pid
+PIDFile=/run/nginx-acc-dashboard.pid
 
 # Serves the pre-built Leptos/WASM dist/ via nginx.
 # Config: deploy/nginx/dashboard.conf  (proxies /api and /bus to acc-server on 8789)
-ExecStartPre=/usr/sbin/nginx -t -c /etc/nginx/sites-available/ccc-dashboard.conf
-ExecStart=/usr/sbin/nginx -g 'daemon on;' -c /etc/nginx/sites-available/ccc-dashboard.conf
+ExecStartPre=/usr/sbin/nginx -t -c /etc/nginx/sites-available/acc-dashboard.conf
+ExecStart=/usr/sbin/nginx -g 'daemon on;' -c /etc/nginx/sites-available/acc-dashboard.conf
 ExecReload=/bin/kill -s HUP $MAINPID
 ExecStop=/bin/kill -s QUIT $MAINPID
 
@@ -21,7 +21,7 @@ RestartSec=5s
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ccc-dashboard
+SyslogIdentifier=acc-dashboard
 
 [Install]
 WantedBy=multi-user.target
