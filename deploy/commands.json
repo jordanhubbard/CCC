@@ -106,6 +106,14 @@
       "program": "pgrep",
       "args": ["-a", "-f", "acc-agent queue"],
       "params": {}
+    },
+    {
+      "name": "fix_hermes_config",
+      "description": "Rewrite ~/.hermes/config.yaml from current .env secrets and restart hermes-gateway",
+      "program": "bash",
+      "args": ["{ACC_DIR}/workspace/deploy/fix-hermes-config.sh"],
+      "params": {},
+      "timeout_secs": 60
     }
   ]
 }
