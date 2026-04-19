@@ -102,6 +102,8 @@ fn build_router(state: S) -> Router {
         .route("/api/tasks/:id/claim",          put(task_claim))
         .route("/api/tasks/:id/complete",       put(ok))
         .route("/api/tasks/:id/unclaim",        put(ok))
+        // Exec result (bus worker)
+        .route("/api/exec/:id/result",          post(ok))
         .with_state(state)
 }
 

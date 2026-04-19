@@ -447,4 +447,30 @@ mod tests {
         assert_eq!(sig1, sig2);
         assert_ne!(sig1, hmac_sign(&payload, "other-secret"));
     }
+
+    // ── post_result hub mock tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_post_result_success() {
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = Client::new();
+        // post_result is fire-and-forget; just verify it doesn't panic.
+        post_result(&client, &mock.url, "test-tok", "exec-abc", "natasha", "output text", 0).await;
+    }
+
+    #[tokio::test]
+    async fn test_post_result_nonzero_exit() {
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = Client::new();
+        post_result(&client, &mock.url, "test-tok", "exec-def", "boris", "stderr output", 1).await;
+    }
+
+    #[tokio::test]
+    async fn test_post_result_hub_down_no_panic() {
+        // post_result must not panic when the hub is unreachable.
+        let client = Client::builder()
+            .timeout(Duration::from_secs(1))
+            .build().unwrap();
+        post_result(&client, "http://127.0.0.1:1", "tok", "exec-xyz", "agent", "out", 0).await;
+    }
 }

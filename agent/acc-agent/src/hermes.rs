@@ -445,6 +445,21 @@ impl CommandExt for &mut Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hub_mock::{HubMock, HubState};
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    fn test_cfg(url: &str) -> Config {
+        Config {
+            acc_dir: PathBuf::from("/tmp"),
+            acc_url: url.to_string(),
+            acc_token: "test-tok".to_string(),
+            agent_name: "natasha".to_string(),
+            agentbus_token: String::new(),
+        }
+    }
+
+    // ── Pure unit tests ───────────────────────────────────────────────────────
 
     #[test]
     fn test_extract_session_id_found() {
@@ -465,5 +480,135 @@ mod tests {
     fn test_hermes_tags_contain_gpu() {
         assert!(HERMES_TAGS.contains(&"gpu"));
         assert!(HERMES_TAGS.contains(&"hermes"));
+    }
+
+    // ── fetch_hermes_item hub mock tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_returns_hermes_tagged() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-h1", "status": "pending", "assignee": "all",
+                   "tags": ["hermes"], "preferred_executor": ""}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_some(), "hermes-tagged item should be returned");
+        assert_eq!(item.unwrap()["id"], "wq-h1");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_returns_gpu_tagged() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-g1", "status": "pending", "assignee": "all",
+                   "tags": ["gpu", "render"], "preferred_executor": ""}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_some());
+        assert_eq!(item.unwrap()["id"], "wq-g1");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_returns_preferred_executor_hermes() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-pe", "status": "pending", "assignee": "all",
+                   "tags": [], "preferred_executor": "hermes"}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_skips_non_hermes_tags() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-c1", "status": "pending", "assignee": "all",
+                   "tags": ["docs", "claude_cli"], "preferred_executor": "claude_cli"}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_none(), "non-hermes item should be skipped");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_skips_non_pending() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-ip", "status": "in-progress", "assignee": "all",
+                   "tags": ["hermes"], "preferred_executor": ""}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_none(), "non-pending item must be skipped");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_skips_wrong_assignee() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-other", "status": "pending", "assignee": "boris",
+                   "tags": ["hermes"], "preferred_executor": ""}),
+        ]).await;
+        let client = reqwest::Client::new();
+        // cfg.agent_name = "natasha", item assigned to "boris"
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_none(), "item assigned to another agent must be skipped");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_accepts_own_assignee() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-mine", "status": "pending", "assignee": "natasha",
+                   "tags": ["hermes"], "preferred_executor": ""}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_some());
+        assert_eq!(item.unwrap()["id"], "wq-mine");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_empty_queue() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_none());
+    }
+
+    // ── api_claim ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_api_claim_success_returns_true() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        assert!(api_claim(&test_cfg(&mock.url), &client, "wq-111").await);
+    }
+
+    #[tokio::test]
+    async fn test_api_claim_conflict_returns_false() {
+        let mock = HubMock::with_state(HubState { item_claim_status: 409, ..Default::default() }).await;
+        let client = reqwest::Client::new();
+        assert!(!api_claim(&test_cfg(&mock.url), &client, "wq-222").await);
+    }
+
+    // ── fire-and-forget helpers ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_post_heartbeat_no_panic() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        post_heartbeat(&test_cfg(&mock.url), &client, "hermes-test").await;
+    }
+
+    #[tokio::test]
+    async fn test_post_complete_no_panic() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        post_complete(&test_cfg(&mock.url), &client, "wq-333", "output text").await;
+    }
+
+    #[tokio::test]
+    async fn test_post_fail_no_panic() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        post_fail(&test_cfg(&mock.url), &client, "wq-444", "timeout").await;
     }
 }
