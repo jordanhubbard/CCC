@@ -115,6 +115,17 @@ pub fn patch_json(path: &str, body: &serde_json::Value) -> Request<Body> {
         .unwrap()
 }
 
+/// Build a PUT request with JSON body and auth token.
+pub fn put_json(path: &str, body: &serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri(path)
+        .header("Authorization", format!("Bearer {}", TEST_TOKEN))
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
 /// Build a DELETE request with auth token.
 pub fn delete(path: &str) -> Request<Body> {
     Request::builder()
