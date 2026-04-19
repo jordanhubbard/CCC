@@ -1,5 +1,7 @@
 mod agent;
 mod bus;
+#[cfg(test)]
+mod hub_mock;
 mod config;
 mod exec_registry;
 mod hermes;

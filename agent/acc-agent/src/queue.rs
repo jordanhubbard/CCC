@@ -846,4 +846,103 @@ mod tests {
         };
         assert!(!is_quenched(&cfg));
     }
+
+    // ── Hub mock HTTP tests ───────────────────────────────────────────────────
+
+    fn mock_cfg(url: &str) -> Config {
+        Config {
+            acc_dir: PathBuf::from("/tmp"),
+            acc_url: url.to_string(),
+            acc_token: "tok".to_string(),
+            agent_name: "boris".to_string(),
+            agentbus_token: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_queue_returns_items() {
+        let mock = crate::hub_mock::HubMock::with_queue(vec![
+            json!({"id": "wq-1", "title": "Item 1", "status": "pending",
+                   "assignee": "all", "priority": "normal", "created": "2026-01-01T00:00:00Z"}),
+            json!({"id": "wq-2", "title": "Item 2", "status": "pending",
+                   "assignee": "all", "priority": "urgent", "created": "2026-01-02T00:00:00Z"}),
+        ]).await;
+        let client = build_client();
+        let items = fetch_queue(&mock_cfg(&mock.url), &client).await.unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().any(|i| i["id"] == "wq-1"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_queue_empty_hub() {
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = build_client();
+        let items = fetch_queue(&mock_cfg(&mock.url), &client).await.unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_queue_hub_down_returns_err() {
+        let cfg = mock_cfg("http://127.0.0.1:1"); // nothing listening on port 1
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(1))
+            .build().unwrap();
+        let result = fetch_queue(&cfg, &client).await;
+        assert!(result.is_err(), "unreachable hub must return Err");
+    }
+
+    #[tokio::test]
+    async fn test_claim_item_success_returns_true() {
+        let mock = crate::hub_mock::HubMock::new().await; // default 200
+        let client = build_client();
+        assert!(claim_item(&mock_cfg(&mock.url), &client, "wq-111").await);
+    }
+
+    #[tokio::test]
+    async fn test_claim_item_conflict_returns_false() {
+        use crate::hub_mock::HubState;
+        let mock = crate::hub_mock::HubMock::with_state(
+            HubState { item_claim_status: 409, ..Default::default() }
+        ).await;
+        let client = build_client();
+        assert!(!claim_item(&mock_cfg(&mock.url), &client, "wq-222").await);
+    }
+
+    #[tokio::test]
+    async fn test_post_heartbeat_does_not_panic() {
+        // post_heartbeat is fire-and-forget; verify it completes without panic.
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = build_client();
+        post_heartbeat(&mock_cfg(&mock.url), &client, "test note").await;
+    }
+
+    #[tokio::test]
+    async fn test_post_complete_does_not_panic() {
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = build_client();
+        post_complete(&mock_cfg(&mock.url), &client, "wq-333", "done").await;
+    }
+
+    #[tokio::test]
+    async fn test_post_fail_does_not_panic() {
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = build_client();
+        post_fail(&mock_cfg(&mock.url), &client, "wq-444", "timeout").await;
+    }
+
+    #[tokio::test]
+    async fn test_select_item_prefers_urgent_from_fetched_queue() {
+        // Integration: fetch returns items, select_item picks the highest priority.
+        let mock = crate::hub_mock::HubMock::with_queue(vec![
+            json!({"id": "low",    "status": "pending", "assignee": "all",
+                   "priority": "low",    "created": "2026-01-01T00:00:00Z"}),
+            json!({"id": "urgent", "status": "pending", "assignee": "all",
+                   "priority": "urgent", "created": "2026-01-02T00:00:00Z"}),
+        ]).await;
+        let client = build_client();
+        let items = fetch_queue(&mock_cfg(&mock.url), &client).await.unwrap();
+        let caps = vec![];
+        let selected = select_item(&items, "boris", &caps).unwrap();
+        assert_eq!(selected["id"], "urgent");
+    }
 }

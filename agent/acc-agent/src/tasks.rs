@@ -247,3 +247,120 @@ fn log(cfg: &Config, msg: &str) {
         .open(&log_path)
         .and_then(|mut f| { use std::io::Write; f.write_all(line.as_bytes()) });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hub_mock::{HubMock, HubState};
+    use serde_json::json;
+
+    fn test_cfg(url: &str) -> Config {
+        Config {
+            acc_dir: std::path::PathBuf::from("/tmp"),
+            acc_url: url.to_string(),
+            acc_token: "test-token".to_string(),
+            agent_name: "test-agent".to_string(),
+            agentbus_token: String::new(),
+        }
+    }
+
+    // ── fetch_open_tasks ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_fetch_open_tasks_parses_tasks() {
+        let mock = HubMock::with_tasks(vec![
+            json!({"id": "t-1", "title": "Alpha", "status": "open"}),
+            json!({"id": "t-2", "title": "Beta",  "status": "open"}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10).await.unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0]["id"], "t-1");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_open_tasks_empty_hub() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10).await.unwrap();
+        assert!(tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_open_tasks_only_open_status() {
+        // Mock has both open and claimed tasks; fetch_open_tasks queries ?status=open.
+        let mock = HubMock::with_tasks(vec![
+            json!({"id": "open-1",   "status": "open"}),
+            json!({"id": "claimed-1","status": "claimed"}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10).await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0]["id"], "open-1");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_open_tasks_hub_unreachable() {
+        // Port 1 is never open in tests — the call should fail gracefully.
+        let cfg = test_cfg("http://127.0.0.1:1");
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(1))
+            .build().unwrap();
+        let result = fetch_open_tasks(&cfg, &client, 5).await;
+        assert!(result.is_err(), "unreachable hub must return Err");
+    }
+
+    // ── count_active_tasks ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_count_active_tasks_returns_claimed_count() {
+        let mock = HubMock::with_state(HubState {
+            tasks: vec![
+                json!({"id": "c1", "status": "claimed"}),
+                json!({"id": "c2", "status": "claimed"}),
+                json!({"id": "o1", "status": "open"}),
+            ],
+            ..Default::default()
+        }).await;
+        let client = reqwest::Client::new();
+        let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_count_active_tasks_zero_when_none_claimed() {
+        let mock = HubMock::with_tasks(vec![
+            json!({"id": "o1", "status": "open"}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
+        assert_eq!(count, 0);
+    }
+
+    // ── claim_task ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_claim_task_success_returns_task() {
+        let mock = HubMock::new().await; // default: 200
+        let client = reqwest::Client::new();
+        let result = claim_task(&test_cfg(&mock.url), &client, "task-xyz").await;
+        assert!(result.is_ok(), "200 → Ok");
+        assert_eq!(result.unwrap()["id"], "task-xyz");
+    }
+
+    #[tokio::test]
+    async fn test_claim_task_conflict_returns_err_409() {
+        let mock = HubMock::with_state(HubState { task_claim_status: 409, ..Default::default() }).await;
+        let client = reqwest::Client::new();
+        let result = claim_task(&test_cfg(&mock.url), &client, "task-abc").await;
+        assert!(matches!(result, Err(409)), "409 → Err(409)");
+    }
+
+    #[tokio::test]
+    async fn test_claim_task_rate_limited_returns_err_429() {
+        let mock = HubMock::with_state(HubState { task_claim_status: 429, ..Default::default() }).await;
+        let client = reqwest::Client::new();
+        let result = claim_task(&test_cfg(&mock.url), &client, "task-def").await;
+        assert!(matches!(result, Err(429)), "429 → Err(429)");
+    }
+}
