@@ -9,6 +9,7 @@ use tokio::process::Command;
 use tokio::time::sleep;
 use serde_json::Value;
 use crate::config::Config;
+use crate::peers;
 
 const POLL_IDLE: Duration = Duration::from_secs(30);
 const POLL_BUSY: Duration = Duration::from_secs(5);
@@ -67,11 +68,24 @@ pub async fn run(args: &[String]) {
             continue;
         }
 
+        // Fetch online peers once per cycle for the collaboration gate
+        let online_peers = peers::list_peers(&cfg, &client).await;
+
         // Try to claim each task (first claim wins, others get 409)
         let mut claimed = false;
         for task in &open_tasks {
             let task_id = task["id"].as_str().unwrap_or("").to_string();
             if task_id.is_empty() { continue; }
+
+            // Collaboration gate: if a specific peer is preferred and online, skip
+            let preferred = task["metadata"]["preferred_executor"].as_str().unwrap_or("");
+            if !preferred.is_empty()
+                && preferred != cfg.agent_name.as_str()
+                && online_peers.iter().any(|p| p == preferred)
+            {
+                log(&cfg, &format!("skipping {task_id} — preferred by {preferred} (online)"));
+                continue;
+            }
 
             match claim_task(&cfg, &client, &task_id).await {
                 Ok(claimed_task) => {
