@@ -9,7 +9,7 @@
 # Run:   docker compose up   (see docker-compose.yml)
 
 # ── Stage 1: Rust build ──────────────────────────────────────────────────
-FROM rust:1.82-slim AS builder
+FROM rust:1.85-slim AS builder
 WORKDIR /build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
