@@ -53,8 +53,9 @@ pub async fn run(args: &[String]) {
             continue;
         }
 
-        // Fetch open tasks
-        let open_tasks = match fetch_open_tasks(&cfg, &client, max_concurrent - active).await {
+        // Fetch open tasks — fetch extra so skipped preferred-tasks don't exhaust the window
+        let fetch_limit = ((max_concurrent - active) * 5).max(10);
+        let open_tasks = match fetch_open_tasks(&cfg, &client, fetch_limit).await {
             Ok(t) => t,
             Err(e) => {
                 log(&cfg, &format!("fetch failed: {e}"));
