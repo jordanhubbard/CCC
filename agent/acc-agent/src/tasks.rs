@@ -203,7 +203,7 @@ async fn run_task_subprocess(cfg: &Config, task: &Value, workspace: &PathBuf) ->
     let claude = which_claude();
 
     let mut cmd = Command::new(&claude);
-    cmd.arg("-p").arg(&prompt)
+    cmd.args(["-p", &prompt, "--dangerously-skip-permissions"])
        .current_dir(workspace)
        .kill_on_drop(true);
 
