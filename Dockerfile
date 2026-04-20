@@ -17,14 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Cache deps first
-COPY Cargo.toml Cargo.lock ./
-COPY acc-server/Cargo.toml ./acc-server/
-RUN mkdir -p acc-server/src && echo 'fn main(){}' > acc-server/src/main.rs
+COPY acc-server/Cargo.toml acc-server/Cargo.lock ./
+RUN mkdir -p src && echo 'fn main(){}' > src/main.rs
 RUN cargo build --release --bin acc-server 2>/dev/null || true
 
 # Full source
-COPY acc-server/ ./acc-server/
-RUN cargo build --release --bin acc-server
+COPY acc-server/src ./src
+RUN touch src/main.rs && cargo build --release --bin acc-server
 
 # ── Stage 2: final image ─────────────────────────────────────────────────
 FROM debian:bookworm-slim
