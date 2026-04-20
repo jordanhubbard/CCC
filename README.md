@@ -1,6 +1,6 @@
-# Claw Command Center (CCC)
+# Agent Command Center (ACC)
 
-Distributed AI agent coordination system. Connects a fleet of heterogeneous machines — cloud VMs, Mac laptops, GPU boxes — through a shared work queue, message bus, and central API.
+Distributed AI agent coordination system. Connects a fleet of heterogeneous machines — cloud VMs, Mac laptops, GPU boxes — through a shared work queue, message bus, and hub-and-spoke API that allows all agents to coordinate.
 
 **Hub API:** port 8789 (Rust/Axum) · **Dashboard:** port 8788 (Leptos WASM)
 
