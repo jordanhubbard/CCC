@@ -10,7 +10,7 @@ use rusqlite::{Connection, Result, params};
 use serde_json::Value;
 use std::path::Path;
 
-const CURRENT_VERSION: i64 = 2;
+const CURRENT_VERSION: i64 = 3;
 
 /// Open a database connection, create schema if needed, run any pending migrations.
 pub fn open(path: &str) -> Result<Connection> {
@@ -151,6 +151,22 @@ fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_bus_to ON bus_messages(to_agent, ts);
         CREATE INDEX IF NOT EXISTS idx_bus_seq ON bus_messages(seq DESC);
         CREATE INDEX IF NOT EXISTS idx_bus_thread ON bus_messages(thread_id);
+
+        CREATE TABLE IF NOT EXISTS requests (
+            id TEXT PRIMARY KEY,
+            body TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            claimed_by TEXT,
+            claimed_at TEXT,
+            completed_at TEXT,
+            completed_by TEXT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            metadata TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_requests_status  ON requests(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_requests_claimed ON requests(claimed_by, status);
     ")?;
     Ok(())
 }
@@ -179,6 +195,27 @@ fn run_migrations(conn: &Connection) -> Result<()> {
 
     // Migration v1: initial schema is already created by init_schema.
     tracing::info!("Database schema at version {} (current: {})", version, CURRENT_VERSION);
+
+    if version < 3 {
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS requests (
+                id TEXT PRIMARY KEY,
+                body TEXT NOT NULL DEFAULT '',
+                channel TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                claimed_by TEXT,
+                claimed_at TEXT,
+                completed_at TEXT,
+                completed_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                metadata TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_requests_status  ON requests(status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_requests_claimed ON requests(claimed_by, status);
+        ")?;
+        set_schema_version(conn, 3)?;
+    }
 
     if version < 2 {
         conn.execute_batch("

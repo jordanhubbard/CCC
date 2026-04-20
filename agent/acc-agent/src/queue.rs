@@ -17,6 +17,7 @@ use tokio::process::Command;
 use tokio::time::sleep;
 
 use crate::config::Config;
+use crate::peers;
 
 const POLL_INTERVAL_IDLE: Duration = Duration::from_secs(60);
 const POLL_INTERVAL_BUSY: Duration = Duration::from_secs(5);
@@ -77,7 +78,8 @@ pub async fn run(args: &[String]) {
             }
         };
 
-        let item = select_item(&items, &cfg.agent_name, &caps);
+        let online_peers = peers::list_peers(&cfg, &client).await;
+        let item = select_item(&items, &cfg.agent_name, &caps, &online_peers);
         if let Some(item) = item {
             let item_id = item["id"].as_str().unwrap_or("").to_string();
             let title = item["title"].as_str().unwrap_or("?");
@@ -526,7 +528,7 @@ async fn fetch_queue(cfg: &Config, client: &reqwest::Client) -> Result<Vec<serde
         .unwrap_or_default())
 }
 
-fn select_item<'a>(items: &'a [serde_json::Value], agent_name: &str, caps: &[String]) -> Option<&'a serde_json::Value> {
+fn select_item<'a>(items: &'a [serde_json::Value], agent_name: &str, caps: &[String], online_peers: &[String]) -> Option<&'a serde_json::Value> {
     let priority_order = |p: &str| match p {
         "urgent" => 0u8,
         "high" => 1,
@@ -553,6 +555,14 @@ fn select_item<'a>(items: &'a [serde_json::Value], agent_name: &str, caps: &[Str
                     let has_cap = req_set.iter().any(|r| caps.iter().any(|c| c == r));
                     if !has_cap { return false; }
                 }
+            }
+            // Collaboration gate: if a specific peer is preferred and online, let them handle it
+            let preferred = item["preferred_executor"].as_str().unwrap_or("");
+            if !preferred.is_empty()
+                && preferred != agent_name
+                && online_peers.iter().any(|p| p == preferred)
+            {
+                return false;
             }
             true
         })
@@ -777,7 +787,7 @@ mod tests {
             json!({"id": "3", "status": "pending", "assignee": "all", "priority": "normal", "created": "2026-01-01T00:00:00Z"}),
         ];
         let caps = vec!["claude_cli".into()];
-        let selected = select_item(&items, "boris", &caps).unwrap();
+        let selected = select_item(&items, "boris", &caps, &[]).unwrap();
         assert_eq!(selected["id"], "2"); // urgent first
     }
 
@@ -788,7 +798,7 @@ mod tests {
             json!({"id": "2", "status": "pending", "assignee": "all", "priority": "normal", "created": ""}),
         ];
         let caps = vec![];
-        let selected = select_item(&items, "boris", &caps).unwrap();
+        let selected = select_item(&items, "boris", &caps, &[]).unwrap();
         assert_eq!(selected["id"], "2");
     }
 
@@ -797,7 +807,7 @@ mod tests {
         let items = vec![
             json!({"id": "1", "status": "pending", "assignee": "jkh", "priority": "normal", "created": ""}),
         ];
-        let selected = select_item(&items, "boris", &[]);
+        let selected = select_item(&items, "boris", &[], &[]);
         assert!(selected.is_none());
     }
 
@@ -808,12 +818,45 @@ mod tests {
                    "required_executors": ["gpu"], "created": ""}),
         ];
         // No gpu cap
-        let no_gpu = select_item(&items, "boris", &["claude_cli".into()]);
+        let no_gpu = select_item(&items, "boris", &["claude_cli".into()], &[]);
         assert!(no_gpu.is_none());
 
         // With gpu cap
-        let with_gpu = select_item(&items, "boris", &["gpu".into()]);
+        let with_gpu = select_item(&items, "boris", &["gpu".into()], &[]);
         assert!(with_gpu.is_some());
+    }
+
+    #[test]
+    fn test_select_item_skips_when_preferred_peer_online() {
+        let items = vec![
+            json!({"id": "1", "status": "pending", "assignee": "all", "priority": "normal",
+                   "preferred_executor": "natasha", "created": ""}),
+        ];
+        // natasha is online — boris should skip this item
+        let selected = select_item(&items, "boris", &[], &["natasha".to_string()]);
+        assert!(selected.is_none(), "must skip task when preferred peer is online");
+    }
+
+    #[test]
+    fn test_select_item_claims_when_preferred_peer_offline() {
+        let items = vec![
+            json!({"id": "1", "status": "pending", "assignee": "all", "priority": "normal",
+                   "preferred_executor": "natasha", "created": ""}),
+        ];
+        // natasha is NOT in online_peers — boris should take it
+        let selected = select_item(&items, "boris", &[], &[]);
+        assert!(selected.is_some(), "must claim task when preferred peer is offline");
+    }
+
+    #[test]
+    fn test_select_item_self_preferred_claims() {
+        let items = vec![
+            json!({"id": "1", "status": "pending", "assignee": "all", "priority": "normal",
+                   "preferred_executor": "boris", "created": ""}),
+        ];
+        // I am the preferred executor — I should claim it
+        let selected = select_item(&items, "boris", &[], &["natasha".to_string()]);
+        assert!(selected.is_some(), "must claim task when self is preferred executor");
     }
 
     #[test]
@@ -942,7 +985,7 @@ mod tests {
         let client = build_client();
         let items = fetch_queue(&mock_cfg(&mock.url), &client).await.unwrap();
         let caps = vec![];
-        let selected = select_item(&items, "boris", &caps).unwrap();
+        let selected = select_item(&items, "boris", &caps, &[]).unwrap();
         assert_eq!(selected["id"], "urgent");
     }
 }

@@ -42,6 +42,7 @@ pub fn build_app(state: Arc<AppState>) -> Router {
         .merge(routes::acp::router())
         .merge(routes::models::router())
         .merge(routes::auth::router())
+        .merge(routes::requests::router())
         .layer(cors)
         .with_state(state)
 }

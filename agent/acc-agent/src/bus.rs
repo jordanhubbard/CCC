@@ -146,6 +146,7 @@ async fn dispatch(cfg: &Config, client: &Client, event: &str) {
         "acc.update" => handle_update(cfg, &msg).await,
         "acc.quench" => handle_quench(cfg, &msg),
         "acc.exec" => handle_exec(cfg, client, &msg).await,
+        "user.request" => handle_user_request(cfg, client, &msg).await,
         "ping" => {
             let from = msg.from.as_deref().unwrap_or("?");
             log(cfg, &format!("ping from {from}"));
@@ -160,6 +161,39 @@ async fn dispatch(cfg: &Config, client: &Client, event: &str) {
         }
         _ => {}
     }
+}
+
+async fn handle_user_request(cfg: &Config, client: &Client, msg: &BusMessage) {
+    let body = msg.body.as_ref().cloned().unwrap_or_default();
+    let request_id = body.get("request_id")
+        .or_else(|| body.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    if request_id.is_empty() {
+        log(cfg, "user.request: missing request_id — skipping");
+        return;
+    }
+
+    if try_claim_request(cfg, client, &request_id).await {
+        log(cfg, &format!("user.request {request_id}: claimed — handling"));
+        touch_work_signal(cfg);
+    } else {
+        log(cfg, &format!("user.request {request_id}: already claimed by peer — backing off"));
+    }
+}
+
+async fn try_claim_request(cfg: &Config, client: &Client, request_id: &str) -> bool {
+    let body = serde_json::json!({"agent": cfg.agent_name});
+    let resp = client
+        .post(format!("{}/api/requests/{}/claim", cfg.acc_url, request_id))
+        .header("Authorization", format!("Bearer {}", cfg.acc_token))
+        .json(&body)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await;
+    resp.map(|r| r.status().as_u16() == 200).unwrap_or(false)
 }
 
 async fn handle_update(cfg: &Config, msg: &BusMessage) {
@@ -616,6 +650,67 @@ mod tests {
         listen_once(&cfg, &client).await;
         // valid event after bad one is still processed
         assert!(cfg.work_signal_file().exists());
+    }
+
+    // ── user.request first-responder tests ───────────────────────────────────
+
+    #[tokio::test]
+    async fn test_try_claim_request_success() {
+        // Mock returns 200 → claim succeeds
+        let mock = crate::hub_mock::HubMock::new().await;
+        let client = Client::new();
+        let cfg = test_cfg_in_dir(&tempfile::tempdir().unwrap().into_path(), &mock.url);
+        let claimed = try_claim_request(&cfg, &client, "req-abc").await;
+        assert!(claimed, "200 response should mean claim succeeded");
+    }
+
+    #[tokio::test]
+    async fn test_try_claim_request_conflict() {
+        use crate::hub_mock::HubState;
+        let mock = crate::hub_mock::HubMock::with_state(
+            HubState { request_claim_status: 409, ..Default::default() }
+        ).await;
+        let client = Client::new();
+        let cfg = test_cfg_in_dir(&tempfile::tempdir().unwrap().into_path(), &mock.url);
+        let claimed = try_claim_request(&cfg, &client, "req-abc").await;
+        assert!(!claimed, "409 response should mean claim lost");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_user_request_claims_and_touches_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = crate::hub_mock::HubMock::new().await; // default 200
+        let cfg = test_cfg_in_dir(dir.path(), &mock.url);
+        let client = Client::new();
+        dispatch(&cfg, &client, &format!(
+            r#"data: {{"type":"user.request","to":"all","body":{{"request_id":"req-123"}}}}"#
+        )).await;
+        assert!(cfg.work_signal_file().exists(), "claim win must touch work-signal");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_user_request_409_no_signal() {
+        use crate::hub_mock::HubState;
+        let dir = tempfile::tempdir().unwrap();
+        let mock = crate::hub_mock::HubMock::with_state(
+            HubState { request_claim_status: 409, ..Default::default() }
+        ).await;
+        let cfg = test_cfg_in_dir(dir.path(), &mock.url);
+        let client = Client::new();
+        dispatch(&cfg, &client, &format!(
+            r#"data: {{"type":"user.request","to":"all","body":{{"request_id":"req-456"}}}}"#
+        )).await;
+        assert!(!cfg.work_signal_file().exists(), "claim loss must NOT touch work-signal");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_user_request_no_id_no_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = crate::hub_mock::HubMock::new().await;
+        let cfg = test_cfg_in_dir(dir.path(), &mock.url);
+        let client = Client::new();
+        // body without request_id — should log and return silently
+        dispatch(&cfg, &client, r#"data: {"type":"user.request","to":"all","body":{}}"#).await;
     }
 
     // ── post_result hub mock tests ────────────────────────────────────────────

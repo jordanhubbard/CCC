@@ -26,6 +26,8 @@ pub struct HubState {
     pub item_claim_status: u16,
     /// HTTP status code for PUT  /api/tasks/:id/claim (default 200)
     pub task_claim_status: u16,
+    /// HTTP status code for POST /api/requests/:id/claim (default 200)
+    pub request_claim_status: u16,
     /// JSON payloads to stream from GET /bus/stream as SSE data events.
     pub sse_events: Vec<String>,
     /// Agent names returned by GET /api/agents/names
@@ -39,6 +41,7 @@ impl Default for HubState {
             tasks: vec![],
             item_claim_status: 200,
             task_claim_status: 200,
+            request_claim_status: 200,
             sse_events: vec![],
             agent_names: vec![],
         }
@@ -112,6 +115,8 @@ fn build_router(state: S) -> Router {
         .route("/api/tasks/:id/claim",          put(task_claim))
         .route("/api/tasks/:id/complete",       put(ok))
         .route("/api/tasks/:id/unclaim",        put(ok))
+        // User request routes (first-responder)
+        .route("/api/requests/:id/claim",       post(request_claim))
         // Exec result (bus worker)
         .route("/api/exec/:id/result",          post(ok))
         // SSE stream (bus listener)
@@ -170,4 +175,16 @@ async fn task_claim(State(st): State<S>, Path(id): Path<String>) -> impl IntoRes
     let code = st.read().await.task_claim_status;
     let sc = StatusCode::from_u16(code).unwrap_or(StatusCode::OK);
     (sc, Json(json!({"ok": code == 200, "task": {"id": id, "title": "mock task", "status": "claimed"}}))).into_response()
+}
+
+async fn request_claim(State(st): State<S>, Path(id): Path<String>) -> impl IntoResponse {
+    let code = st.read().await.request_claim_status;
+    let sc = StatusCode::from_u16(code).unwrap_or(StatusCode::OK);
+    let ok = code == 200;
+    let body = if ok {
+        json!({"ok": true, "request": {"id": id, "status": "claimed"}})
+    } else {
+        json!({"error": "already_claimed"})
+    };
+    (sc, Json(body)).into_response()
 }

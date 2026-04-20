@@ -22,6 +22,7 @@ pub mod supervisor;
 pub mod conversations;
 pub mod metrics;
 pub mod models;
+pub mod requests;
 
 use axum::{
     http::StatusCode,
