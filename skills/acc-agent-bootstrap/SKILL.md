@@ -214,4 +214,49 @@ Always verify against the live agent — these can drift.
 - **`ANTHROPIC_BASE_URL` not set**: Hermes calls will go to the public Anthropic API (wrong billing, wrong routing). Always set this to the local Tokenhub proxy.
 - **AgentFS stale after samba reconfiguration**: Unmount and remount. Do NOT just retry `ls` — the mount handle is broken and must be refreshed.
 - **AgentFS `ls` fails on macOS over SSH**: macOS TCC blocks SSH from listing CIFS mounts. The mount is live if `mount | grep accfs` shows it. Check with `stat` instead of `ls`.
-- **Boris (Kubernetes) can't mount CIFS**: Containers lack `CAP_SYS_ADMIN`. AgentFS must be provided as a Kubernetes PersistentVolumeClaim at pod spec level.
+- **Boris (Kubernetes) can't mount CIFS**: Containers lack `CAP_SYS_ADMIN`. Use the `/api/fs/` HTTP API instead (see below).
+
+---
+
+## AgentFS via HTTP API (containers without CAP_SYS_ADMIN)
+
+For agents that cannot mount CIFS (Kubernetes pods, restricted containers),
+the acc-server exposes AgentFS over HTTP. This covers all practical needs:
+listing, reading, writing, and deleting files.
+
+All paths are relative to `/srv/accfs` on the hub. `/shared/Sim-Next/...`
+is the same content other agents see at `~/.acc/shared/Sim-Next/...`.
+
+```bash
+source ~/.acc/.env 2>/dev/null
+
+# List a directory
+curl -sf -H "Authorization: Bearer $ACC_AGENT_TOKEN" \
+  "${ACC_URL}/api/fs/list?path=/shared"
+
+# Read a file
+curl -sf -H "Authorization: Bearer $ACC_AGENT_TOKEN" \
+  "${ACC_URL}/api/fs/read?path=/shared/Sim-Next/CLAUDE.md"
+
+# Write a file
+curl -sf -X POST \
+  -H "Authorization: Bearer $ACC_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c "import json,sys; print(json.dumps({'path':sys.argv[1],'content':sys.argv[2]}))" \
+       "/shared/Sim-Next/notes.md" "content here")" \
+  "${ACC_URL}/api/fs/write"
+
+# Delete a file
+curl -sf -X DELETE \
+  -H "Authorization: Bearer $ACC_AGENT_TOKEN" \
+  "${ACC_URL}/api/fs/delete?path=/shared/Sim-Next/notes.md"
+
+# Check existence (HEAD — 200 = exists, 404 = not found)
+curl -sf -I -H "Authorization: Bearer $ACC_AGENT_TOKEN" \
+  "${ACC_URL}/api/fs/exists?path=/shared/Sim-Next/CLAUDE.md"
+```
+
+The limitation: `agentfs_path` values in project records are server-local
+paths (`/srv/accfs/shared/<slug>`). To read a project's `.beads/issues.jsonl`
+via the API, translate: strip `/srv/accfs` prefix and use the remainder as
+the `path` parameter.
