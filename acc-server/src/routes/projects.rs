@@ -32,7 +32,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/projects", get(list_projects).post(create_project))
         .route("/api/projects/:owner/:repo/github", get(project_github))
         .route("/api/projects/:owner/:repo", get(get_project))
-        .route("/api/projects/:id", patch(update_project).delete(delete_project))
+        .route("/api/projects/:id", get(get_project_by_id).patch(update_project).delete(delete_project))
         .merge(metrics::router())
 }
 
@@ -106,6 +106,25 @@ async fn list_projects(
         .collect();
 
     Json(json!({"projects": page, "total": total, "offset": offset}))
+}
+
+// ── GET /api/projects/:id ─────────────────────────────────────────────────
+
+async fn get_project_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let projects = read_projects(&state).await;
+    match projects.into_iter().find(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+            || p.get("slug").and_then(|v| v.as_str()) == Some(&id)
+    }) {
+        Some(p) => (axum::http::StatusCode::OK, Json(p)).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error": "Project not found"})),
+        ).into_response(),
+    }
 }
 
 // ── GET /api/projects/:owner/:repo ────────────────────────────────────────
@@ -271,6 +290,9 @@ async fn create_project(
         "slackChannels": body.get("slackChannels").cloned().unwrap_or(json!([])),
         "tags":         body.get("tags").cloned().unwrap_or(json!([])),
         "status":       body.get("status").and_then(|v| v.as_str()).unwrap_or("active"),
+        "owner":        body.get("owner").cloned().unwrap_or(json!(null)),
+        "assignee":     body.get("assignee").cloned().unwrap_or(json!(null)),
+        "notes":        body.get("notes").cloned().unwrap_or(json!("")),
         "createdAt":    now.clone(),
         "updatedAt":    now,
     });
@@ -337,7 +359,9 @@ async fn update_project(
         None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"Project not found"}))).into_response(),
         Some(i) => {
             let p = projects[i].as_object_mut().unwrap();
-            for field in &["name", "description", "repoUrl", "slackChannels", "tags", "status"] {
+            for field in &["name", "description", "repoUrl", "slackChannels", "tags", "status",
+                           "git_url", "slug", "agentfs_path", "clone_status",
+                           "owner", "assignee", "notes"] {
                 if let Some(v) = body.get(field) {
                     p.insert(field.to_string(), v.clone());
                 }
