@@ -418,6 +418,133 @@ async fn delete_project(
     }
 }
 
+// ── Beads import core (shared by HTTP handler and background scanner) ─────
+
+/// Import open beads from a project's AgentFS path into fleet_tasks.
+/// Returns (imported_count, skipped_count).
+/// Idempotent: existing active tasks with matching titles are skipped.
+pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (usize, usize) {
+    let agentfs_path = match project.get("agentfs_path").and_then(|v| v.as_str()) {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => return (0, 0),
+    };
+    let project_ref = project.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if project_ref.is_empty() { return (0, 0); }
+
+    let issues_path = format!("{}/.beads/issues.jsonl", agentfs_path);
+    let content = match tokio::fs::read_to_string(&issues_path).await {
+        Ok(c) => c,
+        Err(_) => return (0, 0),
+    };
+
+    let import_statuses = ["open", "in_progress", "in-progress", "blocked"];
+    let assignee = project.get("assignee").and_then(|v| v.as_str()).unwrap_or("all").to_string();
+
+    let map_priority = |issue: &Value| -> i64 {
+        issue.get("priority").and_then(|v| v.as_i64()).unwrap_or(2).clamp(0, 4)
+    };
+    let map_tags = |issue: &Value| -> Value {
+        let mut tags: Vec<String> = issue.get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        if let Some(t) = issue.get("issue_type").and_then(|v| v.as_str()) {
+            if t != "task" && !tags.contains(&t.to_string()) { tags.push(t.to_string()); }
+        }
+        if !tags.contains(&"beads".to_string()) { tags.push("beads".to_string()); }
+        json!(tags)
+    };
+    let norm = |s: &str| s.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+
+    let db = state.fleet_db.lock().await;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        let issue: Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let status = issue.get("status").and_then(|v| v.as_str()).unwrap_or("open");
+        if !import_statuses.contains(&status) { continue; }
+
+        let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let beads_id = issue.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if title.is_empty() || beads_id.is_empty() { continue; }
+
+        let title_norm = norm(&title);
+        let is_dup: bool = db.query_row(
+            "SELECT COUNT(*) FROM fleet_tasks WHERE project_id=?1 AND status IN ('open','claimed','in_progress') AND LOWER(TRIM(title))=?2",
+            rusqlite::params![project_ref, title_norm],
+            |r| r.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+        if is_dup { skipped += 1; continue; }
+
+        let priority = map_priority(&issue);
+        let tags = map_tags(&issue);
+        let mut description = issue.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if description.len() < 20 {
+            description = format!("{} (imported from beads {})", description, beads_id);
+        }
+        let task_id = format!("task-beads-{}-{}", beads_id, chrono::Utc::now().timestamp_millis());
+        let issue_type = issue.get("issue_type").and_then(|v| v.as_str()).unwrap_or("task").to_string();
+        let metadata = json!({
+            "beads_id": beads_id,
+            "source": "beads-scanner",
+            "tags": tags,
+            "assignee": assignee,
+        });
+
+        if db.execute(
+            "INSERT INTO fleet_tasks (id, project_id, title, description, priority, task_type, metadata, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)",
+            rusqlite::params![task_id, project_ref, title, description, priority, issue_type, metadata.to_string(), now],
+        ).is_ok() {
+            let _ = state.bus_tx.send(json!({
+                "type": "tasks:added",
+                "task_id": task_id,
+                "project_id": project_ref,
+                "beads_id": beads_id,
+            }).to_string());
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+
+    (imported, skipped)
+}
+
+/// Background scanner: runs every BEADS_SCAN_INTERVAL_SECS (default 60).
+/// Scans all active projects with an agentfs_path for new beads and imports them.
+pub async fn run_beads_scanner(state: Arc<AppState>) {
+    let interval_secs: u64 = std::env::var("BEADS_SCAN_INTERVAL_SECS")
+        .ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    tracing::info!("beads-scanner: started (interval={}s)", interval_secs);
+    loop {
+        interval.tick().await;
+        let projects = read_projects(&state).await;
+        let active: Vec<Value> = projects.into_iter().filter(|p| {
+            p.get("status").and_then(|v| v.as_str()) != Some("archived")
+            && p.get("clone_status").and_then(|v| v.as_str()) == Some("ready")
+            && p.get("agentfs_path").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+        }).collect();
+        let mut total_imported = 0usize;
+        for project in &active {
+            let (n, _) = import_project_beads_inner(&state, project).await;
+            total_imported += n;
+        }
+        if total_imported > 0 {
+            tracing::info!("beads-scanner: imported {} new task(s) across {} project(s)", total_imported, active.len());
+        }
+    }
+}
+
 // ── POST /api/projects/:id/import-beads ───────────────────────────────────
 //
 // Reads .beads/issues.jsonl from the project's agentfs_path and creates a
@@ -429,7 +556,7 @@ async fn delete_project(
 //   dry_run=true              — parse and report without writing to queue
 //
 // Returns:
-//   { "imported": N, "skipped": N, "errors": [...], "tasks": [...] }
+//   { "imported": N, "skipped": N, "tasks": [...] }
 
 async fn import_beads(
     State(state): State<Arc<AppState>>,
@@ -458,162 +585,28 @@ async fn import_beads(
         }))).into_response(),
     };
 
-    // Parse options
-    let import_statuses: Vec<String> = params
-        .get("status")
-        .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
-        .unwrap_or_else(|| vec!["open".into(), "in_progress".into(), "in-progress".into(), "blocked".into()]);
-    let assignee_override = params.get("assignee").cloned()
-        .or_else(|| project.get("assignee").and_then(|v| v.as_str()).map(|s| s.to_string()));
+    // dry_run mode: parse and report without writing
     let dry_run = params.get("dry_run").map(|v| v == "true").unwrap_or(false);
-
-    let project_ref = project.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-    // Read .beads/issues.jsonl
-    let issues_path = format!("{}/.beads/issues.jsonl", agentfs_path);
-    let content = match tokio::fs::read_to_string(&issues_path).await {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return (axum::http::StatusCode::NOT_FOUND, Json(json!({
-                "error": format!("No .beads/issues.jsonl at {}", issues_path)
-            }))).into_response();
-        }
-        Err(e) => {
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-                "error": format!("Failed to read issues: {}", e)
-            }))).into_response();
-        }
-    };
-
-    // Parse issues and filter by status
-    let mut to_import: Vec<Value> = Vec::new();
-    let mut parse_errors: Vec<String> = Vec::new();
-    for (lineno, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() { continue; }
-        match serde_json::from_str::<Value>(line) {
-            Ok(issue) => {
-                let status = issue.get("status").and_then(|v| v.as_str()).unwrap_or("open");
-                if import_statuses.iter().any(|s| s == status) {
-                    to_import.push(issue);
-                }
-            }
-            Err(e) => parse_errors.push(format!("line {}: {}", lineno + 1, e)),
-        }
-    }
-
     if dry_run {
+        let import_statuses: Vec<&str> = vec!["open", "in_progress", "in-progress", "blocked"];
+        let issues_path = format!("{}/.beads/issues.jsonl", agentfs_path);
+        let content = tokio::fs::read_to_string(&issues_path).await.unwrap_or_default();
+        let to_import: Vec<Value> = content.lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok())
+            .filter(|v| import_statuses.contains(&v.get("status").and_then(|s| s.as_str()).unwrap_or("open")))
+            .collect();
         return (axum::http::StatusCode::OK, Json(json!({
             "dry_run": true,
             "would_import": to_import.len(),
-            "parse_errors": parse_errors,
             "issues": to_import,
         }))).into_response();
     }
 
-    // Beads priority 0-4 maps 1:1 to fleet_tasks INTEGER priority
-    let map_priority = |issue: &Value| -> i64 {
-        issue.get("priority").and_then(|v| v.as_i64()).unwrap_or(2).clamp(0, 4)
-    };
-
-    // Map issue_type to tags
-    let map_tags = |issue: &Value| -> Value {
-        let mut tags: Vec<String> = issue.get("tags")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
-            .unwrap_or_default();
-        if let Some(t) = issue.get("issue_type").and_then(|v| v.as_str()) {
-            if t != "task" && !tags.contains(&t.to_string()) {
-                tags.push(t.to_string());
-            }
-        }
-        tags.push("beads".to_string());
-        json!(tags)
-    };
-
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut imported: Vec<Value> = Vec::new();
-    let mut skipped: Vec<Value> = Vec::new();
-
-    let db = state.fleet_db.lock().await;
-
-    // Normalize title for dedup check
-    let norm = |s: &str| s.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
-
-    for issue in to_import {
-        let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let description = issue.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let beads_id = issue.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-        // Skip duplicates by normalized title among active tasks for this project
-        let title_norm = norm(&title);
-        let is_dup: bool = db.query_row(
-            "SELECT COUNT(*) FROM fleet_tasks WHERE project_id=?1 AND status IN ('open','claimed','in_progress') AND LOWER(TRIM(title))=?2",
-            rusqlite::params![project_ref, title_norm],
-            |r| r.get::<_, i64>(0),
-        ).unwrap_or(0) > 0;
-
-        if is_dup {
-            skipped.push(json!({"beads_id": beads_id, "title": title, "reason": "duplicate_title"}));
-            continue;
-        }
-
-        let priority = map_priority(&issue);
-        let tags = map_tags(&issue);
-
-        // Pad short descriptions
-        let description = if description.len() < 20 {
-            format!("{} (imported from beads {})", description, beads_id)
-        } else {
-            description
-        };
-
-        let task_id = format!("task-beads-{}-{}", beads_id, chrono::Utc::now().timestamp_millis());
-        let issue_type = issue.get("issue_type").and_then(|v| v.as_str()).unwrap_or("task").to_string();
-        let metadata = json!({
-            "beads_id": beads_id,
-            "source": "import-beads",
-            "tags": tags,
-            "assignee": assignee_override.as_deref().unwrap_or("all"),
-        });
-
-        match db.execute(
-            "INSERT INTO fleet_tasks (id, project_id, title, description, priority, task_type, metadata, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-            rusqlite::params![
-                task_id, project_ref, title, description,
-                priority, issue_type, metadata.to_string(), now,
-            ],
-        ) {
-            Ok(_) => {
-                let _ = state.bus_tx.send(json!({
-                    "type": "tasks:added",
-                    "task_id": task_id,
-                    "project_id": project_ref,
-                    "beads_id": beads_id,
-                }).to_string());
-                imported.push(json!({
-                    "id":        task_id,
-                    "beads_id":  beads_id,
-                    "title":     title,
-                    "priority":  priority,
-                    "task_type": issue_type,
-                }));
-            }
-            Err(e) => {
-                skipped.push(json!({"beads_id": beads_id, "title": title, "reason": e.to_string()}));
-            }
-        }
-    }
-
-    drop(db);
+    let (imported, skipped) = import_project_beads_inner(&state, &project).await;
 
     (axum::http::StatusCode::OK, Json(json!({
-        "ok":           true,
-        "imported":     imported.len(),
-        "skipped":      skipped.len(),
-        "parse_errors": parse_errors,
-        "tasks":        imported,
-        "skipped_items": skipped,
+        "ok":      true,
+        "imported": imported,
+        "skipped":  skipped,
     }))).into_response()
 }

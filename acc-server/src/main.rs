@@ -141,6 +141,9 @@ async fn main() {
         .expect("Failed to build reqwest client");
     tokio::spawn(brain::run_brain_worker(brain_arc, brain_client));
 
+    let scanner_state = app_state.clone();
+    tokio::spawn(routes::projects::run_beads_scanner(scanner_state));
+
     {
         let db = fleet_db.clone();
         tokio::spawn(async move {
