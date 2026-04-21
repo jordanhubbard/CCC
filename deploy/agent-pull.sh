@@ -155,6 +155,16 @@ else
     fi
   fi
 
+  # Install deploy/bin/ scripts to ~/.local/bin/
+  if echo "$CHANGED" | grep -q "^deploy/bin/"; then
+    mkdir -p "$HOME/.local/bin"
+    for _script in "$WORKSPACE/deploy/bin/"*; do
+      [[ -f "$_script" ]] || continue
+      install -m 755 "$_script" "$HOME/.local/bin/$(basename "$_script")"
+    done
+    log "deploy/bin scripts installed to ~/.local/bin/"
+  fi
+
   # Sync Hermes skills if the vendored skills changed
   if echo "$CHANGED" | grep -q "^skills/"; then
     if [[ -d "$HOME/.hermes/skills" ]]; then

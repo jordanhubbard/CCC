@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# acc-file-task — File a task in the ACC queue from any agent session.
+#
+# Usage:
+#   acc-file-task --title "Fix the thing" --description "Why and what to do"
+#   acc-file-task --title "..." --description "..." --priority high --tags "code,gpu"
+#   acc-file-task --title "..." --description "..." --assignee natasha
+#
+# Priority: critical|high|normal|low|idea  (default: normal)
+# Exit 0 on success (prints item ID), non-zero on failure.
+
+set -euo pipefail
+
+# ── Load env ──────────────────────────────────────────────────────────────────
+for _env in "${HOME}/.acc/.env" "${HOME}/.ccc/.env"; do
+  [[ -f "$_env" ]] && { set -a; source "$_env"; set +a; } || true
+done
+
+ACC_URL="${ACC_URL:-${CCC_URL:-}}"
+ACC_AGENT_TOKEN="${ACC_AGENT_TOKEN:-${CCC_AGENT_TOKEN:-}}"
+AGENT_NAME="${AGENT_NAME:-$(hostname)}"
+
+if [[ -z "$ACC_URL" || -z "$ACC_AGENT_TOKEN" ]]; then
+  echo "ERROR: ACC_URL and ACC_AGENT_TOKEN must be set" >&2
+  exit 1
+fi
+
+# ── Parse args ────────────────────────────────────────────────────────────────
+TITLE=""
+DESCRIPTION=""
+PRIORITY="normal"
+TAGS=""
+ASSIGNEE="all"
+NOTES=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --title)       TITLE="$2";       shift 2 ;;
+    --description) DESCRIPTION="$2"; shift 2 ;;
+    --priority)    PRIORITY="$2";    shift 2 ;;
+    --tags)        TAGS="$2";        shift 2 ;;
+    --assignee)    ASSIGNEE="$2";    shift 2 ;;
+    --notes)       NOTES="$2";       shift 2 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$TITLE" ]]; then
+  echo "ERROR: --title required" >&2
+  exit 1
+fi
+if [[ -z "$DESCRIPTION" || ${#DESCRIPTION} -lt 20 ]]; then
+  echo "ERROR: --description required and must be at least 20 characters" >&2
+  exit 1
+fi
+
+# ── Build JSON ────────────────────────────────────────────────────────────────
+TAGS_JSON="[]"
+if [[ -n "$TAGS" ]]; then
+  TAGS_JSON=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1].split(',')))" "$TAGS" 2>/dev/null || echo "[]")
+fi
+
+BODY=$(python3 -c "
+import json, sys
+print(json.dumps({
+  'title':       sys.argv[1],
+  'description': sys.argv[2],
+  'priority':    sys.argv[3],
+  'assignee':    sys.argv[4],
+  'notes':       sys.argv[5],
+  'tags':        json.loads(sys.argv[6]),
+  'created_by':  sys.argv[7],
+}))
+" "$TITLE" "$DESCRIPTION" "$PRIORITY" "$ASSIGNEE" "$NOTES" "$TAGS_JSON" "$AGENT_NAME")
+
+# ── POST ──────────────────────────────────────────────────────────────────────
+RESPONSE=$(curl -sf --max-time 15 \
+  -X POST "${ACC_URL%/}/api/queue" \
+  -H "Authorization: Bearer $ACC_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$BODY" 2>&1) || {
+  echo "ERROR: HTTP request failed" >&2
+  exit 1
+}
+
+ITEM_ID=$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); print(d.get('item',{}).get('id',''))" "$RESPONSE" 2>/dev/null || echo "")
+
+if [[ -z "$ITEM_ID" ]]; then
+  echo "ERROR: queue rejected task: $RESPONSE" >&2
+  exit 1
+fi
+
+echo "$ITEM_ID"
