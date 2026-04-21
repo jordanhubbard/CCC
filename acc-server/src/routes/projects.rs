@@ -1,5 +1,5 @@
 use crate::routes::metrics;
-use crate::state::flush_queue;
+use rusqlite;
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
@@ -542,26 +542,24 @@ async fn import_beads(
     let mut imported: Vec<Value> = Vec::new();
     let mut skipped: Vec<Value> = Vec::new();
 
-    let mut q = state.queue.write().await;
+    let db = state.fleet_db.lock().await;
 
     // Normalize title for dedup check
     let norm = |s: &str| s.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
-    let active_statuses = ["pending", "in-progress", "in_progress", "claimed", "incubating"];
 
     for issue in to_import {
         let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let description = issue.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let beads_id = issue.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-        // Skip duplicates by title
+        // Skip duplicates by normalized title among active tasks for this project
         let title_norm = norm(&title);
-        let is_dup = q.items.iter().any(|i| {
-            let s = i.get("status").and_then(|s| s.as_str()).unwrap_or("");
-            active_statuses.contains(&s)
-                && i.get("title").and_then(|t| t.as_str())
-                    .map(|t| norm(t) == title_norm)
-                    .unwrap_or(false)
-        });
+        let is_dup: bool = db.query_row(
+            "SELECT COUNT(*) FROM fleet_tasks WHERE project_id=?1 AND status IN ('open','claimed','in_progress') AND LOWER(TRIM(title))=?2",
+            rusqlite::params![project_ref, title_norm],
+            |r| r.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
         if is_dup {
             skipped.push(json!({"beads_id": beads_id, "title": title, "reason": "duplicate_title"}));
             continue;
@@ -569,51 +567,53 @@ async fn import_beads(
 
         let priority = map_priority(&issue);
         let tags = map_tags(&issue);
-        let assignee = assignee_override.as_deref().unwrap_or("all");
 
-        // Pad short descriptions (beads sometimes has very short ones)
+        // Pad short descriptions
         let description = if description.len() < 20 {
             format!("{} (imported from beads {})", description, beads_id)
         } else {
             description
         };
 
-        let item_id = format!("wq-API-{}", chrono::Utc::now().timestamp_millis());
-        let item = json!({
-            "id":               item_id,
-            "itemVersion":      1,
-            "created":          now,
-            "source":           format!("beads:{}", beads_id),
-            "assignee":         assignee,
-            "priority":         priority,
-            "status":           "pending",
-            "title":            title,
-            "description":      description,
-            "notes":            issue.get("notes").and_then(|v| v.as_str()).unwrap_or(""),
-            "preferred_executor": "hermes",
-            "journal":          [],
-            "choices":          [],
-            "choiceRecorded":   null,
-            "votes":            [],
-            "attempts":         0,
-            "maxAttempts":      3,
-            "claimedBy":        null,
-            "claimedAt":        null,
-            "completedAt":      null,
-            "result":           null,
-            "tags":             tags,
-            "scout_key":        null,
-            "repo":             null,
-            "project":          project_ref,
-            "beads_id":         beads_id,
+        let task_id = format!("task-beads-{}-{}", beads_id, chrono::Utc::now().timestamp_millis());
+        let issue_type = issue.get("issue_type").and_then(|v| v.as_str()).unwrap_or("task").to_string();
+        let metadata = json!({
+            "beads_id": beads_id,
+            "source": "import-beads",
+            "tags": tags,
+            "assignee": assignee_override.as_deref().unwrap_or("all"),
         });
 
-        q.items.push(item.clone());
-        imported.push(item);
+        match db.execute(
+            "INSERT INTO fleet_tasks (id, project_id, title, description, priority, task_type, metadata, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            rusqlite::params![
+                task_id, project_ref, title, description,
+                priority, issue_type, metadata.to_string(), now,
+            ],
+        ) {
+            Ok(_) => {
+                let _ = state.bus_tx.send(json!({
+                    "type": "tasks:added",
+                    "task_id": task_id,
+                    "project_id": project_ref,
+                    "beads_id": beads_id,
+                }).to_string());
+                imported.push(json!({
+                    "id": task_id,
+                    "beads_id": beads_id,
+                    "title": title,
+                    "priority": priority,
+                    "task_type": issue_type,
+                }));
+            }
+            Err(e) => {
+                skipped.push(json!({"beads_id": beads_id, "title": title, "reason": e.to_string()}));
+            }
+        }
     }
 
-    drop(q);
-    flush_queue(&state).await;
+    drop(db);
 
     (axum::http::StatusCode::OK, Json(json!({
         "ok":           true,

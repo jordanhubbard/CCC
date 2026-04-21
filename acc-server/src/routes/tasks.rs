@@ -214,6 +214,18 @@ async fn update_task(
     if let Some(m) = body.get("metadata") {
         let _ = db.execute("UPDATE fleet_tasks SET metadata=?1, updated_at=?2 WHERE id=?3", params![m.to_string(), now, id]);
     }
+    if let Some(s) = body.get("status").and_then(|v| v.as_str()) {
+        let _ = db.execute("UPDATE fleet_tasks SET status=?1, updated_at=?2 WHERE id=?3", params![s, now, id]);
+    }
+    if let Some(tt) = body.get("task_type").and_then(|v| v.as_str()) {
+        let _ = db.execute("UPDATE fleet_tasks SET task_type=?1, updated_at=?2 WHERE id=?3", params![tt, now, id]);
+    }
+    if let Some(ph) = body.get("phase").and_then(|v| v.as_str()) {
+        let _ = db.execute("UPDATE fleet_tasks SET phase=?1, updated_at=?2 WHERE id=?3", params![ph, now, id]);
+    }
+    if let Some(bb) = body.get("blocked_by") {
+        let _ = db.execute("UPDATE fleet_tasks SET blocked_by=?1, updated_at=?2 WHERE id=?3", params![bb.to_string(), now, id]);
+    }
     let task = db.query_row(
         &format!("SELECT {TASK_COLS} FROM fleet_tasks WHERE id=?1"),
         params![id], row_to_task,
