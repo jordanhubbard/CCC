@@ -1,9 +1,10 @@
 use crate::routes::metrics;
+use crate::state::flush_queue;
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
     response::{IntoResponse, Json},
-    routing::{get, patch},
+    routing::{get, patch, post},
     Router,
 };
 use serde_json::{json, Value};
@@ -33,6 +34,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/projects/:owner/:repo/github", get(project_github))
         .route("/api/projects/:owner/:repo", get(get_project))
         .route("/api/projects/:id", get(get_project_by_id).patch(update_project).delete(delete_project))
+        .route("/api/projects/:id/import-beads", post(import_beads))
         .merge(metrics::router())
 }
 
@@ -414,4 +416,211 @@ async fn delete_project(
             }
         }
     }
+}
+
+// ── POST /api/projects/:id/import-beads ───────────────────────────────────
+//
+// Reads .beads/issues.jsonl from the project's agentfs_path and creates a
+// queue task for each open issue (status: open | in_progress | blocked).
+//
+// Query params:
+//   status=open,in_progress   — comma-separated statuses to import (default above)
+//   assignee=<agent>          — override assignee on created tasks (default: project assignee or "all")
+//   dry_run=true              — parse and report without writing to queue
+//
+// Returns:
+//   { "imported": N, "skipped": N, "errors": [...], "tasks": [...] }
+
+async fn import_beads(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    if !state.is_authed(&headers) {
+        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+    }
+
+    // Find the project
+    let projects = read_projects(&state).await;
+    let project = match projects.iter().find(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+            || p.get("slug").and_then(|v| v.as_str()) == Some(&id)
+    }) {
+        Some(p) => p.clone(),
+        None => return (axum::http::StatusCode::NOT_FOUND, Json(json!({"error": "Project not found"}))).into_response(),
+    };
+
+    let agentfs_path = match project.get("agentfs_path").and_then(|v| v.as_str()) {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
+            "error": "Project has no agentfs_path set"
+        }))).into_response(),
+    };
+
+    // Parse options
+    let import_statuses: Vec<String> = params
+        .get("status")
+        .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+        .unwrap_or_else(|| vec!["open".into(), "in_progress".into(), "in-progress".into(), "blocked".into()]);
+    let assignee_override = params.get("assignee").cloned()
+        .or_else(|| project.get("assignee").and_then(|v| v.as_str()).map(|s| s.to_string()));
+    let dry_run = params.get("dry_run").map(|v| v == "true").unwrap_or(false);
+
+    let project_ref = project.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    // Read .beads/issues.jsonl
+    let issues_path = format!("{}/.beads/issues.jsonl", agentfs_path);
+    let content = match tokio::fs::read_to_string(&issues_path).await {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return (axum::http::StatusCode::NOT_FOUND, Json(json!({
+                "error": format!("No .beads/issues.jsonl at {}", issues_path)
+            }))).into_response();
+        }
+        Err(e) => {
+            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "error": format!("Failed to read issues: {}", e)
+            }))).into_response();
+        }
+    };
+
+    // Parse issues and filter by status
+    let mut to_import: Vec<Value> = Vec::new();
+    let mut parse_errors: Vec<String> = Vec::new();
+    for (lineno, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        match serde_json::from_str::<Value>(line) {
+            Ok(issue) => {
+                let status = issue.get("status").and_then(|v| v.as_str()).unwrap_or("open");
+                if import_statuses.iter().any(|s| s == status) {
+                    to_import.push(issue);
+                }
+            }
+            Err(e) => parse_errors.push(format!("line {}: {}", lineno + 1, e)),
+        }
+    }
+
+    if dry_run {
+        return (axum::http::StatusCode::OK, Json(json!({
+            "dry_run": true,
+            "would_import": to_import.len(),
+            "parse_errors": parse_errors,
+            "issues": to_import,
+        }))).into_response();
+    }
+
+    // Map beads priority (0-4) to queue priority string
+    let map_priority = |issue: &Value| -> &'static str {
+        match issue.get("priority").and_then(|v| v.as_u64()) {
+            Some(0) => "critical",
+            Some(1) => "high",
+            Some(2) => "normal",
+            Some(3) => "low",
+            Some(4) => "idea",
+            _ => "normal",
+        }
+    };
+
+    // Map issue_type to tags
+    let map_tags = |issue: &Value| -> Value {
+        let mut tags: Vec<String> = issue.get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        if let Some(t) = issue.get("issue_type").and_then(|v| v.as_str()) {
+            if t != "task" && !tags.contains(&t.to_string()) {
+                tags.push(t.to_string());
+            }
+        }
+        tags.push("beads".to_string());
+        json!(tags)
+    };
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut imported: Vec<Value> = Vec::new();
+    let mut skipped: Vec<Value> = Vec::new();
+
+    let mut q = state.queue.write().await;
+
+    // Normalize title for dedup check
+    let norm = |s: &str| s.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+    let active_statuses = ["pending", "in-progress", "in_progress", "claimed", "incubating"];
+
+    for issue in to_import {
+        let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let description = issue.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let beads_id = issue.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        // Skip duplicates by title
+        let title_norm = norm(&title);
+        let is_dup = q.items.iter().any(|i| {
+            let s = i.get("status").and_then(|s| s.as_str()).unwrap_or("");
+            active_statuses.contains(&s)
+                && i.get("title").and_then(|t| t.as_str())
+                    .map(|t| norm(t) == title_norm)
+                    .unwrap_or(false)
+        });
+        if is_dup {
+            skipped.push(json!({"beads_id": beads_id, "title": title, "reason": "duplicate_title"}));
+            continue;
+        }
+
+        let priority = map_priority(&issue);
+        let tags = map_tags(&issue);
+        let assignee = assignee_override.as_deref().unwrap_or("all");
+
+        // Pad short descriptions (beads sometimes has very short ones)
+        let description = if description.len() < 20 {
+            format!("{} (imported from beads {})", description, beads_id)
+        } else {
+            description
+        };
+
+        let item_id = format!("wq-API-{}", chrono::Utc::now().timestamp_millis());
+        let item = json!({
+            "id":               item_id,
+            "itemVersion":      1,
+            "created":          now,
+            "source":           format!("beads:{}", beads_id),
+            "assignee":         assignee,
+            "priority":         priority,
+            "status":           "pending",
+            "title":            title,
+            "description":      description,
+            "notes":            issue.get("notes").and_then(|v| v.as_str()).unwrap_or(""),
+            "preferred_executor": "hermes",
+            "journal":          [],
+            "choices":          [],
+            "choiceRecorded":   null,
+            "votes":            [],
+            "attempts":         0,
+            "maxAttempts":      3,
+            "claimedBy":        null,
+            "claimedAt":        null,
+            "completedAt":      null,
+            "result":           null,
+            "tags":             tags,
+            "scout_key":        null,
+            "repo":             null,
+            "project":          project_ref,
+            "beads_id":         beads_id,
+        });
+
+        q.items.push(item.clone());
+        imported.push(item);
+    }
+
+    drop(q);
+    flush_queue(&state).await;
+
+    (axum::http::StatusCode::OK, Json(json!({
+        "ok":           true,
+        "imported":     imported.len(),
+        "skipped":      skipped.len(),
+        "parse_errors": parse_errors,
+        "tasks":        imported,
+        "skipped_items": skipped,
+    }))).into_response()
 }
