@@ -14,7 +14,7 @@ use crate::config::Config;
 const MAX_RESUME_ATTEMPTS: u32 = 6;
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(120);
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
-const HERMES_TAGS: &[&str] = &["hermes", "gpu", "render", "simulation", "omniverse", "isaaclab", "vllm"];
+const CLAUDE_ONLY_TAGS: &[&str] = &["claude", "claude_cli"];
 
 pub async fn run(args: &[String]) {
     let cfg = match Config::load() {
@@ -320,15 +320,15 @@ async fn fetch_hermes_item(cfg: &Config, client: &reqwest::Client) -> Option<ser
         if !assignee.is_empty() && assignee != "all" && assignee != cfg.agent_name.as_str() {
             continue;
         }
-        // Only take hermes-appropriate items
+        // Skip tasks explicitly reserved for claude CLI
         let tags: Vec<&str> = item["tags"]
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_default();
         let preferred = item["preferred_executor"].as_str().unwrap_or("");
-        let is_hermes = tags.iter().any(|t| HERMES_TAGS.contains(t))
-            || HERMES_TAGS.contains(&preferred);
-        if is_hermes {
+        let is_claude_only = preferred == "claude_cli"
+            || tags.iter().any(|t| CLAUDE_ONLY_TAGS.contains(t));
+        if !is_claude_only {
             return Some(item);
         }
     }
@@ -477,12 +477,6 @@ mod tests {
         assert_eq!(extract_session_id(output), None);
     }
 
-    #[test]
-    fn test_hermes_tags_contain_gpu() {
-        assert!(HERMES_TAGS.contains(&"gpu"));
-        assert!(HERMES_TAGS.contains(&"hermes"));
-    }
-
     // ── fetch_hermes_item hub mock tests ─────────────────────────────────────
 
     #[tokio::test]
@@ -521,14 +515,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_hermes_item_skips_non_hermes_tags() {
+    async fn test_fetch_hermes_item_skips_claude_cli() {
         let mock = HubMock::with_queue(vec![
             json!({"id": "wq-c1", "status": "pending", "assignee": "all",
                    "tags": ["docs", "claude_cli"], "preferred_executor": "claude_cli"}),
         ]).await;
         let client = reqwest::Client::new();
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
-        assert!(item.is_none(), "non-hermes item should be skipped");
+        assert!(item.is_none(), "claude_cli item should be skipped");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_hermes_item_returns_coding_task() {
+        let mock = HubMock::with_queue(vec![
+            json!({"id": "wq-code1", "status": "pending", "assignee": "all",
+                   "tags": ["code", "reasoning"], "preferred_executor": ""}),
+        ]).await;
+        let client = reqwest::Client::new();
+        let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
+        assert!(item.is_some(), "coding task should be accepted by hermes");
+        assert_eq!(item.unwrap()["id"], "wq-code1");
     }
 
     #[tokio::test]

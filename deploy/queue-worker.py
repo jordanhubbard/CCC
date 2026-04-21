@@ -797,13 +797,15 @@ def run_claude(
 
 # ── Hermes executor ───────────────────────────────────────────────────────────
 
-_HERMES_TAGS = {"hermes", "gpu", "render", "simulation", "omniverse", "isaaclab"}
+_CLAUDE_ONLY_TAGS = {"claude", "claude_cli"}
 
 
 def _hermes_applicable(item: dict) -> bool:
     tags = set(item.get("tags", []))
     preferred = item.get("preferred_executor", "")
-    return bool(tags & _HERMES_TAGS) or preferred == "hermes"
+    if preferred == "claude_cli" or tags & _CLAUDE_ONLY_TAGS:
+        return False
+    return True
 
 
 def run_hermes(

@@ -38,8 +38,6 @@ KEEPALIVE_INTERVAL = 120      # seconds between CCC heartbeats while hermes runs
 POLL_INTERVAL = 60            # seconds between queue checks in --poll mode
 HERMES_MAX_ITERATIONS = 120   # pass to hermes for long-running tasks
 
-# Tags/executor hints that indicate a hermes task
-HERMES_TAGS = {"hermes", "gpu", "render", "simulation", "omniverse", "isaaclab", "vllm"}
 
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -325,8 +323,8 @@ def poll_queue() -> None:
                         continue
                     tags = set(item.get("tags", []))
                     preferred = item.get("preferred_executor", "")
-                    # Only take hermes-appropriate tasks
-                    if not (tags & HERMES_TAGS or preferred in HERMES_TAGS):
+                    # Skip tasks explicitly reserved for claude CLI
+                    if preferred == "claude_cli" or tags & {"claude", "claude_cli"}:
                         continue
                     item_id = item["id"]
                     title = item.get("title", "?")[:60]
