@@ -414,6 +414,10 @@ async fn post_heartbeat(
     if let Some(agent_obj) = agents.as_object_mut().and_then(|m| m.get_mut(&agent)) {
         if let Some(obj) = agent_obj.as_object_mut() {
             obj.insert("lastSeen".into(), json!(now));
+            // Update host if agent reports a better value (self-heals stale registry entries)
+            if let Some(h) = body.get("host").and_then(|h| h.as_str()) {
+                obj.insert("host".into(), json!(h));
+            }
             // Merge telemetry fields if present in the heartbeat payload
             for key in &telemetry_keys {
                 if let Some(val) = body.get(*key) {
