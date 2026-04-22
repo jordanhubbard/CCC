@@ -1,7 +1,7 @@
 //! Fleet task worker — polls /api/tasks, claims atomically, executes in AgentFS workspace.
 //!
-//! Work tasks run claude; review tasks run claude with a structured review prompt;
-//! phase_commit tasks run git to push approved work to a branch.
+//! Work tasks and review tasks are executed via the native Anthropic agentic loop in sdk.rs.
+//! Phase_commit tasks run git to push approved work to a branch.
 //! Multiple agents run this concurrently; the server's SQL atomic claim prevents double-work.
 
 use std::path::PathBuf;
@@ -14,7 +14,6 @@ use crate::peers;
 
 const POLL_IDLE: Duration = Duration::from_secs(30);
 const POLL_BUSY: Duration = Duration::from_secs(5);
-const WORK_TIMEOUT: Duration = Duration::from_secs(7200); // 2h per task
 
 pub async fn run(args: &[String]) {
     let max_concurrent: usize = args.iter()
@@ -220,7 +219,14 @@ async fn execute_task(cfg: &Config, client: &reqwest::Client, task: &Value, onli
     let ctx_path = workspace.join(".task-context.json");
     let _ = std::fs::write(&ctx_path, task.to_string());
 
-    let result = run_task_subprocess(cfg, task, &workspace).await;
+    let description = task["description"].as_str().unwrap_or("");
+    let prompt = if description.is_empty() {
+        title.to_string()
+    } else {
+        format!("{title}\n\n{description}")
+    };
+
+    let result = crate::sdk::run_agent(&prompt, &workspace, client).await;
 
     match result {
         Ok(output) => {
@@ -238,32 +244,6 @@ async fn execute_task(cfg: &Config, client: &reqwest::Client, task: &Value, onli
     }
 }
 
-async fn run_task_subprocess(_cfg: &Config, task: &Value, workspace: &PathBuf) -> Result<String, String> {
-    let description = task["description"].as_str().unwrap_or("");
-    let title = task["title"].as_str().unwrap_or("(task)");
-
-    let prompt = if description.is_empty() {
-        title.to_string()
-    } else {
-        format!("{}\n\n{}", title, description)
-    };
-
-    let claude = which_claude();
-    let mut cmd = Command::new(&claude);
-    cmd.args(["-p", &prompt, "--dangerously-skip-permissions"])
-       .current_dir(workspace)
-       .kill_on_drop(true);
-
-    let result = tokio::time::timeout(WORK_TIMEOUT, cmd.output()).await
-        .map_err(|_| "task timed out".to_string())?
-        .map_err(|e| format!("subprocess failed: {e}"))?;
-
-    if result.status.success() {
-        Ok(String::from_utf8_lossy(&result.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&result.stderr).to_string())
-    }
-}
 
 // ── Pair programming: submit for review ──────────────────────────────────────
 
@@ -342,7 +322,34 @@ async fn execute_review_task(cfg: &Config, client: &reqwest::Client, task: &Valu
     });
     let _ = std::fs::write(workspace.join(".review-context.json"), ctx.to_string());
 
-    let review_output = run_review_subprocess(cfg, task, &workspace, review_of_id, work_summary).await;
+    let review_prompt = format!(
+        "You are a code reviewer in an automated pair-programming workflow.\n\n\
+         Original task: {title}\n\
+         Original task ID: {review_of_id}\n\
+         Worker's own summary: {summary}\n\n\
+         The working directory contains the project files written by the worker.\n\n\
+         Review this work and respond with ONLY a single valid JSON object — no prose, no markdown:\n\
+         {{\n\
+           \"verdict\": \"approved\",\n\
+           \"reason\": \"<one sentence>\",\n\
+           \"gaps\": [\n\
+             {{\n\
+               \"title\": \"<short task title for the gap>\",\n\
+               \"description\": \"<what still needs to be done and why>\",\n\
+               \"priority\": 1\n\
+             }}\n\
+           ]\n\
+         }}\n\n\
+         Replace \"approved\" with \"rejected\" if there is a serious defect that must be fixed \
+         before this phase can be committed. Gaps may be filed even for approved work.\n\n\
+         Check for: (1) task completion, (2) consistency with existing code style and architecture, \
+         (3) any CI/CD blockers such as missing tests or broken imports, \
+         (4) remaining gaps the original task left unaddressed.",
+        title = task["title"].as_str().unwrap_or("(task)"),
+        summary = &work_summary[..work_summary.len().min(2000)],
+    );
+
+    let review_output = crate::sdk::run_agent(&review_prompt, &workspace, client).await;
 
     let (verdict, reason, gaps) = match review_output {
         Ok(out) => parse_review_output(&out),
@@ -376,58 +383,6 @@ async fn fetch_task_project_id(cfg: &Config, client: &reqwest::Client, task_id: 
             .and_then(|b| b["project_id"].as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| fallback_task["project_id"].as_str().unwrap_or("").to_string()),
         Err(_) => fallback_task["project_id"].as_str().unwrap_or("").to_string(),
-    }
-}
-
-async fn run_review_subprocess(
-    _cfg: &Config,
-    task: &Value,
-    workspace: &PathBuf,
-    review_of_id: &str,
-    work_summary: &str,
-) -> Result<String, String> {
-    let title = task["title"].as_str().unwrap_or("(task)");
-    let summary = &work_summary[..work_summary.len().min(2000)];
-
-    let prompt = format!(
-        "You are a code reviewer in an automated pair-programming workflow.\n\n\
-         Original task: {title}\n\
-         Original task ID: {review_of_id}\n\
-         Worker's own summary: {summary}\n\n\
-         The working directory contains the project files written by the worker.\n\n\
-         Review this work and respond with ONLY a single valid JSON object — no prose, no markdown:\n\
-         {{\n\
-           \"verdict\": \"approved\",\n\
-           \"reason\": \"<one sentence>\",\n\
-           \"gaps\": [\n\
-             {{\n\
-               \"title\": \"<short task title for the gap>\",\n\
-               \"description\": \"<what still needs to be done and why>\",\n\
-               \"priority\": 1\n\
-             }}\n\
-           ]\n\
-         }}\n\n\
-         Replace \"approved\" with \"rejected\" if there is a serious defect that must be fixed \
-         before this phase can be committed. Gaps may be filed even for approved work.\n\n\
-         Check for: (1) task completion, (2) consistency with existing code style and architecture, \
-         (3) any CI/CD blockers such as missing tests or broken imports, \
-         (4) remaining gaps the original task left unaddressed."
-    );
-
-    let claude = which_claude();
-    let mut cmd = Command::new(&claude);
-    cmd.args(["-p", &prompt, "--dangerously-skip-permissions"])
-       .current_dir(workspace)
-       .kill_on_drop(true);
-
-    let result = tokio::time::timeout(WORK_TIMEOUT, cmd.output()).await
-        .map_err(|_| "review timed out".to_string())?
-        .map_err(|e| format!("subprocess failed: {e}"))?;
-
-    if result.status.success() {
-        Ok(String::from_utf8_lossy(&result.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&result.stderr).to_string())
     }
 }
 
@@ -597,21 +552,6 @@ async fn unclaim_task(cfg: &Config, client: &reqwest::Client, task_id: &str) {
         .bearer_auth(&cfg.acc_token)
         .json(&serde_json::json!({"agent": cfg.agent_name}))
         .send().await;
-}
-
-fn which_claude() -> String {
-    for path in &["/usr/local/bin/claude", "/usr/bin/claude"] {
-        if std::path::Path::new(path).exists() {
-            return path.to_string();
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        for rel in &[".local/bin/claude", ".claude/local/claude"] {
-            let p = format!("{home}/{rel}");
-            if std::path::Path::new(&p).exists() { return p; }
-        }
-    }
-    "claude".to_string()
 }
 
 fn is_quenched(cfg: &Config) -> bool {

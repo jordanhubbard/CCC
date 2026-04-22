@@ -10,6 +10,7 @@ mod migrate;
 mod peers;
 mod proxy;
 mod queue;
+mod sdk;
 mod services;
 mod supervise;
 mod tasks;
