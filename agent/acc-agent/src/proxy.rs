@@ -38,10 +38,7 @@ pub async fn run(args: &[String]) {
         &crate::config::acc_dir().join(".env"),
     );
 
-    let mut port: u16 = std::env::var("ACC_PROXY_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(9099);
+    let mut port: u16 = 9099;
     let mut upstream = std::env::var("NVIDIA_API_BASE")
         .unwrap_or_else(|_| "https://inference-api.nvidia.com".into());
 
@@ -63,6 +60,11 @@ pub async fn run(args: &[String]) {
             _ => {}
         }
         i += 1;
+    }
+
+    // ACC_PROXY_PORT env var overrides CLI default (set in .env for port conflicts)
+    if let Some(env_port) = std::env::var("ACC_PROXY_PORT").ok().and_then(|v| v.parse().ok()) {
+        port = env_port;
     }
 
     let upstream = upstream.trim_end_matches('/').to_string();
