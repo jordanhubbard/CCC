@@ -10,6 +10,7 @@ pub struct ServiceDef {
     pub name: &'static str,
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub linux_unit: &'static str,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub macos_label: &'static str,
 }
 
