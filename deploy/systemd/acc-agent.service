@@ -1,15 +1,20 @@
 [Unit]
-Description=ACC Agent Pull Service
-After=network.target
+Description=ACC Agent Supervisor
+Documentation=https://github.com/{OWNER}/ACC
+After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 User=AGENT_USER
 EnvironmentFile=-AGENT_HOME/.acc/.env
-ExecStart=/bin/bash AGENT_HOME/.acc/workspace/deploy/agent-pull.sh
-StandardOutput=append:AGENT_HOME/.acc/logs/pull.log
-StandardError=append:AGENT_HOME/.acc/logs/pull.log
+Environment=PATH=AGENT_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=AGENT_HOME/.acc/bin/acc-agent supervise
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=acc-agent
 
 [Install]
 WantedBy=multi-user.target

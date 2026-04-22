@@ -479,7 +479,7 @@ async fn run_claude(
 }
 
 async fn run_hermes_driver(
-    cfg: &Config,
+    _cfg: &Config,
     item: &serde_json::Value,
     item_id: &str,
     task_env: &[(String, String)],

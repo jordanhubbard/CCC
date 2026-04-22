@@ -7,28 +7,28 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>PULL_SCRIPT_PATH</string>
+        <string>AGENT_HOME/.acc/bin/acc-agent</string>
+        <string>supervise</string>
     </array>
 
-    <key>StartInterval</key>
-    <integer>600</integer>
+    <key>KeepAlive</key>
+    <true/>
 
     <key>RunAtLoad</key>
     <true/>
 
     <key>StandardOutPath</key>
-    <string>LOG_PATH</string>
+    <string>AGENT_HOME/.acc/logs/supervise.log</string>
 
     <key>StandardErrorPath</key>
-    <string>LOG_PATH</string>
+    <string>AGENT_HOME/.acc/logs/supervise.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/jkh</string>
+        <string>AGENT_HOME</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <string>AGENT_HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub struct ServiceDef {
     pub name: &'static str,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub linux_unit: &'static str,
     pub macos_label: &'static str,
 }

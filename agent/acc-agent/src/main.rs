@@ -11,6 +11,7 @@ mod peers;
 mod proxy;
 mod queue;
 mod services;
+mod supervise;
 mod tasks;
 mod upgrade;
 
@@ -32,6 +33,7 @@ fn main() {
         "hermes" => tokio_run(hermes::run(rest)),
         "proxy" => tokio_run(proxy::run(rest)),
         "tasks" => tokio_run(tasks::run(rest)),
+        "supervise" => tokio_run(supervise::run(rest)),
         "upgrade" => tokio_run(upgrade::run_cli(rest)),
         cmd => {
             eprintln!("Unknown command: {cmd}");
@@ -59,7 +61,8 @@ fn print_help() {
     eprintln!("  acc-agent queue   (long-running daemon: queue worker)");
     eprintln!("  acc-agent hermes  (hermes session driver)");
     eprintln!("  acc-agent proxy   (long-running daemon: NVIDIA header-strip proxy)");
-    eprintln!("  acc-agent tasks  [--max=N]  (long-running daemon: fleet task worker)");
+    eprintln!("  acc-agent tasks     [--max=N]    (long-running daemon: fleet task worker)");
+    eprintln!("  acc-agent supervise [--dry-run]  (master supervisor: spawns all children)");
     eprintln!();
     eprintln!("MIGRATE:");
     eprintln!("  is-applied <name>            exit 0 if applied, 1 if not");

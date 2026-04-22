@@ -238,7 +238,7 @@ async fn execute_task(cfg: &Config, client: &reqwest::Client, task: &Value, onli
     }
 }
 
-async fn run_task_subprocess(cfg: &Config, task: &Value, workspace: &PathBuf) -> Result<String, String> {
+async fn run_task_subprocess(_cfg: &Config, task: &Value, workspace: &PathBuf) -> Result<String, String> {
     let description = task["description"].as_str().unwrap_or("");
     let title = task["title"].as_str().unwrap_or("(task)");
 
@@ -380,7 +380,7 @@ async fn fetch_task_project_id(cfg: &Config, client: &reqwest::Client, task_id: 
 }
 
 async fn run_review_subprocess(
-    cfg: &Config,
+    _cfg: &Config,
     task: &Value,
     workspace: &PathBuf,
     review_of_id: &str,

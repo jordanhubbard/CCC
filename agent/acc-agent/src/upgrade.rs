@@ -174,9 +174,20 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
         post_heartbeat(cfg).await;
     }
 
-    // ── 7. Re-exec self if needed ─────────────────────────────────────────────
+    // ── 7. Signal supervisor restart if needed ────────────────────────────────
     if needs_self_restart && !opts.dry_run {
-        log(cfg, "re-execing current binary (acc-bus-listener restart requested)");
+        let pid_path = cfg.acc_dir.join("supervisor.pid");
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                log(cfg, &format!("sending SIGUSR1 to supervisor (pid {pid})"));
+                let _ = std::process::Command::new("kill")
+                    .args(["-USR1", &pid.to_string()])
+                    .status();
+                return; // supervisor will stop+restart all children including us
+            }
+        }
+        // No supervisor running — fall back to re-exec self
+        log(cfg, "no supervisor.pid found — re-execing self");
         let current_exe = std::env::current_exe()
             .unwrap_or_else(|_| std::path::PathBuf::from("acc-agent"));
         let args: Vec<String> = std::env::args().collect();

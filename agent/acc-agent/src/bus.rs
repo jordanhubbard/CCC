@@ -27,6 +27,7 @@ struct BusMessage {
     from: Option<String>,
     to: Option<String>,
     body: Option<Value>,
+    #[allow(dead_code)]
     subject: Option<String>,
     /// MIME type for messages carrying inline content.
     mime: Option<String>,

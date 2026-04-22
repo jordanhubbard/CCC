@@ -28,6 +28,7 @@ pub struct ParamDef {
 #[derive(Debug, Deserialize, Clone)]
 pub struct CommandDef {
     pub name: String,
+    #[allow(dead_code)]
     pub description: Option<String>,
     /// Executable path or name (looked up via PATH). No shell.
     pub program: String,
