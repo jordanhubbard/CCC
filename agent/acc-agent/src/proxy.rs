@@ -38,7 +38,10 @@ pub async fn run(args: &[String]) {
         &crate::config::acc_dir().join(".env"),
     );
 
-    let mut port: u16 = 9099;
+    let mut port: u16 = std::env::var("ACC_PROXY_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(9099);
     let mut upstream = std::env::var("NVIDIA_API_BASE")
         .unwrap_or_else(|_| "https://inference-api.nvidia.com".into());
 

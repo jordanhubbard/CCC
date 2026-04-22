@@ -67,8 +67,11 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
     for script_file in &scripts {
         let script_name = script_file.trim_end_matches(".sh").to_string();
 
-        // Already applied?
-        if state.get(&script_name).map(|r| r.status == "ok").unwrap_or(false) {
+        // Skip migrations that have already been attempted (ok or failed).
+        // Re-running failed migrations causes infinite hangs for environment-specific
+        // failures (e.g. calico holding a port, consul not installed on macOS).
+        // To force a retry, manually remove the entry from migrations.json.
+        if state.contains_key(&script_name) {
             continue;
         }
 
