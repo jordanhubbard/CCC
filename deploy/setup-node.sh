@@ -167,6 +167,14 @@ else
   success "tmux present ($(tmux -V))"
 fi
 
+# python3-venv (required to create the hermes venv; Debian/Ubuntu splits this out)
+if [[ "$PLATFORM" == "linux" ]] && ! python3 -m venv --help &>/dev/null 2>&1; then
+  info "Installing python3-venv..."
+  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+  sudo apt-get install -y "python${PY_VER}-venv" 2>/dev/null || \
+    warn "Could not auto-install python${PY_VER}-venv. Run: sudo apt-get install -y python${PY_VER}-venv"
+fi
+
 # Claude Code CLI (primary coding executor)
 if command -v claude &>/dev/null; then
   success "Claude Code CLI present ($(claude --version 2>/dev/null | head -1))"

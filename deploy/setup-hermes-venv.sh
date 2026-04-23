@@ -43,14 +43,13 @@ fi
 
 echo "[hermes-venv] Using $PYTHON ($(${PYTHON} --version))"
 
-# On Ubuntu, python3-venv may need installing
-if ! "$PYTHON" -m venv --help &>/dev/null; then
+# On Ubuntu/Debian, python3-venv is a separate apt package. setup-node.sh installs it.
+if ! "$PYTHON" -m venv --help &>/dev/null 2>&1; then
     PY_VER=$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    echo "[hermes-venv] Installing python${PY_VER}-venv..."
-    sudo apt-get install -y "python${PY_VER}-venv" 2>/dev/null || {
-        echo "[hermes-venv] ERROR: could not install python${PY_VER}-venv" >&2
-        exit 1
-    }
+    echo "[hermes-venv] ERROR: python${PY_VER}-venv not installed." >&2
+    echo "  Run: sudo apt-get install -y python${PY_VER}-venv" >&2
+    echo "  Or:  bash ~/Src/ACC/deploy/setup-node.sh  (installs all prerequisites)" >&2
+    exit 1
 fi
 
 echo "[hermes-venv] Creating venv at ${VENV}"
