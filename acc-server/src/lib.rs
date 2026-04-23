@@ -2,6 +2,7 @@ pub mod brain;
 pub mod bus_types;
 pub mod config;
 pub mod db;
+pub mod dispatch;
 pub mod routes;
 pub mod state;
 pub mod supervisor;

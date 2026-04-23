@@ -1,4 +1,4 @@
-use acc_server::{brain, build_app, config, db, routes, state, AppState};
+use acc_server::{brain, build_app, config, db, dispatch, routes, state, AppState};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -147,6 +147,8 @@ async fn main() {
 
     let scanner_state = app_state.clone();
     tokio::spawn(routes::projects::run_beads_scanner(scanner_state));
+
+    tokio::spawn(dispatch::run(app_state.clone()));
 
     {
         let db = fleet_db.clone();
