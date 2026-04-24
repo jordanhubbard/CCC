@@ -45,6 +45,24 @@ pub enum Error {
 }
 
 impl Error {
+    /// Extract the HTTP status code for errors that carry one. Transport,
+    /// JSON, auth, and I/O errors return `None`.
+    pub fn status_code(&self) -> Option<u16> {
+        match self {
+            Error::Api { status, .. } => Some(*status),
+            Error::Unauthorized(_) => Some(401),
+            Error::NotFound(_) => Some(404),
+            Error::Conflict(_) => Some(409),
+            Error::Locked(_) => Some(423),
+            Error::AtCapacity(_) => Some(429),
+            Error::Http(_)
+            | Error::MalformedJson(_)
+            | Error::NoToken
+            | Error::InvalidToken
+            | Error::Io(_) => None,
+        }
+    }
+
     /// Build a typed error from an HTTP response body. Called by per-endpoint
     /// code after a non-2xx status.
     pub(crate) fn from_response(status: u16, body_bytes: &[u8]) -> Self {

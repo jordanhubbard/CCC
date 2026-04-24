@@ -8,6 +8,8 @@ name = "acc-agent"
 path = "src/main.rs"
 
 [dependencies]
+acc-client = { path = "../../acc-client" }
+acc-model  = { path = "../../acc-model" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

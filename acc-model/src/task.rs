@@ -49,13 +49,23 @@ impl_fromstr_via_serde!(TaskStatus);
 impl_fromstr_via_serde!(TaskType);
 impl_fromstr_via_serde!(ReviewResult);
 
+/// A fleet task.
+///
+/// Only `id` and `status` are strictly required; the server historically
+/// emits tasks with partial fields (and some test harnesses do too), so
+/// we default the rest. Callers that need a field which is semantically
+/// required in their context should check after deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
+    #[serde(default)]
     pub project_id: String,
+    #[serde(default)]
     pub title: String,
+    #[serde(default)]
     pub description: String,
     pub status: TaskStatus,
+    #[serde(default)]
     pub priority: i64,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,7 +80,8 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_by: Option<String>,
 
-    pub created_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
 
     #[serde(default)]
     pub metadata: Value,

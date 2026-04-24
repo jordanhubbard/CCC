@@ -1,47 +1,27 @@
 //! Peer discovery — query the hub for other agents in the cluster.
 //!
 //! Calls GET /api/agents/names?online=true and returns the list, excluding
-//! this agent's own name.  Results are best-effort: the hub's view lags by
+//! this agent's own name. Results are best-effort: the hub's view lags by
 //! at most one heartbeat interval (~30s).
 
-use std::time::Duration;
-use reqwest::Client;
 use crate::config::Config;
+use acc_client::Client;
 
 /// Return the names of all currently-online peers (excluding self).
 pub async fn list_peers(cfg: &Config, client: &Client) -> Vec<String> {
-    let url = format!("{}/api/agents/names?online=true", cfg.acc_url);
-    let resp = match client
-        .get(&url)
-        .bearer_auth(&cfg.acc_token)
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(_) => return vec![],
-    };
-    let body: serde_json::Value = match resp.json().await {
-        Ok(v) => v,
-        Err(_) => return vec![],
-    };
-    body["names"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .filter(|n| *n != cfg.agent_name.as_str())
-                .map(String::from)
-                .collect()
-        })
-        .unwrap_or_default()
+    match client.agents().names(true).await {
+        Ok(names) => names
+            .into_iter()
+            .filter(|n| n != cfg.agent_name.as_str())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hub_mock::{HubMock, HubState};
-    use serde_json::json;
 
     fn test_cfg(url: &str, name: &str) -> Config {
         Config {
@@ -58,13 +38,18 @@ mod tests {
         }
     }
 
+    fn client_for(url: &str) -> Client {
+        Client::new(url, "test-tok").expect("build client")
+    }
+
     #[tokio::test]
     async fn test_list_peers_returns_others() {
         let mock = HubMock::with_state(HubState {
             agent_names: vec!["boris".into(), "natasha".into(), "bullwinkle".into()],
             ..Default::default()
-        }).await;
-        let client = Client::new();
+        })
+        .await;
+        let client = client_for(&mock.url);
         let peers = list_peers(&test_cfg(&mock.url, "boris"), &client).await;
         assert!(!peers.contains(&"boris".to_string()), "must exclude self");
         assert!(peers.contains(&"natasha".to_string()));
@@ -76,8 +61,9 @@ mod tests {
         let mock = HubMock::with_state(HubState {
             agent_names: vec!["boris".into()],
             ..Default::default()
-        }).await;
-        let client = Client::new();
+        })
+        .await;
+        let client = client_for(&mock.url);
         let peers = list_peers(&test_cfg(&mock.url, "boris"), &client).await;
         assert!(peers.is_empty());
     }
@@ -85,7 +71,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_peers_hub_unreachable_returns_empty() {
         let cfg = test_cfg("http://127.0.0.1:1", "boris");
-        let client = Client::builder().timeout(Duration::from_secs(1)).build().unwrap();
+        let client = client_for(&cfg.acc_url);
         let peers = list_peers(&cfg, &client).await;
         assert!(peers.is_empty());
     }
@@ -93,7 +79,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_peers_no_agents_returns_empty() {
         let mock = HubMock::new().await;
-        let client = Client::new();
+        let client = client_for(&mock.url);
         let peers = list_peers(&test_cfg(&mock.url, "boris"), &client).await;
         assert!(peers.is_empty());
     }

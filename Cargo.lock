@@ -6,19 +6,22 @@ version = 4
 name = "acc"
 version = "0.1.0"
 dependencies = [
+ "acc-client",
+ "acc-model",
  "anyhow",
  "clap",
  "futures-util",
- "reqwest",
+ "serde",
  "serde_json",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
 name = "acc-agent"
 version = "0.1.0"
 dependencies = [
+ "acc-client",
+ "acc-model",
  "axum",
  "base64",
  "bytes",

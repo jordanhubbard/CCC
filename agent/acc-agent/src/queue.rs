@@ -78,7 +78,13 @@ pub async fn run(args: &[String]) {
             }
         };
 
-        let online_peers = peers::list_peers(&cfg, &client).await;
+        // Temporary bridge while queue.rs is still on reqwest: the peers
+        // module is already on acc-client. Build a per-cycle client just
+        // for this call. Removed once queue.rs finishes its port.
+        let online_peers = match acc_client::Client::new(&cfg.acc_url, &cfg.acc_token) {
+            Ok(c) => peers::list_peers(&cfg, &c).await,
+            Err(_) => Vec::new(),
+        };
         let item = select_item(&items, &cfg.agent_name, &caps, &online_peers);
         if let Some(item) = item {
             let item_id = item["id"].as_str().unwrap_or("").to_string();

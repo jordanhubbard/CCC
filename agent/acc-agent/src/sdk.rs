@@ -16,11 +16,13 @@ const API_CALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// Run an agentic loop for `prompt` inside `workspace`.
 /// Uses ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, CLAUDE_CODE_DEFAULT_MODEL from env.
 /// Returns the model's final text output.
-pub async fn run_agent(
-    prompt: &str,
-    workspace: &Path,
-    client: &reqwest::Client,
-) -> Result<String, String> {
+pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String> {
+    // sdk talks to the Anthropic API, not to ACC — it owns its own HTTP
+    // client. Callers don't need to supply one.
+    let client = reqwest::Client::builder()
+        .timeout(API_CALL_TIMEOUT)
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
     let api_base = std::env::var("ANTHROPIC_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
     let api_base = api_base.trim_end_matches('/').to_string();

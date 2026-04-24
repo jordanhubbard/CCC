@@ -14,6 +14,34 @@ impl<'a> AgentsApi<'a> {
         ListAgentsBuilder { client: self.client, online: None }
     }
 
+    /// GET /api/agents/names?online=...
+    ///
+    /// Lightweight list returning just agent names — useful for peer discovery
+    /// where the full agent envelope would be wasteful.
+    pub async fn names(self, online: bool) -> Result<Vec<String>> {
+        let mut q: Vec<(&'static str, String)> = Vec::new();
+        if online {
+            q.push(("online", "true".into()));
+        }
+        let resp = self
+            .client
+            .http()
+            .get(self.client.url("/api/agents/names"))
+            .query(&q)
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await?;
+        if !(200..300).contains(&status) {
+            return Err(Error::from_response(status, &bytes));
+        }
+        let env: NamesEnvelope = serde_json::from_slice(&bytes)?;
+        Ok(match env {
+            NamesEnvelope::Wrapped { names } => names,
+            NamesEnvelope::Bare(v) => v,
+        })
+    }
+
     /// GET /api/agents/{name}
     pub async fn get(self, name: &str) -> Result<Agent> {
         let resp = self
@@ -84,4 +112,11 @@ enum ListEnvelope {
 enum SingleEnvelope {
     Wrapped { agent: Agent },
     Bare(Agent),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum NamesEnvelope {
+    Wrapped { names: Vec<String> },
+    Bare(Vec<String>),
 }

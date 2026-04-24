@@ -11,6 +11,8 @@ use tokio::process::Command;
 use tokio::sync::Notify;
 use tokio::time::sleep;
 use serde_json::Value;
+use acc_client::Client;
+use acc_model::{CreateTaskRequest, ReviewResult, TaskStatus, TaskType};
 use crate::config::Config;
 use crate::peers;
 
@@ -36,10 +38,10 @@ pub async fn run(args: &[String]) {
     log(&cfg, &format!("starting (agent={}, hub={}, max_concurrent={}, pair_programming={})",
         cfg.agent_name, cfg.acc_url, max_concurrent, cfg.pair_programming));
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("http client");
+    let client = match Client::new(&cfg.acc_url, &cfg.acc_token) {
+        Ok(c) => c,
+        Err(e) => { eprintln!("[tasks] http client: {e}"); std::process::exit(1); }
+    };
 
     // Bus subscriber: wakes the poll loop immediately on dispatch nudge/assign
     let nudge = Arc::new(Notify::new());
@@ -196,56 +198,33 @@ pub async fn run(args: &[String]) {
 
 // ── Bus subscriber — wakes poll loop on dispatch nudge/assign ─────────────────
 
-async fn bus_subscriber(cfg: Config, client: reqwest::Client, nudge: Arc<Notify>) {
-    let url = format!("{}/bus/stream", cfg.acc_url);
+async fn bus_subscriber(cfg: Config, client: Client, nudge: Arc<Notify>) {
     loop {
-        match subscribe_sse(&cfg, &client, &url, &nudge).await {
+        match subscribe_bus(&cfg, &client, &nudge).await {
             Ok(()) => {}
             Err(e) => {
-                log(&cfg, &format!("[bus] SSE disconnected: {e}, reconnecting in 5s"));
+                log(&cfg, &format!("[bus] disconnected: {e}, reconnecting in 5s"));
                 sleep(Duration::from_secs(5)).await;
             }
         }
     }
 }
 
-async fn subscribe_sse(cfg: &Config, client: &reqwest::Client, url: &str, nudge: &Arc<Notify>) -> Result<(), String> {
+async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>) -> Result<(), String> {
     use futures_util::StreamExt;
+    let stream = client.bus().stream();
+    tokio::pin!(stream);
+    while let Some(msg) = stream.next().await {
+        let msg = msg.map_err(|e| e.to_string())?;
+        let kind = msg.kind.as_deref().unwrap_or("");
+        let to = msg.to.as_deref().unwrap_or("");
+        let is_directed_to_us = to == cfg.agent_name;
+        let is_broadcast = to.is_empty() || to == "null";
 
-    let resp = client.get(url)
-        .bearer_auth(&cfg.acc_token)
-        .send().await
-        .map_err(|e| e.to_string())?;
-
-    let mut stream = resp.bytes_stream();
-    let mut buf = String::new();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        buf.push_str(&String::from_utf8_lossy(&chunk));
-
-        // SSE frames are separated by double newline
-        while let Some(pos) = buf.find("\n\n") {
-            let frame = buf[..pos].to_string();
-            buf = buf[pos + 2..].to_string();
-
-            // Extract data: line from SSE frame
-            for line in frame.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                        let msg_type = v["type"].as_str().unwrap_or("");
-                        let to = v["to"].as_str().unwrap_or("");
-                        let is_directed_to_us = to == cfg.agent_name;
-                        let is_broadcast = to.is_empty() || to == "null";
-
-                        if msg_type == "tasks:dispatch_nudge" && (is_directed_to_us || is_broadcast) {
-                            nudge.notify_one();
-                        } else if msg_type == "tasks:dispatch_assigned" && is_directed_to_us {
-                            nudge.notify_one();
-                        }
-                    }
-                }
-            }
+        if kind == "tasks:dispatch_nudge" && (is_directed_to_us || is_broadcast) {
+            nudge.notify_one();
+        } else if kind == "tasks:dispatch_assigned" && is_directed_to_us {
+            nudge.notify_one();
         }
     }
     Ok(())
@@ -253,42 +232,44 @@ async fn subscribe_sse(cfg: &Config, client: &reqwest::Client, url: &str, nudge:
 
 // ── Fetching / claiming ───────────────────────────────────────────────────────
 
-async fn fetch_open_tasks(cfg: &Config, client: &reqwest::Client, limit: usize, task_type: &str) -> Result<Vec<Value>, String> {
-    let url = format!("{}/api/tasks?status=open&task_type={}&limit={}", cfg.acc_url, task_type, limit.max(1));
-    let resp = client.get(&url)
-        .bearer_auth(&cfg.acc_token)
-        .send().await
+async fn fetch_open_tasks(_cfg: &Config, client: &Client, limit: usize, task_type: &str) -> Result<Vec<Value>, String> {
+    let tt = parse_task_type(task_type).unwrap_or(TaskType::Work);
+    let tasks = client
+        .tasks()
+        .list()
+        .status(TaskStatus::Open)
+        .task_type(tt)
+        .limit(limit.max(1) as u32)
+        .send()
+        .await
         .map_err(|e| e.to_string())?;
-    let body: Value = resp.json().await.map_err(|e| e.to_string())?;
-    Ok(body["tasks"].as_array().cloned().unwrap_or_default())
+    Ok(tasks.into_iter().map(to_value).collect())
 }
 
-async fn count_active_tasks(cfg: &Config, client: &reqwest::Client) -> usize {
-    let url = format!("{}/api/tasks?status=claimed&agent={}", cfg.acc_url, cfg.agent_name);
-    let Ok(resp) = client.get(&url).bearer_auth(&cfg.acc_token).send().await else { return 0; };
-    let Ok(body): Result<Value, _> = resp.json().await else { return 0; };
-    body["count"].as_u64().unwrap_or(0) as usize
+async fn count_active_tasks(cfg: &Config, client: &Client) -> usize {
+    match client
+        .tasks()
+        .list()
+        .status(TaskStatus::Claimed)
+        .agent(cfg.agent_name.clone())
+        .send()
+        .await
+    {
+        Ok(tasks) => tasks.len(),
+        Err(_) => 0,
+    }
 }
 
-async fn claim_task(cfg: &Config, client: &reqwest::Client, task_id: &str) -> Result<Value, u16> {
-    let url = format!("{}/api/tasks/{}/claim", cfg.acc_url, task_id);
-    let resp = client.put(&url)
-        .bearer_auth(&cfg.acc_token)
-        .json(&serde_json::json!({"agent": cfg.agent_name}))
-        .send().await
-        .map_err(|_| 500u16)?;
-    let status = resp.status().as_u16();
-    if status == 200 {
-        let body: Value = resp.json().await.map_err(|_| 500u16)?;
-        Ok(body["task"].clone())
-    } else {
-        Err(status)
+async fn claim_task(cfg: &Config, client: &Client, task_id: &str) -> Result<Value, u16> {
+    match client.tasks().claim(task_id, &cfg.agent_name).await {
+        Ok(task) => Ok(to_value(task)),
+        Err(e) => Err(e.status_code().unwrap_or(500)),
     }
 }
 
 // ── Work task execution ───────────────────────────────────────────────────────
 
-async fn execute_task(cfg: &Config, client: &reqwest::Client, task: &Value, online_peers: &[String]) {
+async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers: &[String]) {
     let task_id = task["id"].as_str().unwrap_or("unknown");
     let title = task["title"].as_str().unwrap_or("(no title)");
     let project_id = task["project_id"].as_str().unwrap_or("");
@@ -302,29 +283,24 @@ async fn execute_task(cfg: &Config, client: &reqwest::Client, task: &Value, onli
     let _ = std::fs::write(&ctx_path, task.to_string());
 
     let description = task["description"].as_str().unwrap_or("");
-    let prompt = if description.is_empty() {
-        title.to_string()
-    } else {
-        format!("{title}\n\n{description}")
-    };
+    let prompt = format!(
+        "You are an autonomous coding agent. Your task is:\n\nTitle: {title}\n\nDescription:\n{description}\n\nYou are in a git workspace with existing code. Make the requested changes. When done, summarize what you did."
+    );
 
-    let result = crate::sdk::run_agent(&prompt, &workspace, client).await;
+    let result = crate::sdk::run_agent(&prompt, &workspace).await;
 
     match result {
         Ok(output) => {
-            log(cfg, &format!("task {task_id} completed: {}", &output[..output.len().min(120)]));
             if cfg.pair_programming {
                 submit_for_review(cfg, client, task, &output, online_peers).await;
             } else {
                 complete_task(cfg, client, task_id, &output).await;
+                log(cfg, &format!("completed {task_id}"));
             }
         }
         Err(e) => {
             log(cfg, &format!("task {task_id} failed: {e}"));
             unclaim_task(cfg, client, task_id).await;
-            // Back off before the outer loop can reclaim — prevents rapid retry hammering
-            // on rate limits or transient API errors.
-            sleep(POLL_IDLE).await;
         }
     }
 }
@@ -332,7 +308,7 @@ async fn execute_task(cfg: &Config, client: &reqwest::Client, task: &Value, onli
 
 // ── Pair programming: submit for review ──────────────────────────────────────
 
-async fn submit_for_review(cfg: &Config, client: &reqwest::Client, task: &Value, output: &str, online_peers: &[String]) {
+async fn submit_for_review(cfg: &Config, client: &Client, task: &Value, output: &str, online_peers: &[String]) {
     let task_id = task["id"].as_str().unwrap_or("");
     let project_id = task["project_id"].as_str().unwrap_or("");
     let title = task["title"].as_str().unwrap_or("(task)");
@@ -358,26 +334,21 @@ async fn submit_for_review(cfg: &Config, client: &reqwest::Client, task: &Value,
         "Review the completed work for task '{title}' (ID: {task_id}).\n\nWorker summary:\n{summary}\n\nCheck the shared project workspace for changes."
     );
 
-    let mut body = serde_json::json!({
-        "project_id": project_id,
-        "title": format!("Review: {title}"),
-        "description": review_desc,
-        "task_type": "review",
-        "review_of": task_id,
-        "priority": priority,
-        "metadata": meta,
-    });
-    if let Some(p) = phase {
-        body["phase"] = Value::String(p.to_string());
-    }
+    let req = CreateTaskRequest {
+        project_id: project_id.to_string(),
+        title: format!("Review: {title}"),
+        description: Some(review_desc),
+        priority: Some(priority),
+        task_type: Some(TaskType::Review),
+        review_of: Some(task_id.to_string()),
+        phase: phase.map(|p| p.to_string()),
+        metadata: Some(meta),
+        ..Default::default()
+    };
 
-    let url = format!("{}/api/tasks", cfg.acc_url);
-    match client.post(&url).bearer_auth(&cfg.acc_token).json(&body).send().await {
-        Ok(resp) => {
-            let review_id = resp.json::<Value>().await.ok()
-                .and_then(|b| b["task"]["id"].as_str().map(|s| s.to_string()))
-                .unwrap_or_default();
-            log(cfg, &format!("submitted {task_id} for review → {review_id} (reviewer: {})",
+    match client.tasks().create(&req).await {
+        Ok(review) => {
+            log(cfg, &format!("submitted {task_id} for review → {} (reviewer: {})", review.id,
                 if reviewer.is_empty() { "any" } else { reviewer }));
         }
         Err(e) => log(cfg, &format!("failed to create review task: {e}")),
@@ -386,7 +357,7 @@ async fn submit_for_review(cfg: &Config, client: &reqwest::Client, task: &Value,
 
 // ── Review task execution ─────────────────────────────────────────────────────
 
-async fn execute_review_task(cfg: &Config, client: &reqwest::Client, task: &Value) {
+async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
     let task_id = task["id"].as_str().unwrap_or("unknown");
     let review_of_id = task["review_of"].as_str().unwrap_or("");
     let phase = task["phase"].as_str().unwrap_or("");
@@ -434,7 +405,7 @@ async fn execute_review_task(cfg: &Config, client: &reqwest::Client, task: &Valu
         summary = &work_summary[..work_summary.len().min(2000)],
     );
 
-    let review_output = crate::sdk::run_agent(&review_prompt, &workspace, client).await;
+    let review_output = crate::sdk::run_agent(&review_prompt, &workspace).await;
 
     let (verdict, reason, gaps) = match review_output {
         Ok(out) => parse_review_output(&out),
@@ -458,15 +429,12 @@ async fn execute_review_task(cfg: &Config, client: &reqwest::Client, task: &Valu
     log(cfg, &format!("review {task_id} done: {verdict} ({} gaps filed)", gaps.len()));
 }
 
-async fn fetch_task_project_id(cfg: &Config, client: &reqwest::Client, task_id: &str, fallback_task: &Value) -> String {
+async fn fetch_task_project_id(_cfg: &Config, client: &Client, task_id: &str, fallback_task: &Value) -> String {
     if task_id.is_empty() {
         return fallback_task["project_id"].as_str().unwrap_or("").to_string();
     }
-    let url = format!("{}/api/tasks/{}", cfg.acc_url, task_id);
-    match client.get(&url).bearer_auth(&cfg.acc_token).send().await {
-        Ok(r) => r.json::<Value>().await.ok()
-            .and_then(|b| b["project_id"].as_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| fallback_task["project_id"].as_str().unwrap_or("").to_string()),
+    match client.tasks().get(task_id).await {
+        Ok(task) => task.project_id,
         Err(_) => fallback_task["project_id"].as_str().unwrap_or("").to_string(),
     }
 }
@@ -488,46 +456,42 @@ fn parse_review_output(output: &str) -> (String, String, Vec<Value>) {
     }
 }
 
-async fn create_gap_task(cfg: &Config, client: &reqwest::Client, project_id: &str, phase: &str, review_task_id: &str, gap: &Value) {
+async fn create_gap_task(cfg: &Config, client: &Client, project_id: &str, phase: &str, review_task_id: &str, gap: &Value) {
     let title = gap["title"].as_str().unwrap_or("Gap task").to_string();
     let description = gap["description"].as_str().unwrap_or("").to_string();
     let priority = gap["priority"].as_i64().unwrap_or(2);
 
-    let mut body = serde_json::json!({
-        "project_id": project_id,
-        "task_type": "work",
-        "title": title,
-        "description": description,
-        "priority": priority,
-        "metadata": {"spawned_by_review": review_task_id},
-    });
-    if !phase.is_empty() {
-        body["phase"] = Value::String(phase.to_string());
-    }
+    let req = CreateTaskRequest {
+        project_id: project_id.to_string(),
+        title: title.clone(),
+        description: Some(description),
+        priority: Some(priority),
+        task_type: Some(TaskType::Work),
+        phase: (!phase.is_empty()).then(|| phase.to_string()),
+        metadata: Some(serde_json::json!({"spawned_by_review": review_task_id})),
+        ..Default::default()
+    };
 
-    let url = format!("{}/api/tasks", cfg.acc_url);
-    match client.post(&url).bearer_auth(&cfg.acc_token).json(&body).send().await {
-        Ok(resp) => {
-            let gap_id = resp.json::<Value>().await.ok()
-                .and_then(|b| b["task"]["id"].as_str().map(|s| s.to_string()))
-                .unwrap_or_default();
-            log(cfg, &format!("filed gap task {gap_id}: {title}"));
-        }
+    match client.tasks().create(&req).await {
+        Ok(task) => log(cfg, &format!("filed gap task {}: {title}", task.id)),
         Err(e) => log(cfg, &format!("failed to create gap task: {e}")),
     }
 }
 
-async fn set_review_result_on_task(cfg: &Config, client: &reqwest::Client, task_id: &str, verdict: &str, reason: &str) {
-    let url = format!("{}/api/tasks/{}/review-result", cfg.acc_url, task_id);
-    let _ = client.put(&url)
-        .bearer_auth(&cfg.acc_token)
-        .json(&serde_json::json!({"agent": cfg.agent_name, "result": verdict, "notes": reason}))
-        .send().await;
+async fn set_review_result_on_task(cfg: &Config, client: &Client, task_id: &str, verdict: &str, reason: &str) {
+    let result = match verdict {
+        "approved" => ReviewResult::Approved,
+        _ => ReviewResult::Rejected,
+    };
+    let _ = client
+        .tasks()
+        .review_result(task_id, result, Some(&cfg.agent_name), Some(reason))
+        .await;
 }
 
 // ── Phase commit task execution ───────────────────────────────────────────────
 
-async fn execute_phase_commit_task(cfg: &Config, client: &reqwest::Client, task: &Value) {
+async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) {
     let task_id = task["id"].as_str().unwrap_or("unknown");
     let project_id = task["project_id"].as_str().unwrap_or("");
     let phase = task["phase"].as_str().unwrap_or("unknown");
@@ -548,17 +512,15 @@ async fn execute_phase_commit_task(cfg: &Config, client: &reqwest::Client, task:
             log(cfg, &format!("phase_commit {task_id} git failed: {e}"));
             unclaim_task(cfg, client, task_id).await;
             // File investigation task
-            let url = format!("{}/api/tasks", cfg.acc_url);
-            let _ = client.post(&url)
-                .bearer_auth(&cfg.acc_token)
-                .json(&serde_json::json!({
-                    "project_id": project_id,
-                    "task_type": "work",
-                    "title": format!("Investigate git failure: phase {phase}"),
-                    "description": format!("Phase commit failed for {task_id}: {e}"),
-                    "priority": 0,
-                }))
-                .send().await;
+            let req = CreateTaskRequest {
+                project_id: project_id.to_string(),
+                title: format!("Investigate git failure: phase {phase}"),
+                description: Some(format!("Phase commit failed for {task_id}: {e}")),
+                priority: Some(0),
+                task_type: Some(TaskType::Work),
+                ..Default::default()
+            };
+            let _ = client.tasks().create(&req).await;
         }
     }
 }
@@ -623,20 +585,16 @@ async fn resolve_workspace(cfg: &Config, project_id: &str, task_id: &str) -> Pat
     }
 }
 
-async fn complete_task(cfg: &Config, client: &reqwest::Client, task_id: &str, output: &str) {
-    let url = format!("{}/api/tasks/{}/complete", cfg.acc_url, task_id);
-    let _ = client.put(&url)
-        .bearer_auth(&cfg.acc_token)
-        .json(&serde_json::json!({"agent": cfg.agent_name, "output": &output[..output.len().min(4096)]}))
-        .send().await;
+async fn complete_task(cfg: &Config, client: &Client, task_id: &str, output: &str) {
+    let truncated = &output[..output.len().min(4096)];
+    let _ = client
+        .tasks()
+        .complete(task_id, Some(&cfg.agent_name), Some(truncated))
+        .await;
 }
 
-async fn unclaim_task(cfg: &Config, client: &reqwest::Client, task_id: &str) {
-    let url = format!("{}/api/tasks/{}/unclaim", cfg.acc_url, task_id);
-    let _ = client.put(&url)
-        .bearer_auth(&cfg.acc_token)
-        .json(&serde_json::json!({"agent": cfg.agent_name}))
-        .send().await;
+async fn unclaim_task(cfg: &Config, client: &Client, task_id: &str) {
+    let _ = client.tasks().unclaim(task_id, Some(&cfg.agent_name)).await;
 }
 
 fn is_quenched(cfg: &Config) -> bool {
@@ -652,6 +610,15 @@ fn log(cfg: &Config, msg: &str) {
         use std::io::Write;
         let _ = writeln!(f, "{line}");
     }
+}
+
+fn parse_task_type(s: &str) -> Option<TaskType> {
+    use std::str::FromStr;
+    TaskType::from_str(s).ok()
+}
+
+fn to_value<T: serde::Serialize>(v: T) -> Value {
+    serde_json::to_value(v).unwrap_or(Value::Null)
 }
 
 #[cfg(test)]
@@ -675,8 +642,8 @@ mod tests {
         }
     }
 
-    fn test_cfg_no_pp(url: &str) -> Config {
-        Config { pair_programming: false, ..test_cfg(url) }
+    fn test_client(url: &str) -> Client {
+        Client::new(url, "test-token").expect("build client")
     }
 
     // ── fetch_open_tasks ──────────────────────────────────────────────────────
@@ -687,7 +654,7 @@ mod tests {
             json!({"id": "t-1", "title": "Alpha", "status": "open", "task_type": "work"}),
             json!({"id": "t-2", "title": "Beta",  "status": "open", "task_type": "work"}),
         ]).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0]["id"], "t-1");
@@ -696,7 +663,7 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_open_tasks_empty_hub() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
         assert!(tasks.is_empty());
     }
@@ -707,7 +674,7 @@ mod tests {
             json!({"id": "open-1",   "status": "open",    "task_type": "work"}),
             json!({"id": "claimed-1","status": "claimed", "task_type": "work"}),
         ]).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["id"], "open-1");
@@ -720,7 +687,7 @@ mod tests {
             json!({"id": "r-1", "status": "open", "task_type": "review"}),
             json!({"id": "p-1", "status": "open", "task_type": "phase_commit"}),
         ]).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let work = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
         assert_eq!(work.len(), 1);
         assert_eq!(work[0]["id"], "w-1");
@@ -733,9 +700,7 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_open_tasks_hub_unreachable() {
         let cfg = test_cfg("http://127.0.0.1:1");
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(1))
-            .build().unwrap();
+        let client = test_client(&cfg.acc_url);
         let result = fetch_open_tasks(&cfg, &client, 5, "work").await;
         assert!(result.is_err(), "unreachable hub must return Err");
     }
@@ -752,7 +717,7 @@ mod tests {
             ],
             ..Default::default()
         }).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
         assert_eq!(count, 2);
     }
@@ -762,7 +727,7 @@ mod tests {
         let mock = HubMock::with_tasks(vec![
             json!({"id": "o1", "status": "open"}),
         ]).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
         assert_eq!(count, 0);
     }
@@ -772,7 +737,7 @@ mod tests {
     #[tokio::test]
     async fn test_claim_task_success_returns_task() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-xyz").await;
         assert!(result.is_ok(), "200 → Ok");
         assert_eq!(result.unwrap()["id"], "task-xyz");
@@ -781,7 +746,7 @@ mod tests {
     #[tokio::test]
     async fn test_claim_task_conflict_returns_err_409() {
         let mock = HubMock::with_state(HubState { task_claim_status: 409, ..Default::default() }).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-abc").await;
         assert!(matches!(result, Err(409)), "409 → Err(409)");
     }
@@ -789,7 +754,7 @@ mod tests {
     #[tokio::test]
     async fn test_claim_task_rate_limited_returns_err_429() {
         let mock = HubMock::with_state(HubState { task_claim_status: 429, ..Default::default() }).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-def").await;
         assert!(matches!(result, Err(429)), "429 → Err(429)");
     }
@@ -797,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn test_claim_task_blocked_returns_err_423() {
         let mock = HubMock::with_state(HubState { task_claim_status: 423, ..Default::default() }).await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-blocked").await;
         assert!(matches!(result, Err(423)), "423 → Err(423)");
     }
@@ -854,7 +819,7 @@ mod tests {
     #[tokio::test]
     async fn test_submit_for_review_picks_non_self_peer() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let cfg = Config {
             agent_name: "boris".to_string(),
             pair_programming: true,
@@ -875,7 +840,7 @@ mod tests {
     #[tokio::test]
     async fn test_submit_for_review_no_peers_no_preferred() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let cfg = Config {
             agent_name: "natasha".to_string(),
             pair_programming: true,
@@ -896,7 +861,7 @@ mod tests {
     #[tokio::test]
     async fn test_submit_for_review_self_only_peer_no_preferred() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let client = test_client(&mock.url);
         let cfg = Config {
             agent_name: "natasha".to_string(),
             pair_programming: true,
