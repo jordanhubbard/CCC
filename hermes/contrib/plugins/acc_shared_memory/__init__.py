@@ -30,12 +30,12 @@ Environment variables:
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-import subprocess
-import time
 import re
+import time
+
+from acc_client import ApiError, Client, NoToken
 
 logger = logging.getLogger(__name__)
 
@@ -58,50 +58,41 @@ _STOP_WORDS = frozenset({
 _call_counter = 0
 _session_user_message = ""  # captured from first pre_llm_call
 
+# Module-level client, lazy-initialized on first use. Set to False after a
+# failed attempt so we don't retry every call.
+_client: Client | None | bool = None
+
 
 def _enabled() -> bool:
     return os.environ.get("ACC_MEMORY_ENABLED", "1") not in ("0", "false", "no")
 
 
-def _cfg() -> tuple[str, str, str]:
-    """Return (acc_url, token, agent_name). Raises if not configured."""
-    url = os.environ.get("ACC_URL", os.environ.get("CCC_URL", "")).rstrip("/")
-    token = os.environ.get("CCC_AGENT_TOKEN", "")
-    name = (
+def _agent_name() -> str:
+    return (
         os.environ.get("ACC_AGENT_NAME")
         or os.environ.get("CCC_AGENT_NAME")
         or os.environ.get("AGENT_NAME")
         or os.uname().nodename.split(".")[0]
     )
-    if not url or not token:
-        raise RuntimeError("ACC_URL (or CCC_URL) and CCC_AGENT_TOKEN must be set")
-    return url, token, name
 
 
-def _http(method: str, path: str, body: dict | None = None) -> dict | None:
-    """Synchronous curl to ACC hub. Returns parsed JSON or None."""
-    try:
-        url, token, _ = _cfg()
-    except RuntimeError:
+def _get_client() -> Client | None:
+    """Return a cached Client, or None if the hub isn't reachable/configured."""
+    global _client
+    if _client is False:
         return None
-
-    cmd = [
-        "curl", "-sf", "--max-time", "12",
-        "-X", method,
-        "-H", f"Authorization: Bearer {token}",
-        "-H", "Content-Type: application/json",
-    ]
-    if body is not None:
-        cmd += ["-d", json.dumps(body)]
-    cmd.append(f"{url}{path}")
-
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if r.returncode == 0 and r.stdout.strip():
-            return json.loads(r.stdout)
-    except Exception as e:
-        logger.debug("acc_shared_memory request failed: %s", e)
-    return None
+    if _client is None:
+        try:
+            _client = Client.from_env()
+        except NoToken as e:
+            logger.info("acc_shared_memory: no token — disabled (%s)", e)
+            _client = False
+            return None
+        except Exception as e:  # pragma: no cover — unexpected startup error
+            logger.warning("acc_shared_memory: client init failed — disabled: %s", e)
+            _client = False
+            return None
+    return _client  # type: ignore[return-value]
 
 
 # ── Query term extraction ──────────────────────────────────────────────────────
@@ -174,16 +165,20 @@ def _render_results(results: list[dict], budget: int = _TOKEN_BUDGET) -> str:
 
 def _search_fleet_memory(query: str) -> str:
     """Query ACC /api/memory/search and return tiered rendered context."""
-    payload = {
-        "query": query,
-        "limit": _SEARCH_LIMIT,
-        "collection": "acc_memory",
-    }
-    resp = _http("POST", "/api/memory/search", payload)
-    if not resp:
+    client = _get_client()
+    if client is None:
+        return ""
+    try:
+        results = client.memory.search(
+            query=query, limit=_SEARCH_LIMIT, collection="acc_memory"
+        )
+    except ApiError as e:
+        logger.debug("acc_shared_memory: search returned %s", e)
+        return ""
+    except Exception as e:  # transport / timeout
+        logger.debug("acc_shared_memory: search failed: %s", e)
         return ""
 
-    results = resp.get("results", [])
     if not results:
         return ""
 
@@ -191,11 +186,7 @@ def _search_fleet_memory(query: str) -> str:
     if not rendered:
         return ""
 
-    try:
-        _, _, name = _cfg()
-    except RuntimeError:
-        name = "?"
-
+    name = _agent_name()
     logger.debug("acc_shared_memory: injecting %d results (%d chars)",
                  len(results), len(rendered))
     return (
@@ -212,24 +203,25 @@ def _store_memory(text: str, tags: list[str] | None = None, session_id: str = ""
     """Store text in ACC shared memory with agent provenance."""
     if not text.strip():
         return
-    try:
-        _, _, name = _cfg()
-    except RuntimeError:
+    client = _get_client()
+    if client is None:
         return
 
-    payload = {
-        "text": text[:6000],  # Qdrant payload size limit
-        "metadata": {
-            "agent": name,
-            "session_id": session_id,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "tags": tags or [],
-            "source": "hermes_session",
-        },
+    name = _agent_name()
+    metadata = {
+        "agent": name,
+        "session_id": session_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "tags": tags or [],
+        "source": "hermes_session",
     }
-    ok = _http("POST", "/api/memory/store", payload)
-    if ok:
+    try:
+        client.memory.store(text[:6000], metadata=metadata)
         logger.debug("acc_shared_memory: stored %d chars (agent=%s)", len(text), name)
+    except ApiError as e:
+        logger.debug("acc_shared_memory: store returned %s", e)
+    except Exception as e:  # transport / timeout
+        logger.debug("acc_shared_memory: store failed: %s", e)
 
 
 # ── Hook handlers ──────────────────────────────────────────────────────────────
@@ -315,14 +307,15 @@ def register(ctx) -> None:
         logger.info("acc_shared_memory: disabled via ACC_MEMORY_ENABLED=0")
         return
 
-    try:
-        url, _, name = _cfg()
-    except RuntimeError as e:
-        logger.info("acc_shared_memory: skipping — %s", e)
+    client = _get_client()
+    if client is None:
+        logger.info("acc_shared_memory: skipping — no ACC client available")
         return
 
-    logger.info("acc_shared_memory: active (hub=%s agent=%s store_every=%d)",
-                url, name, _STORE_EVERY_N)
+    logger.info(
+        "acc_shared_memory: active (hub=%s agent=%s store_every=%d)",
+        client.base_url, _agent_name(), _STORE_EVERY_N,
+    )
 
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_hook("post_llm_call", _post_llm_call)

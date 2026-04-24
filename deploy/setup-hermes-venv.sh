@@ -6,6 +6,7 @@ set -euo pipefail
 
 VENV="${HOME}/.acc/hermes-venv"
 HERMES_SRC="${HOME}/Src/ACC/hermes"
+ACC_CLIENT_SRC="${HOME}/Src/ACC/clients/python/acc_client"
 
 if [ ! -d "${HERMES_SRC}" ]; then
     echo "[hermes-venv] ERROR: hermes source not found at ${HERMES_SRC}" >&2
@@ -59,7 +60,12 @@ echo "[hermes-venv] Upgrading pip"
 "${VENV}/bin/pip" install --quiet --upgrade pip
 
 echo "[hermes-venv] Installing hermes from ${HERMES_SRC}"
-"${VENV}/bin/pip" install --quiet -e "${HERMES_SRC}"
+"${VENV}/bin/pip" install --quiet -e "${HERMES_SRC}[slack]"
+
+if [ -d "${ACC_CLIENT_SRC}" ]; then
+    echo "[hermes-venv] Installing acc_client from ${ACC_CLIENT_SRC}"
+    "${VENV}/bin/pip" install --quiet -e "${ACC_CLIENT_SRC}"
+fi
 
 echo "[hermes-venv] Installing hermes wrapper at ~/.local/bin/hermes"
 mkdir -p "${HOME}/.local/bin"
