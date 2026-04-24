@@ -9,6 +9,8 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::sleep;
 
+use acc_client::Client;
+use acc_model::HeartbeatRequest;
 use crate::config::Config;
 
 const MAX_RESUME_ATTEMPTS: u32 = 6;
@@ -44,7 +46,7 @@ pub async fn run(args: &[String]) {
         i += 1;
     }
 
-    let client = build_client();
+    let client = build_client(&cfg);
 
     if poll {
         poll_queue(&cfg, &client).await;
@@ -60,7 +62,7 @@ pub async fn run(args: &[String]) {
 
 async fn run_task(
     cfg: &Config,
-    client: &reqwest::Client,
+    client: &Client,
     query: Option<String>,
     item_id: Option<String>,
     session_id: Option<String>,
@@ -303,7 +305,7 @@ async fn run_gateway(cfg: &Config) {
 }
 
 // Queue poll mode
-async fn poll_queue(cfg: &Config, client: &reqwest::Client) {
+async fn poll_queue(cfg: &Config, client: &Client) {
     log(cfg, &format!("starting queue poll (agent={}, hub={})", cfg.agent_name, cfg.acc_url));
     loop {
         if let Some(item) = fetch_hermes_item(cfg, client).await {
@@ -321,34 +323,27 @@ async fn poll_queue(cfg: &Config, client: &reqwest::Client) {
     }
 }
 
-async fn fetch_hermes_item(cfg: &Config, client: &reqwest::Client) -> Option<serde_json::Value> {
-    let resp = client
-        .get(format!("{}/api/queue", cfg.acc_url))
-        .header("Authorization", format!("Bearer {}", cfg.acc_token))
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await
-        .ok()?;
-    let data: serde_json::Value = resp.json().await.ok()?;
-    let items = data.as_array()
-        .cloned()
-        .or_else(|| data["items"].as_array().cloned())?;
+async fn fetch_hermes_item(cfg: &Config, client: &Client) -> Option<serde_json::Value> {
+    let items = client.queue().list().await.ok()?;
     for item in items {
-        if item["status"].as_str() != Some("pending") { continue; }
-        let assignee = item["assignee"].as_str().unwrap_or("");
+        let raw = serde_json::to_value(&item).ok()?;
+        if raw["status"].as_str() != Some("pending") {
+            continue;
+        }
+        let assignee = raw["assignee"].as_str().unwrap_or("");
         if !assignee.is_empty() && assignee != "all" && assignee != cfg.agent_name.as_str() {
             continue;
         }
         // Skip tasks explicitly reserved for claude CLI
-        let tags: Vec<&str> = item["tags"]
+        let tags: Vec<&str> = raw["tags"]
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_default();
-        let preferred = item["preferred_executor"].as_str().unwrap_or("");
+        let preferred = raw["preferred_executor"].as_str().unwrap_or("");
         let is_claude_only = preferred == "claude_cli"
             || tags.iter().any(|t| CLAUDE_ONLY_TAGS.contains(t));
         if !is_claude_only {
-            return Some(item);
+            return Some(raw);
         }
     }
     None
@@ -356,76 +351,46 @@ async fn fetch_hermes_item(cfg: &Config, client: &reqwest::Client) -> Option<ser
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
-async fn api_claim(cfg: &Config, client: &reqwest::Client, item_id: &str) -> bool {
-    let body = serde_json::json!({"agent": cfg.agent_name, "note": "hermes-driver claiming"});
-    let resp = client
-        .post(format!("{}/api/item/{item_id}/claim", cfg.acc_url))
-        .header("Authorization", format!("Bearer {}", cfg.acc_token))
-        .json(&body)
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await;
-    resp.map(|r| r.status().is_success()).unwrap_or(false)
+async fn api_claim(cfg: &Config, client: &Client, item_id: &str) -> bool {
+    client
+        .items()
+        .claim(item_id, &cfg.agent_name, Some("hermes-driver claiming"))
+        .await
+        .is_ok()
 }
 
-async fn post_heartbeat(cfg: &Config, client: &reqwest::Client, note: &str) {
-    let body = serde_json::json!({
-        "ts": chrono::Utc::now().to_rfc3339(),
-        "status": "ok",
-        "note": &note[..note.len().min(200)],
-        "host": cfg.host,
-        "ssh_user": cfg.ssh_user,
-        "ssh_host": cfg.ssh_host,
-        "ssh_port": cfg.ssh_port,
-    });
+async fn post_heartbeat(cfg: &Config, client: &Client, note: &str) {
+    let truncated = &note[..note.len().min(200)];
+    let req = HeartbeatRequest {
+        ts: Some(chrono::Utc::now()),
+        status: Some("ok".into()),
+        note: Some(truncated.into()),
+        host: Some(cfg.host.clone()),
+        ssh_user: Some(cfg.ssh_user.clone()),
+        ssh_host: Some(cfg.ssh_host.clone()),
+        ssh_port: Some(cfg.ssh_port as u64),
+    };
+    let _ = client.items().heartbeat(&cfg.agent_name, &req).await;
+}
+
+async fn post_keepalive(cfg: &Config, client: &Client, item_id: &str, note: &str) {
     let _ = client
-        .post(format!("{}/api/heartbeat/{}", cfg.acc_url, cfg.agent_name))
-        .header("Authorization", format!("Bearer {}", cfg.acc_token))
-        .json(&body)
-        .timeout(Duration::from_secs(10))
-        .send()
+        .items()
+        .keepalive(item_id, &cfg.agent_name, Some(note))
         .await;
 }
 
-async fn post_keepalive(cfg: &Config, client: &reqwest::Client, item_id: &str, note: &str) {
-    let body = serde_json::json!({"agent": cfg.agent_name, "note": note});
-    let _ = client
-        .post(format!("{}/api/item/{item_id}/keepalive", cfg.acc_url))
-        .header("Authorization", format!("Bearer {}", cfg.acc_token))
-        .json(&body)
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await;
-}
-
-async fn post_complete(cfg: &Config, client: &reqwest::Client, item_id: &str, result: &str) {
+async fn post_complete(cfg: &Config, client: &Client, item_id: &str, result: &str) {
     let truncated = &result[..result.len().min(4000)];
-    let body = serde_json::json!({
-        "agent": cfg.agent_name,
-        "result": truncated,
-        "resolution": truncated,
-    });
     let _ = client
-        .post(format!("{}/api/item/{item_id}/complete", cfg.acc_url))
-        .header("Authorization", format!("Bearer {}", cfg.acc_token))
-        .json(&body)
-        .timeout(Duration::from_secs(15))
-        .send()
+        .items()
+        .complete(item_id, &cfg.agent_name, Some(truncated), Some(truncated))
         .await;
 }
 
-async fn post_fail(cfg: &Config, client: &reqwest::Client, item_id: &str, reason: &str) {
-    let body = serde_json::json!({
-        "agent": cfg.agent_name,
-        "reason": &reason[..reason.len().min(2000)],
-    });
-    let _ = client
-        .post(format!("{}/api/item/{item_id}/fail", cfg.acc_url))
-        .header("Authorization", format!("Bearer {}", cfg.acc_token))
-        .json(&body)
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await;
+async fn post_fail(cfg: &Config, client: &Client, item_id: &str, reason: &str) {
+    let truncated = &reason[..reason.len().min(2000)];
+    let _ = client.items().fail(item_id, &cfg.agent_name, truncated).await;
 }
 
 fn log(cfg: &Config, msg: &str) {
@@ -443,11 +408,8 @@ fn log(cfg: &Config, msg: &str) {
     }
 }
 
-fn build_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("failed to build HTTP client")
+fn build_client(cfg: &Config) -> Client {
+    Client::new(&cfg.acc_url, &cfg.acc_token).expect("failed to build HTTP client")
 }
 
 // Helper trait for setting optional env vars on Command
@@ -512,7 +474,8 @@ mod tests {
             json!({"id": "wq-h1", "status": "pending", "assignee": "all",
                    "tags": ["hermes"], "preferred_executor": ""}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_some(), "hermes-tagged item should be returned");
         assert_eq!(item.unwrap()["id"], "wq-h1");
@@ -524,7 +487,8 @@ mod tests {
             json!({"id": "wq-g1", "status": "pending", "assignee": "all",
                    "tags": ["gpu", "render"], "preferred_executor": ""}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_some());
         assert_eq!(item.unwrap()["id"], "wq-g1");
@@ -536,7 +500,8 @@ mod tests {
             json!({"id": "wq-pe", "status": "pending", "assignee": "all",
                    "tags": [], "preferred_executor": "hermes"}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_some());
     }
@@ -547,7 +512,8 @@ mod tests {
             json!({"id": "wq-c1", "status": "pending", "assignee": "all",
                    "tags": ["docs", "claude_cli"], "preferred_executor": "claude_cli"}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_none(), "claude_cli item should be skipped");
     }
@@ -558,7 +524,8 @@ mod tests {
             json!({"id": "wq-code1", "status": "pending", "assignee": "all",
                    "tags": ["code", "reasoning"], "preferred_executor": ""}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_some(), "coding task should be accepted by hermes");
         assert_eq!(item.unwrap()["id"], "wq-code1");
@@ -570,7 +537,8 @@ mod tests {
             json!({"id": "wq-ip", "status": "in-progress", "assignee": "all",
                    "tags": ["hermes"], "preferred_executor": ""}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_none(), "non-pending item must be skipped");
     }
@@ -581,7 +549,8 @@ mod tests {
             json!({"id": "wq-other", "status": "pending", "assignee": "boris",
                    "tags": ["hermes"], "preferred_executor": ""}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         // cfg.agent_name = "natasha", item assigned to "boris"
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_none(), "item assigned to another agent must be skipped");
@@ -593,7 +562,8 @@ mod tests {
             json!({"id": "wq-mine", "status": "pending", "assignee": "natasha",
                    "tags": ["hermes"], "preferred_executor": ""}),
         ]).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_some());
         assert_eq!(item.unwrap()["id"], "wq-mine");
@@ -602,7 +572,8 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_hermes_item_empty_queue() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         let item = fetch_hermes_item(&test_cfg(&mock.url), &client).await;
         assert!(item.is_none());
     }
@@ -612,14 +583,16 @@ mod tests {
     #[tokio::test]
     async fn test_api_claim_success_returns_true() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         assert!(api_claim(&test_cfg(&mock.url), &client, "wq-111").await);
     }
 
     #[tokio::test]
     async fn test_api_claim_conflict_returns_false() {
         let mock = HubMock::with_state(HubState { item_claim_status: 409, ..Default::default() }).await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         assert!(!api_claim(&test_cfg(&mock.url), &client, "wq-222").await);
     }
 
@@ -628,21 +601,24 @@ mod tests {
     #[tokio::test]
     async fn test_post_heartbeat_no_panic() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         post_heartbeat(&test_cfg(&mock.url), &client, "hermes-test").await;
     }
 
     #[tokio::test]
     async fn test_post_complete_no_panic() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         post_complete(&test_cfg(&mock.url), &client, "wq-333", "output text").await;
     }
 
     #[tokio::test]
     async fn test_post_fail_no_panic() {
         let mock = HubMock::new().await;
-        let client = reqwest::Client::new();
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
         post_fail(&test_cfg(&mock.url), &client, "wq-444", "timeout").await;
     }
 }
