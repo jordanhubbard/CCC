@@ -13,9 +13,13 @@
 //! # Ok(()) }
 //! ```
 
+pub mod agents;
 pub mod auth;
+pub mod bus;
 pub mod error;
 pub mod items;
+pub mod memory;
+pub mod projects;
 pub mod queue;
 pub mod tasks;
 
@@ -91,5 +95,25 @@ impl Client {
     /// Entry point for per-item mutations and heartbeat.
     pub fn items(&self) -> items::ItemsApi<'_> {
         items::ItemsApi { client: self }
+    }
+
+    /// Entry point for project operations.
+    pub fn projects(&self) -> projects::ProjectsApi<'_> {
+        projects::ProjectsApi { client: self }
+    }
+
+    /// Entry point for agent registry reads.
+    pub fn agents(&self) -> agents::AgentsApi<'_> {
+        agents::AgentsApi { client: self }
+    }
+
+    /// Entry point for bus send/messages/SSE stream.
+    pub fn bus(&self) -> bus::BusApi<'_> {
+        bus::BusApi { client: self }
+    }
+
+    /// Entry point for memory search/store.
+    pub fn memory(&self) -> memory::MemoryApi<'_> {
+        memory::MemoryApi { client: self }
     }
 }
