@@ -406,6 +406,22 @@ async fn complete_task(
         params![id], row_to_task,
     ).unwrap_or(json!({"id":id}));
     let _ = state.bus_tx.send(json!({"type":"tasks:completed","task_id":id,"agent":agent}).to_string());
+
+    // F4: notify GitHub if this task has a linked issue
+    if let Some(meta) = task.get("metadata").and_then(|m| m.as_object()) {
+        if let (Some(gh_num), Some(gh_repo)) = (
+            meta.get("github_number").and_then(|v| v.as_i64()),
+            meta.get("github_repo").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        ) {
+            let task_id_clone = id.clone();
+            let agent_clone = agent.clone();
+            let auto_close = std::env::var("GITHUB_AUTO_CLOSE").unwrap_or_default() == "true";
+            tokio::spawn(async move {
+                notify_github_issue(&gh_repo, gh_num as u64, &task_id_clone, &agent_clone, auto_close).await;
+            });
+        }
+    }
+
     Json(json!({"ok":true,"task":task})).into_response()
 }
 
@@ -542,6 +558,41 @@ async fn vote_on_task(
     }).to_string());
 
     Json(json!({"ok":true,"task":task})).into_response()
+}
+
+async fn notify_github_issue(repo: &str, number: u64, task_id: &str, agent: &str, auto_close: bool) {
+    let comment = format!(
+        "✅ Fleet task `{}` completed by agent `{}`.\n\nThis issue has been resolved by the ACC agent fleet.",
+        task_id, agent
+    );
+    let comment_status = tokio::process::Command::new("gh")
+        .args(["issue", "comment", &number.to_string(), "--repo", repo, "--body", &comment])
+        .output()
+        .await;
+    match comment_status {
+        Ok(out) if out.status.success() =>
+            tracing::info!("github: commented on {}#{}", repo, number),
+        Ok(out) =>
+            tracing::warn!("github: comment on {}#{} failed: {}", repo, number,
+                String::from_utf8_lossy(&out.stderr).trim()),
+        Err(e) =>
+            tracing::warn!("github: gh CLI not available: {}", e),
+    }
+    if auto_close {
+        let close_status = tokio::process::Command::new("gh")
+            .args(["issue", "close", &number.to_string(), "--repo", repo])
+            .output()
+            .await;
+        match close_status {
+            Ok(out) if out.status.success() =>
+                tracing::info!("github: closed {}#{}", repo, number),
+            Ok(out) =>
+                tracing::warn!("github: close {}#{} failed: {}", repo, number,
+                    String::from_utf8_lossy(&out.stderr).trim()),
+            Err(e) =>
+                tracing::warn!("github: gh CLI close failed: {}", e),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -48,6 +48,7 @@ pub fn build_app(state: Arc<AppState>) -> Router {
         .merge(routes::soul::router())
         .merge(routes::blobs::router())
         .merge(routes::watchdog::router())
+        .merge(routes::github::router())
         .layer(cors)
         .with_state(state)
 }
