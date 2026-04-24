@@ -25,6 +25,7 @@ pub mod models;
 pub mod requests;
 pub mod soul;
 pub mod blobs;
+pub mod watchdog;
 
 use axum::{
     http::StatusCode,

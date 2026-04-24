@@ -47,6 +47,7 @@ pub fn build_app(state: Arc<AppState>) -> Router {
         .merge(routes::requests::router())
         .merge(routes::soul::router())
         .merge(routes::blobs::router())
+        .merge(routes::watchdog::router())
         .layer(cors)
         .with_state(state)
 }
@@ -114,6 +115,8 @@ pub mod testing {
             blob_store: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             blobs_path: dir.join("blobs").to_string_lossy().into_owned(),
             dlq_path:   dir.join("bus-dlq.jsonl").to_string_lossy().into_owned(),
+            user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
+            watchdog: routes::watchdog::WatchdogState::new(),
         })
     }
 

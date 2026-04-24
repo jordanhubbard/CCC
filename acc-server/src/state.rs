@@ -48,6 +48,11 @@ pub struct AppState {
     pub blobs_path: String,
     /// Path to the dead-letter queue JSONL file.
     pub dlq_path: String,
+    /// Per-token role map: token (plaintext) → role string.
+    /// Used to gate role-restricted endpoints at runtime.
+    pub user_token_roles: std::sync::RwLock<std::collections::HashMap<String, String>>,
+    /// Watchdog state: tracks abandoned-work detection and alerts.
+    pub watchdog: crate::routes::watchdog::WatchdogState,
 }
 
 impl AppState {

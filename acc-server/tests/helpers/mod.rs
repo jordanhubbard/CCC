@@ -66,6 +66,8 @@ pub async fn make_state(tmp: &TempDir) -> Arc<AppState> {
         blob_store: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         blobs_path: dir.join("blobs").to_string_lossy().into_owned(),
         dlq_path:   dir.join("bus-dlq.jsonl").to_string_lossy().into_owned(),
+        user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
+        watchdog: acc_server::routes::watchdog::WatchdogState::new(),
     })
 }
 

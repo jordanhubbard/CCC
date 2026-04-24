@@ -88,6 +88,8 @@ async fn main() {
         blob_store: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         blobs_path: format!("{}/blobs", cfg.data_dir),
         dlq_path: format!("{}/bus-dlq.jsonl", cfg.data_dir),
+        user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
+        watchdog: routes::watchdog::WatchdogState::new(),
     });
 
     state::load_all(&app_state).await;
@@ -149,6 +151,9 @@ async fn main() {
     tokio::spawn(routes::projects::run_beads_scanner(scanner_state));
 
     tokio::spawn(dispatch::run(app_state.clone()));
+
+    let watchdog_state = app_state.clone();
+    tokio::spawn(routes::watchdog::run_watchdog(watchdog_state));
 
     {
         let db = fleet_db.clone();
