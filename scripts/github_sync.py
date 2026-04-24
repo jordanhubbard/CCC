@@ -362,12 +362,14 @@ def sync_repo(repo: str, state: dict, existing_beads: list[dict]) -> tuple[int, 
             )
             if rc == 0:
                 created += 1
-                # Extract new beads ID from output like "✓ Created issue: ACC-xyz — ..."
+                # Extract new beads ID from output like "✓ Created issue: CCC-xyz — ...".
+                # Accept any prefix (ACC-, CCC-, etc.) so the script works across
+                # projects — the prefix is chosen by the beads project config.
+                import re as _re
                 beads_id = None
-                for word in out.split():
-                    if word.startswith("ACC-"):
-                        beads_id = word.rstrip("—").strip()
-                        break
+                m = _re.search(r"\b([A-Z]{2,6}-[a-z0-9]+)\b", out)
+                if m:
+                    beads_id = m.group(1)
                 # Update metadata with github linkage
                 if beads_id:
                     notes = (f"source=github github_number={issue['number']} "
