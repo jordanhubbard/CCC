@@ -115,7 +115,7 @@ run_tests() {
     local output_file
     output_file=$(mktemp)
 
-    if ! cargo test --manifest-path Cargo.toml --quiet > "$output_file" 2>&1; then
+    if ! cargo test --workspace --quiet > "$output_file" 2>&1; then
         cat "$output_file"
         rm -f "$output_file"
         error "Tests failed. Fix before releasing."

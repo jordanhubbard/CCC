@@ -40,19 +40,21 @@ echo "→ $(rustc --version)  /  $(cargo --version)"
 # ── Build ────────────────────────────────────────────────────────────────────
 
 echo "→ Building acc CLI..."
-cargo build --release --manifest-path "$REPO_ROOT/acc-cli/Cargo.toml"
+cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" -p acc
 
 # ── Install ──────────────────────────────────────────────────────────────────
 
+ACC_BIN="$REPO_ROOT/target/release/acc"
+
 if [ "$BUILD_ONLY" = "true" ]; then
-    echo "✓ Build complete: $REPO_ROOT/acc-cli/target/release/acc"
+    echo "✓ Build complete: $ACC_BIN"
     exit 0
 fi
 
 mkdir -p "$INSTALL_DIR"
 # Atomic replace so a running binary isn't clobbered mid-swap (ETXTBSY)
 tmp="$INSTALL_DIR/acc.new.$$"
-cp "$REPO_ROOT/acc-cli/target/release/acc" "$tmp"
+cp "$ACC_BIN" "$tmp"
 mv "$tmp" "$INSTALL_DIR/acc"
 
 echo "✓ Installed: $INSTALL_DIR/acc  ($("$INSTALL_DIR/acc" --version 2>/dev/null || echo "v?"))"

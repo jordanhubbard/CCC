@@ -7,8 +7,34 @@ members = [
     "acc-model",
 ]
 
+# Shared versions for deps used by 2+ members. Members opt in via
+# `<dep>.workspace = true` and may add (not override) features locally.
+# reqwest is intentionally omitted: the agent needs rustls-tls with
+# default-features = false, which can't be overridden at the member level.
+[workspace.dependencies]
+tokio          = { version = "1",    features = ["full"] }
+serde          = { version = "1",    features = ["derive"] }
+serde_json     = "1"
+chrono         = { version = "0.4",  features = ["serde"] }
+futures-util   = "0.3"
+tokio-util     = { version = "0.7",  features = ["io"] }
+axum           = "0.7"
+hmac           = "0.12"
+sha2           = "0.10"
+subtle         = "2"
+base64         = "0.22"
+hex            = "0.4"
+bytes          = "1"
+http-body-util = "0.1"
+
+# Thin LTO is cheap enough to apply workspace-wide and recovers most of the
+# size win of full LTO. Per-package settings scope size-optimization to
+# acc-agent (distributed to every fleet node) while letting acc-server keep
+# its debug symbols for production stack traces.
 [profile.release]
+lto = "thin"
+
+[profile.release.package.acc-agent]
 opt-level = "s"
-lto = true
 codegen-units = 1
 strip = true

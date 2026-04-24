@@ -39,10 +39,9 @@ elif command -v cargo &>/dev/null && [ -d "${WORKSPACE}/agent" ]; then
     # Fall back: build from source (fleet nodes have Rust via setup-node.sh)
     m_info "No matching pre-built binary — building acc-agent from source (this takes ~2min)"
     export PATH="${HOME}/.cargo/bin:${PATH}"
-    if cargo build --release --manifest-path "${WORKSPACE}/Cargo.toml" \
-            -p acc-agent --quiet \
-            2>>"${LOG_DIR:-${HOME}/.acc/logs}/migration-0001-build.log"; then
-        install_binary "${WORKSPACE}/target/release/acc-agent"
+    if cargo build --release --manifest-path "${WORKSPACE}/agent/Cargo.toml" \
+            --quiet 2>>"${LOG_DIR:-${HOME}/.acc/logs}/migration-0001-build.log"; then
+        install_binary "${WORKSPACE}/agent/target/release/acc-agent"
     else
         m_warn "cargo build failed — see ${LOG_DIR:-${HOME}/.acc/logs}/migration-0001-build.log"
     fi
