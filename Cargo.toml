@@ -1,6 +1,11 @@
 [workspace]
-members = ["acc-agent"]
 resolver = "2"
+members = [
+    "acc-cli",
+    "acc-server",
+    "agent/acc-agent",
+    "acc-model",
+]
 
 [profile.release]
 opt-level = "s"

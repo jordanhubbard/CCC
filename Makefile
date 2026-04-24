@@ -123,8 +123,7 @@ register: ## Register this agent with the CCC hub
 # ── Build ──────────────────────────────────────────────────────────────────
 
 build: ## Build all Rust binaries (acc-agent, acc-server, acc CLI)
-	@cargo build --release --manifest-path agent/Cargo.toml
-	@cargo build --release --manifest-path acc-server/Cargo.toml
+	@cargo build --release -p acc-agent -p acc-server
 	@bash scripts/install-acc.sh --build-only
 
 build-cli: ## Build the acc CLI binary (installs Rust via rustup if needed)
@@ -136,8 +135,7 @@ install-cli: ## Build and install acc CLI to $$HOME/.local/bin/acc (installs Rus
 # ── Testing ────────────────────────────────────────────────────────────────
 
 test: ## Run all Rust tests
-	@cargo test --manifest-path agent/Cargo.toml
-	@cargo test --manifest-path acc-server/Cargo.toml
+	@cargo test --workspace
 
 # ── Release ────────────────────────────────────────────────────────────────
 

@@ -83,7 +83,7 @@ build_and_install() {
 if echo "${CHANGED}" | grep -q "^agent/"; then
   AGENT_DEST="${ACC_DIR:-$HOME/.acc}/bin/acc-agent"
   AGENT_MANIFEST="${WORKSPACE}/agent/acc-agent/Cargo.toml"
-  AGENT_BIN="${WORKSPACE}/agent/target/release/acc-agent"
+  AGENT_BIN="${WORKSPACE}/target/release/acc-agent"
 
   # Prefer pre-built binary if it's newer than the last build
   if [ -f "${WORKSPACE}/acc-agent" ] && \
@@ -109,7 +109,7 @@ fi
 # ── acc-server (hub only) ──────────────────────────────────────────────────
 if [ "${IS_HUB}" = "true" ] && echo "${CHANGED}" | grep -q "^acc-server/"; then
   SERVER_MANIFEST="${WORKSPACE}/acc-server/Cargo.toml"
-  SERVER_BIN="${WORKSPACE}/acc-server/target/release/acc-server"
+  SERVER_BIN="${WORKSPACE}/target/release/acc-server"
   SERVER_DEST="/usr/local/bin/acc-server"
 
   if [ -f "${SERVER_MANIFEST}" ]; then
