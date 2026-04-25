@@ -277,13 +277,25 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
     let task_branch = format!("task/{item_id}");
 
     // Create task branch
-    let _ = Command::new("git").args(["-C", cwd, "checkout", "-b", &task_branch]).output().await;
+    match Command::new("git").args(["-C", cwd, "checkout", "-b", &task_branch]).output().await {
+        Ok(o) if !o.status.success() => {
+            log(cfg, &format!("[{item_id}] git checkout -b failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+        }
+        Err(e) => log(cfg, &format!("[{item_id}] git checkout -b spawn failed: {e}")),
+        _ => {}
+    }
 
     // Stage all
-    if Command::new("git").args(["-C", cwd, "add", "-A"]).output().await
-        .map(|o| !o.status.success()).unwrap_or(true)
-    {
-        return "git add failed".into();
+    match Command::new("git").args(["-C", cwd, "add", "-A"]).output().await {
+        Ok(o) if !o.status.success() => {
+            log(cfg, &format!("[{item_id}] git add failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+            return "git add failed".into();
+        }
+        Err(e) => {
+            log(cfg, &format!("[{item_id}] git add spawn failed: {e}"));
+            return "git add failed".into();
+        }
+        _ => {}
     }
 
     // Commit
@@ -292,7 +304,7 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
         cfg.agent_name,
         &task_output[..task_output.len().min(500)]
     );
-    let _ = Command::new("git")
+    match Command::new("git")
         .args([
             "-C", cwd,
             "-c", &format!("user.email={}@acc", cfg.agent_name),
@@ -300,7 +312,14 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
             "commit", "-m", &commit_msg,
         ])
         .output()
-        .await;
+        .await
+    {
+        Ok(o) if !o.status.success() => {
+            log(cfg, &format!("[{item_id}] git commit failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+        }
+        Err(e) => log(cfg, &format!("[{item_id}] git commit spawn failed: {e}")),
+        _ => {}
+    }
 
     let sha = Command::new("git")
         .args(["-C", cwd, "rev-parse", "--short", "HEAD"])
@@ -320,10 +339,17 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
             .unwrap_or_default();
         if remote.starts_with("https://github.com/") {
             let ssh_url = remote.replacen("https://github.com/", "git@github.com:", 1);
-            let _ = Command::new("git")
+            match Command::new("git")
                 .args(["-C", cwd, "remote", "set-url", "origin", &ssh_url])
                 .output()
-                .await;
+                .await
+            {
+                Ok(o) if !o.status.success() => {
+                    log(cfg, &format!("[{item_id}] git remote set-url failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+                }
+                Err(e) => log(cfg, &format!("[{item_id}] git remote set-url spawn failed: {e}")),
+                _ => {}
+            }
         }
     }
 
@@ -332,14 +358,29 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
         .args(["-C", cwd, "push", "--force-with-lease", "origin", &task_branch])
         .output()
         .await;
-    if push.map(|o| o.status.success()).unwrap_or(false) {
+    let push_err = match &push {
+        Ok(o) if !o.status.success() => Some(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+        Ok(_) => None,
+        Err(e) => Some(format!("spawn failed: {e}")),
+    };
+    if push.as_ref().map(|o| o.status.success()).unwrap_or(false) {
         return format!("pushed to {task_branch} @ {sha}");
+    }
+    if let Some(err) = push_err {
+        log(cfg, &format!("[{item_id}] git push --force-with-lease failed: {err}"));
     }
 
     let push2 = Command::new("git")
         .args(["-C", cwd, "push", "--set-upstream", "origin", &task_branch])
         .output()
         .await;
+    match &push2 {
+        Ok(o) if !o.status.success() => {
+            log(cfg, &format!("[{item_id}] git push --set-upstream failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+        }
+        Err(e) => log(cfg, &format!("[{item_id}] git push --set-upstream spawn failed: {e}")),
+        _ => {}
+    }
     if push2.map(|o| o.status.success()).unwrap_or(false) {
         format!("pushed to {task_branch} @ {sha}")
     } else {
