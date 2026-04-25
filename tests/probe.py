@@ -7,6 +7,8 @@ Runs against a live ACC cluster. Configure via environment variables:
   ACC_AGENT_TOKEN    Bearer token for authentication
   ACC_PROBE_AGENTS   Comma-separated agent names to probe (optional; auto-discovered if absent)
   ACC_PROBE_TIMEOUT  Maximum seconds for any single probe (default: 300)
+  GITHUB_TOKEN       GitHub personal access token (for two-way sync probes; optional)
+  GITHUB_REPO        GitHub repo in 'owner/repo' form (for two-way sync probes; optional)
 
 Run:
   pip install pytest requests
@@ -31,6 +33,8 @@ ACC_TOKEN         = os.environ.get("ACC_AGENT_TOKEN", "")
 PROBE_TIMEOUT     = int(os.environ.get("ACC_PROBE_TIMEOUT", "300"))
 PROBE_AGENTS_ENV  = os.environ.get("ACC_PROBE_AGENTS", "")
 POLL_INTERVAL     = 5  # seconds between status polls
+GITHUB_TOKEN      = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO       = os.environ.get("GITHUB_REPO", "jordanhubbard/ACC")
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -587,3 +591,296 @@ class TestAgentDiagnostics:
         assert results, f"No response to disk_usage from {known_agents[0]}"
         assert results[0].get("exit_code") == 0, \
             f"disk_usage failed: {results[0]}"
+
+
+# ── Probe 8: GitHub ↔ Beads Two-Way Sync ─────────────────────────────────────
+
+class TestTwoWaySync:
+    """
+    Verify the GitHub ↔ Beads two-way sync pipeline.
+
+    These probes exercise the full round-trip:
+      GitHub Issue → github-sync → ACC task queue → agent → Beads update
+      Beads task   → sync        → GitHub Issue label/comment update
+
+    Environment:
+      GITHUB_TOKEN   — GitHub PAT with repo scope (issues:read+write)
+      GITHUB_REPO    — 'owner/repo' string (default: jordanhubbard/ACC)
+
+    Probes that require GITHUB_TOKEN are skipped automatically when the token
+    is absent so the suite still passes in environments without GitHub access.
+    """
+
+    SYNC_POLL_INTERVAL = 5   # seconds between sync-state polls
+    SYNC_TIMEOUT       = 60  # max seconds to wait for a sync round-trip
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _github_headers() -> dict:
+        headers = {"Accept": "application/vnd.github+json"}
+        if GITHUB_TOKEN:
+            headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+        return headers
+
+    @staticmethod
+    def _gh_get(path: str, **kwargs) -> requests.Response:
+        url = f"https://api.github.com{path}"
+        return requests.get(url, headers=TestTwoWaySync._github_headers(), timeout=15, **kwargs)
+
+    @staticmethod
+    def _gh_post(path: str, body: dict) -> requests.Response:
+        url = f"https://api.github.com{path}"
+        return requests.post(url, headers=TestTwoWaySync._github_headers(),
+                             json=body, timeout=15)
+
+    @staticmethod
+    def _gh_patch(path: str, body: dict) -> requests.Response:
+        url = f"https://api.github.com{path}"
+        return requests.patch(url, headers=TestTwoWaySync._github_headers(),
+                              json=body, timeout=15)
+
+    def _require_github(self):
+        if not GITHUB_TOKEN:
+            pytest.skip(
+                "GITHUB_TOKEN not set — skipping GitHub API probe. "
+                "Set GITHUB_TOKEN (repo scope) to run two-way sync tests."
+            )
+
+    def _require_acc(self, client):
+        """Confirm the ACC hub is reachable before attempting sync probes."""
+        resp = client.get(f"{ACC_URL}/api/health", timeout=10)
+        if resp.status_code != 200:
+            pytest.skip(f"ACC hub not reachable ({resp.status_code}) — skipping sync probe")
+
+    # ── sync state endpoint ───────────────────────────────────────────────────
+
+    def test_sync_state_endpoint_reachable(self, client):
+        """
+        GET /api/github-sync/state must respond 200 and return a JSON object
+        that includes at least a 'last_synced_at' or 'repo' field.
+
+        Failure indicates the github-sync module is not running or not wired
+        into the server routing table.
+        """
+        resp = client.get(f"{ACC_URL}/api/github-sync/state", timeout=10)
+        if resp.status_code == 404:
+            pytest.skip(
+                "/api/github-sync/state not found — github-sync module may not be "
+                "enabled in this build. Enable it by setting GITHUB_TOKEN on the hub."
+            )
+        assert resp.status_code == 200, (
+            f"github-sync state endpoint returned {resp.status_code}: {resp.text[:300]}\n"
+            f"  Check: is GITHUB_TOKEN set on the hub? Is github_sync mod compiled in?"
+        )
+        state = resp.json()
+        assert isinstance(state, dict), f"Expected JSON object, got: {type(state)}"
+        # At least one recognisable field should be present
+        known_fields = {"last_synced_at", "repo", "github_repo", "synced_count",
+                        "last_run", "status", "enabled"}
+        present = known_fields & set(state.keys())
+        assert present, (
+            f"github-sync state has no recognisable fields. Got keys: {list(state.keys())}"
+        )
+        print(f"\n  github-sync state: {state}")
+
+    # ── GitHub → ACC direction ────────────────────────────────────────────────
+
+    def test_github_issues_endpoint_readable(self, client):
+        """
+        GET /api/issues (hub-proxied GitHub issues list) must return a non-error
+        response. This checks that the hub can reach GitHub and has a valid token.
+        """
+        resp = client.get(f"{ACC_URL}/api/issues", timeout=15)
+        if resp.status_code == 404:
+            pytest.skip("/api/issues not implemented on this hub — skipping")
+        assert resp.status_code == 200, (
+            f"/api/issues returned {resp.status_code}: {resp.text[:300]}\n"
+            f"  Check: GITHUB_TOKEN set on hub? Network reachable?"
+        )
+        body = resp.json()
+        assert isinstance(body, list), f"Expected list of issues, got: {type(body)}"
+        print(f"\n  Hub reports {len(body)} open issues via /api/issues")
+
+    def test_open_github_issue_appears_in_queue(self, client):
+        """
+        A GitHub issue that is open should have a corresponding ACC task in the
+        work queue (status pending / claimed / in-progress / completed).  We
+        verify this for issue #12 which was used to trigger this very task.
+
+        If the queue item is absent it means the GitHub→ACC ingest leg failed.
+        """
+        self._require_acc(client)
+
+        resp = client.get(f"{ACC_URL}/api/queue", timeout=15)
+        assert resp.status_code == 200, f"GET /api/queue failed: {resp.status_code}"
+        items = resp.json()
+        if isinstance(items, dict):
+            items = list(items.values())
+
+        # Look for a task that references issue #12 or the ACC-4fi Beads ID
+        def matches(item: dict) -> bool:
+            title = (item.get("title") or "").lower()
+            desc  = (item.get("description") or "").lower()
+            meta  = item.get("metadata") or item.get("meta") or {}
+            return (
+                "acc-4fi"   in title or "acc-4fi"   in desc
+                or "#12"    in title or "#12"        in desc
+                or meta.get("github_number") == 12
+                or meta.get("beads_id") == "ACC-4fi"
+            )
+
+        found = [i for i in items if matches(i)]
+
+        # Also search completed / archived endpoint if available
+        if not found:
+            r2 = client.get(f"{ACC_URL}/api/queue?status=all", timeout=15)
+            if r2.status_code == 200:
+                all_items = r2.json()
+                if isinstance(all_items, dict):
+                    all_items = list(all_items.values())
+                found = [i for i in all_items if matches(i)]
+
+        assert found, (
+            "No queue item found referencing GitHub issue #12 / ACC-4fi.\n"
+            "  Expected the github-sync ingest to have created a task from\n"
+            "  https://github.com/jordanhubbard/ACC/issues/12.\n"
+            "  Possible causes:\n"
+            "    - github-sync hasn't run since the issue was opened\n"
+            "    - GITHUB_TOKEN missing or lacks 'repo' scope on the hub\n"
+            "    - issue was ingested under a different title pattern\n"
+            "  Trigger a manual sync: POST /api/github-sync/trigger"
+        )
+        statuses = [i.get("status", "?") for i in found]
+        print(f"\n  Issue #12 / ACC-4fi found in queue (statuses: {statuses})")
+
+    def test_github_issue_label_sync(self):
+        """
+        The GitHub issue #12 should carry a label that was applied by the
+        sync pipeline (e.g. 'acc-synced', 'beads', or the Beads task ID).
+        Verifies the ACC→GitHub label write-back leg.
+        """
+        self._require_github()
+
+        resp = self._gh_get(f"/repos/{GITHUB_REPO}/issues/12")
+        if resp.status_code == 404:
+            pytest.skip(f"Issue #12 not found in {GITHUB_REPO} — skipping label check")
+        assert resp.status_code == 200, (
+            f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
+        )
+        issue = resp.json()
+        labels = [l["name"] for l in issue.get("labels", [])]
+        print(f"\n  Issue #12 labels: {labels}")
+
+        # Acceptable sync-applied label patterns
+        sync_labels = [l for l in labels if any(
+            pat in l.lower() for pat in ("acc", "beads", "synced", "agent")
+        )]
+        assert sync_labels, (
+            f"Issue #12 has no ACC/Beads sync label. Current labels: {labels}\n"
+            "  The ACC→GitHub label write-back leg may not be running.\n"
+            "  Expected at least one label matching: acc*, beads*, synced*, agent*\n"
+            "  Check: github-sync label_on_ingest config in github_sync.rs"
+        )
+
+    # ── Beads → ACC direction ─────────────────────────────────────────────────
+
+    def test_sync_trigger_endpoint_exists(self, client):
+        """
+        POST /api/github-sync/trigger must return 200 or 202 (accepted).
+        This endpoint is called by Beads webhooks to push state changes back
+        into the ACC task queue without waiting for the next poll cycle.
+        """
+        resp = client.post(f"{ACC_URL}/api/github-sync/trigger", json={}, timeout=15)
+        if resp.status_code == 404:
+            pytest.skip(
+                "/api/github-sync/trigger not implemented — "
+                "manual sync trigger not available on this build"
+            )
+        assert resp.status_code in (200, 202), (
+            f"Sync trigger returned {resp.status_code}: {resp.text[:300]}\n"
+            "  This endpoint should accept POST and kick off a GitHub sync cycle."
+        )
+        print(f"\n  Sync trigger response: {resp.json() if resp.content else '(empty)'}")
+
+    def test_beads_id_present_in_task_metadata(self, client):
+        """
+        Any queue item ingested from GitHub must carry a 'beads_id' (or equivalent)
+        in its metadata.  Missing Beads IDs mean the ACC↔Beads bridge is not
+        annotating tasks correctly, which breaks Beads→ACC status propagation.
+        """
+        self._require_acc(client)
+
+        resp = client.get(f"{ACC_URL}/api/queue?status=all", timeout=15)
+        if resp.status_code != 200:
+            resp = client.get(f"{ACC_URL}/api/queue", timeout=15)
+        assert resp.status_code == 200
+
+        items = resp.json()
+        if isinstance(items, dict):
+            items = list(items.values())
+
+        github_items = [
+            i for i in items
+            if (i.get("metadata") or {}).get("source") == "github"
+            or (i.get("metadata") or {}).get("github_number") is not None
+        ]
+
+        if not github_items:
+            pytest.skip(
+                "No GitHub-sourced items found in the queue. "
+                "Run the sync at least once before this probe."
+            )
+
+        missing_beads = [
+            i for i in github_items
+            if not (i.get("metadata") or {}).get("beads_id")
+        ]
+
+        assert not missing_beads, (
+            f"{len(missing_beads)} GitHub-sourced queue items lack a beads_id:\n"
+            + "\n".join(f"  - {i.get('id')} / {i.get('title', '?')[:60]}"
+                        for i in missing_beads[:5])
+            + "\n  Fix: ensure github_sync.rs stamps beads_id on every ingested task."
+        )
+        print(
+            f"\n  All {len(github_items)} GitHub-sourced items have a beads_id ✓"
+        )
+
+    # ── round-trip integrity ──────────────────────────────────────────────────
+
+    def test_no_duplicate_tasks_for_same_issue(self, client):
+        """
+        The same GitHub issue number must not produce more than one non-completed
+        queue item.  Duplicates indicate the dedup gate in github_sync.rs is
+        broken or the semantic-dedup hash is colliding.
+        """
+        self._require_acc(client)
+
+        resp = client.get(f"{ACC_URL}/api/queue", timeout=15)
+        assert resp.status_code == 200
+        items = resp.json()
+        if isinstance(items, dict):
+            items = list(items.values())
+
+        active = [
+            i for i in items
+            if i.get("status") in ("pending", "in-progress", "in_progress", "claimed")
+        ]
+
+        # Group by github_number
+        by_issue: dict[int, list] = {}
+        for item in active:
+            gn = (item.get("metadata") or {}).get("github_number")
+            if gn is not None:
+                by_issue.setdefault(int(gn), []).append(item)
+
+        duplicates = {k: v for k, v in by_issue.items() if len(v) > 1}
+        assert not duplicates, (
+            f"Duplicate active queue items detected for GitHub issue(s):\n"
+            + "\n".join(
+                f"  - issue #{num}: {[i.get('id') for i in dupes]}"
+                for num, dupes in duplicates.items()
+            )
+            + "\n  Fix: check the dedup gate in github_sync.rs / POST /api/queue handling."
+        )

@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- probe suite: Probe 8 — GitHub ↔ Beads two-way sync tests (#12, ACC-4fi)
+  - `test_sync_state_endpoint_reachable` — verifies `/api/github-sync/state` is live
+  - `test_github_issues_endpoint_readable` — hub-proxied `/api/issues` returns data
+  - `test_open_github_issue_appears_in_queue` — issue #12 / ACC-4fi is present in the work queue
+  - `test_github_issue_label_sync` — ACC-applied sync labels are visible on the GitHub issue
+  - `test_sync_trigger_endpoint_exists` — manual sync trigger endpoint accepts POST
+  - `test_beads_id_present_in_task_metadata` — every GitHub-sourced task carries a beads_id
+  - `test_no_duplicate_tasks_for_same_issue` — dedup gate prevents duplicate active tasks
+
 ## [0.0.1] - 2026-04-13
 
 ### Added
