@@ -172,28 +172,57 @@ def summarize_ingest(raw):
     return line
 
 
+def _watchdog_has_alerts(raw):
+    """True when the watchdog detected anything worth surfacing."""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return True  # parse failure is itself noteworthy
+    return data.get("alert_count", 0) > 0 or not data.get("healthy", True)
+
+
+def _health_has_alerts(raw):
+    """True when fleet-health-check.py reported something down/offline."""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return True
+    if any(not s.get("ok", True) for s in data.get("services", [])):
+        return True
+    if any(not p.get("ok", True) for p in data.get("tokenhub_providers", [])):
+        return True
+    if any(not a.get("online", True) for a in data.get("agents", [])):
+        return True
+    if any(not r.get("ok", True) for r in data.get("remote_accfs", [])):
+        return True
+    return False
+
+
 if __name__ == "__main__":
+    # Silence-on-success: this script is invoked by hermes' cronjob tool,
+    # which posts any non-empty stdout to Slack. To stop spamming the
+    # channel with "all clear" every interval, we now emit output ONLY
+    # when something needs attention. Real problems still surface; the
+    # uneventful 99% of runs go silent.
     output_lines = []
 
-    # Health check
     stdout, stderr, rc = run_script("fleet-health-check.py")
-    if rc == 0 and stdout:
-        output_lines.append(summarize_health(stdout))
-    else:
+    if rc != 0:
         output_lines.append(f"Health check FAILED (rc={rc}): {stderr[:200]}")
+    elif stdout and _health_has_alerts(stdout):
+        output_lines.append(summarize_health(stdout))
 
-    # Stale task watchdog
     stdout, stderr, rc = run_script("stale-task-watchdog.py")
-    if rc == 0 and stdout:
-        output_lines.append(summarize_watchdog(stdout))
-    else:
+    if rc != 0:
         output_lines.append(f"Watchdog FAILED (rc={rc}): {stderr[:200]}")
+    elif stdout and _watchdog_has_alerts(stdout):
+        output_lines.append(summarize_watchdog(stdout))
 
-    # Slack ingestion
     stdout, stderr, rc = run_script("slack-channel-ingest.py")
-    if rc == 0 and stdout:
-        output_lines.append(summarize_ingest(stdout))
-    else:
+    if rc != 0:
         output_lines.append(f"Ingest FAILED (rc={rc}): {stderr[:200]}")
+    # Successful ingestion is silent — the messages themselves are the
+    # signal; we don't need a meta-summary in #acc-fleet.
 
-    print("\n".join(output_lines))
+    if output_lines:
+        print("\n".join(output_lines))
