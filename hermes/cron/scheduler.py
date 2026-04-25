@@ -895,6 +895,29 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             session_db=_session_db,
         )
         
+        # CCC-c8s: Sandbox the LLM run into a per-invocation workspace so any
+        # write_file / edit_file / shell tool call lands there instead of
+        # leaking into whatever cwd the scheduler was started in (rocky case:
+        # 1751 stranded edits in ~/Src/ACC). chdir is process-global, but the
+        # cron tick processes one job at a time (max_workers=1 above), so it
+        # is safe to chdir for the duration of the run and restore in finally.
+        _cron_sandbox = Path.home() / ".acc" / "cron-workspaces" / job_id / _cron_session_id
+        try:
+            _cron_sandbox.mkdir(parents=True, exist_ok=True)
+        except Exception as _sandbox_err:
+            logger.warning(
+                "Job '%s': failed to create sandbox %s, falling back to caller cwd: %s",
+                job_id, _cron_sandbox, _sandbox_err,
+            )
+            _cron_sandbox = None
+        _orig_cwd = os.getcwd()
+        if _cron_sandbox is not None:
+            try:
+                os.chdir(str(_cron_sandbox))
+                logger.info("Job '%s': chdir → %s", job_id, _cron_sandbox)
+            except Exception as _chdir_err:
+                logger.warning("Job '%s': chdir to sandbox failed: %s", job_id, _chdir_err)
+
         # Run the agent with an *inactivity*-based timeout: the job can run
         # for hours if it's actively calling tools / receiving stream tokens,
         # but a hung API call or stuck tool with no activity for the configured
@@ -1021,6 +1044,13 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         return False, output, "", error_msg
 
     finally:
+        # CCC-c8s: restore the scheduler's original cwd. Must run whether
+        # the job succeeded, raised, or timed out.
+        try:
+            if "_orig_cwd" in locals() and _orig_cwd:
+                os.chdir(_orig_cwd)
+        except Exception:
+            pass
         # Clean up ContextVar session/delivery state for this job.
         clear_session_vars(_ctx_tokens)
         if _session_db:
