@@ -361,7 +361,7 @@ async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers:
 
     log(cfg, &format!("executing task {task_id}: {title}"));
 
-    let workspace = resolve_workspace(cfg, project_id, task_id).await;
+    let workspace = resolve_workspace(cfg, client, project_id, task_id).await;
     let _ = std::fs::create_dir_all(&workspace);
 
     let ctx_path = workspace.join(".task-context.json");
@@ -459,7 +459,7 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
     // Fetch original task to get project_id
     let project_id = fetch_task_project_id(cfg, client, review_of_id, task).await;
 
-    let workspace = resolve_workspace(cfg, &project_id, "").await;
+    let workspace = resolve_workspace(cfg, client, &project_id, "").await;
     let _ = std::fs::create_dir_all(&workspace);
 
     let work_summary = task["metadata"]["work_output_summary"].as_str().unwrap_or("");
@@ -597,7 +597,7 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
 
     log(cfg, &format!("executing phase_commit {task_id}: phase={phase}"));
 
-    let workspace = resolve_workspace(cfg, project_id, "").await;
+    let workspace = resolve_workspace(cfg, client, project_id, "").await;
     let branch = format!("phase/{phase}");
     let n_blocked = task["blocked_by"].as_array().map(|a| a.len()).unwrap_or(0);
     let commit_msg = format!("phase commit: {phase} ({n_blocked} tasks reviewed and approved)");
@@ -671,15 +671,40 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-async fn resolve_workspace(cfg: &Config, project_id: &str, task_id: &str) -> PathBuf {
+async fn resolve_workspace(cfg: &Config, client: &Client, project_id: &str, task_id: &str) -> PathBuf {
     let shared = cfg.acc_dir.join("shared");
-    if !project_id.is_empty() && shared.exists() {
-        let p = shared.join(project_id);
-        if p.exists() { return p; }
+
+    // AgentFS is mounted at $ACC_DIR/shared (CIFS to the hub's
+    // /srv/accfs). Each project lives at <shared>/<slug>, where <slug>
+    // matches the server's Project.slug field. Until 2026-04-25 we used
+    // <shared>/<project_id> here, which produced an empty stub directory
+    // — the actual content lives at <shared>/<slug>. agents ran with
+    // empty cwds and "completed" tasks without doing real work.
+    //
+    // Look up the slug; fall back to project_id if the lookup fails so
+    // we degrade rather than break.
+    let workspace_name: String = if project_id.is_empty() {
+        "default".to_string()
+    } else {
+        match client.projects().get(project_id).await {
+            Ok(p) if p.slug.as_deref().map(|s| !s.is_empty()).unwrap_or(false) => {
+                p.slug.unwrap()
+            }
+            _ => project_id.to_string(),
+        }
+    };
+
+    if shared.exists() {
+        let p = shared.join(&workspace_name);
+        if p.exists() {
+            return p;
+        }
     }
+
+    // Fallback: shared/<slug-or-id> (will be created by caller); for
+    // task-scoped paths a per-task local dir is the last resort.
     if task_id.is_empty() {
-        // Shared project workspace (for review and phase_commit tasks)
-        cfg.acc_dir.join("shared").join(if project_id.is_empty() { "default" } else { project_id })
+        cfg.acc_dir.join("shared").join(&workspace_name)
     } else {
         cfg.acc_dir.join("task-workspaces").join(task_id)
     }
