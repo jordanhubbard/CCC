@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 use tokio::time::sleep;
 use serde_json::Value;
 use acc_client::Client;
-use acc_model::{CreateTaskRequest, ReviewResult, TaskStatus, TaskType};
+use acc_model::{CreateTaskRequest, HeartbeatRequest, ReviewResult, TaskStatus, TaskType};
 use crate::config::Config;
 use crate::peers;
 
@@ -35,6 +35,48 @@ const WORK_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 /// grabs back a task it just released (observed 2026-04-24: unclaim
 /// reversed by same-agent re-claim within 15s on every attempt).
 const RECLAIM_COOLDOWN: Duration = Duration::from_secs(15 * 60);
+
+/// Keepalive heartbeat interval while a long-running task is in
+/// flight. Without this, the hub sees silence for the full
+/// REVIEW_TIMEOUT (30min) or WORK_TIMEOUT (2h) and may treat the
+/// agent as dead even though it's actively working (CCC-79d).
+const TASK_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Spawn a background task that posts /api/heartbeat/{agent} every
+/// TASK_KEEPALIVE_INTERVAL until the returned sender is dropped or
+/// signaled. Fire-and-forget on the network: if a heartbeat POST
+/// fails, the next interval tries again.
+fn spawn_keepalive(
+    cfg: Config,
+    client: Client,
+    note: String,
+) -> tokio::sync::oneshot::Sender<()> {
+    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(TASK_KEEPALIVE_INTERVAL);
+        // Skip the immediate first tick; heartbeat is for long-running
+        // gaps, not for the moment after claim.
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let req = HeartbeatRequest {
+                        ts: Some(chrono::Utc::now()),
+                        status: Some("ok".into()),
+                        note: Some(note.clone()),
+                        host: Some(cfg.host.clone()),
+                        ssh_user: Some(cfg.ssh_user.clone()),
+                        ssh_host: Some(cfg.ssh_host.clone()),
+                        ssh_port: Some(cfg.ssh_port as u64),
+                    };
+                    let _ = client.items().heartbeat(&cfg.agent_name, &req).await;
+                }
+                _ = &mut stop_rx => break,
+            }
+        }
+    });
+    stop_tx
+}
 
 /// Per-process cache of `(task_id, released_at)`. Keeps the last
 /// `RECLAIM_COOLDOWN` worth of finished tasks so the poll loop can
@@ -385,6 +427,13 @@ async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers:
          When the edits are applied, summarize in 1-3 sentences what you changed."
     );
 
+    // CCC-79d: heartbeat every 60s while the agentic loop runs so the
+    // hub doesn't read silence-for-2h as agent-dead.
+    let ka_stop = spawn_keepalive(
+        cfg.clone(),
+        client.clone(),
+        format!("working task {task_id}"),
+    );
     let result = match tokio::time::timeout(
         WORK_TIMEOUT,
         crate::sdk::run_agent(&prompt, &workspace),
@@ -392,6 +441,7 @@ async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers:
         Ok(r) => r,
         Err(_) => Err(format!("timeout after {}m", WORK_TIMEOUT.as_secs() / 60)),
     };
+    let _ = ka_stop.send(());
 
     match result {
         Ok(output) => {
@@ -510,6 +560,14 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
         summary = &work_summary[..work_summary.len().min(2000)],
     );
 
+    // CCC-79d: heartbeat every 60s while the review's agentic loop
+    // runs. Without this, the hub sees silence for the full
+    // REVIEW_TIMEOUT (30min) and may treat the agent as dead.
+    let ka_stop = spawn_keepalive(
+        cfg.clone(),
+        client.clone(),
+        format!("reviewing task {task_id}"),
+    );
     let review_output = match tokio::time::timeout(
         REVIEW_TIMEOUT,
         crate::sdk::run_agent(&review_prompt, &workspace),
@@ -517,6 +575,7 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
         Ok(r) => r,
         Err(_) => Err(format!("timeout after {}m", REVIEW_TIMEOUT.as_secs() / 60)),
     };
+    let _ = ka_stop.send(());
 
     let (verdict, reason, gaps) = match review_output {
         Ok(out) => parse_review_output(&out),
