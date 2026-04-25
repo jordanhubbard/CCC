@@ -35,8 +35,10 @@ sudo pkill -f "$SERVER_DEST" 2>/dev/null || true
 sleep 1
 
 echo "[restart-hub] Starting new acc-server (nohup, logs → ${LOG_DIR}/acc-server.log)"
-nohup "$SERVER_DEST" >> "${LOG_DIR}/acc-server.log" 2>&1 &
-disown || true
+# CCC-4cg: run from / so the daemon doesn't inherit the caller's cwd
+# (e.g. ~/Src/ACC) — any relative-path writes would otherwise land in
+# the user's git checkout instead of the hub's data dir.
+( cd / && nohup "$SERVER_DEST" >> "${LOG_DIR}/acc-server.log" 2>&1 & disown || true )
 sleep 2
 
 if pgrep -f "$SERVER_DEST" >/dev/null; then

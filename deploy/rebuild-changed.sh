@@ -118,7 +118,7 @@ if [ "${IS_HUB}" = "true" ] && echo "${CHANGED}" | grep -q "^acc-server/"; then
       sudo cp \"${SERVER_BIN}\" \"${SERVER_DEST}.new\" && \
       sudo mv \"${SERVER_DEST}.new\" \"${SERVER_DEST}\" && \
       pkill -f /usr/local/bin/acc-server || true; sleep 1; \
-      nohup ${SERVER_DEST} >> \"${LOG_DIR}/acc-server.log\" 2>&1 &
+      ( cd / && nohup ${SERVER_DEST} >> \"${LOG_DIR}/acc-server.log\" 2>&1 & disown || true )
     "
     build_and_install "${SERVER_MANIFEST}" "${SERVER_BIN}" "${SERVER_DEST}" "acc-server" "${restart}"
   else
