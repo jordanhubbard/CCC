@@ -37,14 +37,33 @@ pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String>
     let ws_str = workspace.display().to_string();
     let system = format!(
         "You are a coding agent executing a task. Your workspace is: {ws_str}\n\
-         Use bash for shell commands and str_replace_editor for file operations. \
-         File paths given to str_replace_editor may be absolute or relative to the workspace. \
-         Do not run git commit or git push — version control is handled separately."
+         \n\
+         You have two tools: `bash` for shell commands and `str_replace_editor` \
+         for file operations (view/create/str_replace/insert). Paths may be \
+         absolute or workspace-relative.\n\
+         \n\
+         RULES:\n\
+         1. The task is verified by `git diff` against your edits in the \
+            workspace, NOT by what you write in the response. A response \
+            that only describes what you would do — without actually \
+            calling `str_replace_editor` or `bash` to apply the changes \
+            — is a failed task.\n\
+         2. If the request is unclear, use `str_replace_editor view` or \
+            `bash` to inspect existing files first, then make the changes.\n\
+         3. Do not run `git commit` or `git push` — version control is \
+            handled separately by the milestone-commit task.\n\
+         4. After the edits are applied, briefly summarize what you \
+            changed in your final text response."
     );
 
     let tools = tool_schemas();
     let mut messages: Vec<Value> = vec![json!({"role": "user", "content": prompt})];
     let mut final_text = String::new();
+    // Track tool calls across the whole run. If a coding-agent run ends
+    // without ANY tool use, the model has summarized instead of edited
+    // (the dishonest-completion pattern). We give it one chance to fix.
+    let mut total_tool_calls: u32 = 0;
+    let mut nudged_for_no_tools = false;
 
     for turn in 0..MAX_TURNS {
         let body = json!({
@@ -105,10 +124,30 @@ pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String>
                 _ => {}
             }
         }
+        total_tool_calls += tool_uses.len() as u32;
 
         messages.push(json!({"role": "assistant", "content": content_arr}));
 
         if stop_reason == "end_turn" || tool_uses.is_empty() {
+            // No-tool-use guard: if the entire run ended without a single
+            // tool call, the model summarized instead of editing. Give it
+            // one chance to make this right before accepting completion.
+            if total_tool_calls == 0 && !nudged_for_no_tools {
+                eprintln!(
+                    "[sdk] turn {turn}: model finished without using any tools — \
+                     re-prompting once for actual edits"
+                );
+                messages.push(json!({
+                    "role": "user",
+                    "content": "You produced a description but did not apply the \
+                                changes. Use `str_replace_editor` or `bash` now \
+                                to actually make the edits in the workspace. The \
+                                task is verified by `git diff`, not by what you \
+                                write in this conversation."
+                }));
+                nudged_for_no_tools = true;
+                continue;
+            }
             break;
         }
 

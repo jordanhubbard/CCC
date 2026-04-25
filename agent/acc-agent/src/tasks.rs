@@ -369,7 +369,20 @@ async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers:
 
     let description = task["description"].as_str().unwrap_or("");
     let prompt = format!(
-        "You are an autonomous coding agent. Your task is:\n\nTitle: {title}\n\nDescription:\n{description}\n\nYou are in a git workspace with existing code. Make the requested changes. When done, summarize what you did."
+        "You are an autonomous coding agent. Your task:\n\
+         \n\
+         Title: {title}\n\
+         \n\
+         Description:\n\
+         {description}\n\
+         \n\
+         You are in a git working directory with the project source. Apply the \
+         requested changes by calling `str_replace_editor` (for file edits) or \
+         `bash` (to run scripts, tests, etc.). The completion of this task is \
+         verified by `git diff` against your edits — a written description that \
+         doesn't actually modify files counts as a failed task.\n\
+         \n\
+         When the edits are applied, summarize in 1-3 sentences what you changed."
     );
 
     let result = match tokio::time::timeout(
