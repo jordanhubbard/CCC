@@ -101,20 +101,6 @@ from agent.subdirectory_hints import SubdirectoryHintTracker
 from agent.prompt_caching import apply_anthropic_cache_control
 from agent.prompt_builder import build_skills_system_prompt, build_context_files_prompt, build_environment_hints, load_soul_md, TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, DEVELOPER_ROLE_MODELS, GOOGLE_MODEL_OPERATIONAL_GUIDANCE, OPENAI_MODEL_EXECUTION_GUIDANCE
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
-from agent.codex_responses_adapter import (
-    _chat_content_to_responses_parts,
-    _chat_messages_to_responses_input as _codex_chat_messages_to_responses_input,
-    _derive_responses_function_call_id as _codex_derive_responses_function_call_id,
-    _deterministic_call_id as _codex_deterministic_call_id,
-    _extract_responses_message_text as _codex_extract_responses_message_text,
-    _extract_responses_reasoning_text as _codex_extract_responses_reasoning_text,
-    _normalize_codex_response as _codex_normalize_codex_response,
-    _preflight_codex_api_kwargs as _codex_preflight_codex_api_kwargs,
-    _preflight_codex_input_items as _codex_preflight_codex_input_items,
-    _responses_tools as _codex_responses_tools,
-    _split_responses_tool_id as _codex_split_responses_tool_id,
-    _summarize_user_message_for_log,
-)
 from agent.display import (
     KawaiiSpinner, build_tool_preview as _build_tool_preview,
     get_cute_tool_message as _get_cute_tool_message_impl,
@@ -412,11 +398,6 @@ def _sanitize_surrogates(text: str) -> str:
     if _SURROGATE_RE.search(text):
         return _SURROGATE_RE.sub('\ufffd', text)
     return text
-
-
-# _chat_content_to_responses_parts and _summarize_user_message_for_log are
-# imported from agent.codex_responses_adapter (see import block above).
-# They remain importable from run_agent for backward compatibility.
 
 
 def _sanitize_structure_surrogates(payload: Any) -> bool:
@@ -887,7 +868,7 @@ class AIAgent:
             base_url (str): Base URL for the model API (optional)
             api_key (str): API key for authentication (optional, uses env var if not provided)
             provider (str): Provider identifier (optional; used for telemetry/routing hints)
-            api_mode (str): API mode override: "chat_completions" or "codex_responses"
+            api_mode (str): API mode override: "chat_completions", "anthropic_messages", or "bedrock_converse"
             model (str): Model name to use (default: "anthropic/claude-opus-4.6")
             max_iterations (int): Maximum number of tool calling iterations (default: 90)
             tool_delay (float): Delay between tool calls in seconds (default: 1.0)
@@ -960,21 +941,8 @@ class AIAgent:
         self.provider = provider_name or ""
         self.acp_command = acp_command or command
         self.acp_args = list(acp_args or args or [])
-        if api_mode in {"chat_completions", "codex_responses", "anthropic_messages", "bedrock_converse"}:
+        if api_mode in {"chat_completions", "anthropic_messages", "bedrock_converse"}:
             self.api_mode = api_mode
-        elif self.provider == "openai-codex":
-            self.api_mode = "codex_responses"
-        elif self.provider == "xai":
-            self.api_mode = "codex_responses"
-        elif (provider_name is None) and (
-            self._base_url_hostname == "chatgpt.com"
-            and "/backend-api/codex" in self._base_url_lower
-        ):
-            self.api_mode = "codex_responses"
-            self.provider = "openai-codex"
-        elif (provider_name is None) and self._base_url_hostname == "api.x.ai":
-            self.api_mode = "codex_responses"
-            self.provider = "xai"
         elif self.provider == "anthropic" or (provider_name is None and self._base_url_hostname == "api.anthropic.com"):
             self.api_mode = "anthropic_messages"
             self.provider = "anthropic"
@@ -1003,31 +971,6 @@ class AIAgent:
                 self.model = normalize_model_for_provider(self.model, self.provider)
         except Exception:
             pass
-
-        # GPT-5.x models usually require the Responses API path, but some
-        # providers have exceptions (for example Copilot's gpt-5-mini still
-        # uses chat completions). Also auto-upgrade for direct OpenAI URLs
-        # (api.openai.com) since all newer tool-calling models prefer
-        # Responses there. ACP runtimes are excluded: CopilotACPClient
-        # handles its own routing and does not implement the Responses API
-        # surface.
-        # When api_mode was explicitly provided, respect it — the user
-        # knows what their endpoint supports (#10473).
-        if (
-            api_mode is None
-            and self.api_mode == "chat_completions"
-            and self.provider != "copilot-acp"
-            and not str(self.base_url or "").lower().startswith("acp://copilot")
-            and not str(self.base_url or "").lower().startswith("acp+tcp://")
-            and (
-                self._is_direct_openai_url()
-                or self._provider_model_requires_responses_api(
-                    self.model,
-                    provider=self.provider,
-                )
-            )
-        ):
-            self.api_mode = "codex_responses"
 
         # Pre-warm OpenRouter model metadata cache in a background thread.
         # fetch_model_metadata() is cached for 1 hour; this avoids a blocking
@@ -1190,9 +1133,7 @@ class AIAgent:
 
         # Initialize LLM client via centralized provider router.
         # The router handles auth resolution, base URL, headers, and
-        # Codex/Anthropic wrapping for all known providers.
-        # raw_codex=True because the main agent needs direct responses.stream()
-        # access for Codex Responses API streaming.
+        # Anthropic wrapping for all known providers.
         self._anthropic_client = None
         self._is_anthropic_oauth = False
 
@@ -1300,14 +1241,11 @@ class AIAgent:
                     }
                 elif base_url_host_matches(effective_base, "portal.qwen.ai"):
                     client_kwargs["default_headers"] = _qwen_portal_headers()
-                elif base_url_host_matches(effective_base, "chatgpt.com"):
-                    from agent.auxiliary_client import _codex_cloudflare_headers
-                    client_kwargs["default_headers"] = _codex_cloudflare_headers(api_key)
             else:
                 # No explicit creds — use the centralized provider router
                 from agent.auxiliary_client import resolve_provider_client
                 _routed_client, _ = resolve_provider_client(
-                    self.provider or "auto", model=self.model, raw_codex=True)
+                    self.provider or "auto", model=self.model)
                 if _routed_client is not None:
                     client_kwargs = {
                         "api_key": _routed_client.api_key,
@@ -2717,78 +2655,6 @@ class AIAgent:
 
         return not self._has_natural_response_ending(visible_text)
 
-    def _looks_like_codex_intermediate_ack(
-        self,
-        user_message: str,
-        assistant_content: str,
-        messages: List[Dict[str, Any]],
-    ) -> bool:
-        """Detect a planning/ack message that should continue instead of ending the turn."""
-        if any(isinstance(msg, dict) and msg.get("role") == "tool" for msg in messages):
-            return False
-
-        assistant_text = self._strip_think_blocks(assistant_content or "").strip().lower()
-        if not assistant_text:
-            return False
-        if len(assistant_text) > 1200:
-            return False
-
-        has_future_ack = bool(
-            re.search(r"\b(i['’]ll|i will|let me|i can do that|i can help with that)\b", assistant_text)
-        )
-        if not has_future_ack:
-            return False
-
-        action_markers = (
-            "look into",
-            "look at",
-            "inspect",
-            "scan",
-            "check",
-            "analyz",
-            "review",
-            "explore",
-            "read",
-            "open",
-            "run",
-            "test",
-            "fix",
-            "debug",
-            "search",
-            "find",
-            "walkthrough",
-            "report back",
-            "summarize",
-        )
-        workspace_markers = (
-            "directory",
-            "current directory",
-            "current dir",
-            "cwd",
-            "repo",
-            "repository",
-            "codebase",
-            "project",
-            "folder",
-            "filesystem",
-            "file tree",
-            "files",
-            "path",
-        )
-
-        user_text = (user_message or "").strip().lower()
-        user_targets_workspace = (
-            any(marker in user_text for marker in workspace_markers)
-            or "~/" in user_text
-            or "/" in user_text
-        )
-        assistant_mentions_action = any(marker in assistant_text for marker in action_markers)
-        assistant_targets_workspace = any(
-            marker in assistant_text for marker in workspace_markers
-        )
-        return (user_targets_workspace or assistant_targets_workspace) and assistant_mentions_action
-    
-    
     def _extract_reasoning(self, assistant_message) -> Optional[str]:
         """
         Extract reasoning/thinking content from an assistant message.
@@ -3099,7 +2965,6 @@ class AIAgent:
                     reasoning=msg.get("reasoning") if role == "assistant" else None,
                     reasoning_content=msg.get("reasoning_content") if role == "assistant" else None,
                     reasoning_details=msg.get("reasoning_details") if role == "assistant" else None,
-                    codex_reasoning_items=msg.get("codex_reasoning_items") if role == "assistant" else None,
                 )
             self._last_flushed_db_idx = len(messages)
         except Exception as e:
@@ -3525,7 +3390,7 @@ class AIAgent:
                 "reason": reason,
                 "request": {
                     "method": "POST",
-                    "url": f"{self.base_url.rstrip('/')}{'/responses' if self.api_mode == 'codex_responses' else '/chat/completions'}",
+                    "url": f"{self.base_url.rstrip('/')}/chat/completions",
                     "headers": {
                         "Authorization": f"Bearer {self._mask_api_key_for_logs(api_key)}",
                         "Content-Type": "application/json",
@@ -4448,20 +4313,47 @@ class AIAgent:
         Deterministic IDs prevent cache invalidation — random UUIDs would
         make every API call's prefix unique, breaking OpenAI's prompt cache.
         """
-        return _codex_deterministic_call_id(fn_name, arguments, index)
+        import hashlib as _hashlib
+        seed = f"{fn_name}:{arguments}:{index}"
+        digest = _hashlib.sha256(seed.encode("utf-8", errors="replace")).hexdigest()[:12]
+        return f"call_{digest}"
 
     @staticmethod
     def _split_responses_tool_id(raw_id: Any) -> tuple[Optional[str], Optional[str]]:
-        """Split a stored tool id into (call_id, response_item_id)."""
-        return _codex_split_responses_tool_id(raw_id)
+        """Split a stored composite tool id into (call_id, response_item_id)."""
+        if not isinstance(raw_id, str):
+            return None, None
+        value = raw_id.strip()
+        if not value:
+            return None, None
+        if "|" in value:
+            call_id, response_item_id = value.split("|", 1)
+            return call_id.strip() or None, response_item_id.strip() or None
+        if value.startswith("fc_"):
+            return None, value
+        return value, None
 
+    @staticmethod
     def _derive_responses_function_call_id(
-        self,
         call_id: str,
         response_item_id: Optional[str] = None,
     ) -> str:
-        """Build a valid Responses `function_call.id` (must start with `fc_`)."""
-        return _codex_derive_responses_function_call_id(call_id, response_item_id)
+        """Build a valid function call id (must start with `fc_`)."""
+        if isinstance(response_item_id, str):
+            candidate = response_item_id.strip()
+            if candidate.startswith("fc_"):
+                return candidate
+        source = (call_id or "").strip()
+        if source.startswith("fc_"):
+            return source
+        if source.startswith("call_") and len(source) > len("call_"):
+            return f"fc_{source[len('call_'):]}"
+        sanitized = re.sub(r"[^A-Za-z0-9_-]", "", source)
+        if sanitized.startswith("fc_"):
+            return sanitized
+        if sanitized.startswith("call_") and len(sanitized) > len("call_"):
+            return f"fc_{sanitized[len('call_'):]}"
+        return f"fc_{uuid.uuid4().hex[:16]}"
 
     def _thread_identity(self) -> str:
         thread = threading.current_thread()
@@ -4828,236 +4720,6 @@ class AIAgent:
     def _close_request_openai_client(self, client: Any, *, reason: str) -> None:
         self._close_openai_client(client, reason=reason, shared=False)
 
-    def _run_codex_stream(self, api_kwargs: dict, client: Any = None, on_first_delta: callable = None):
-        """Execute one streaming Responses API request and return the final response."""
-        import httpx as _httpx
-
-        active_client = client or self._ensure_primary_openai_client(reason="codex_stream_direct")
-        max_stream_retries = 1
-        has_tool_calls = False
-        first_delta_fired = False
-        # Accumulate streamed text so we can recover if get_final_response()
-        # returns empty output (e.g. chatgpt.com backend-api sends
-        # response.incomplete instead of response.completed).
-        self._codex_streamed_text_parts: list = []
-        for attempt in range(max_stream_retries + 1):
-            collected_output_items: list = []
-            try:
-                with active_client.responses.stream(**api_kwargs) as stream:
-                    for event in stream:
-                        self._touch_activity("receiving stream response")
-                        if self._interrupt_requested:
-                            break
-                        event_type = getattr(event, "type", "")
-                        # Fire callbacks on text content deltas (suppress during tool calls)
-                        if "output_text.delta" in event_type or event_type == "response.output_text.delta":
-                            delta_text = getattr(event, "delta", "")
-                            if delta_text:
-                                self._codex_streamed_text_parts.append(delta_text)
-                            if delta_text and not has_tool_calls:
-                                if not first_delta_fired:
-                                    first_delta_fired = True
-                                    if on_first_delta:
-                                        try:
-                                            on_first_delta()
-                                        except Exception:
-                                            pass
-                                self._fire_stream_delta(delta_text)
-                        # Track tool calls to suppress text streaming
-                        elif "function_call" in event_type:
-                            has_tool_calls = True
-                        # Fire reasoning callbacks
-                        elif "reasoning" in event_type and "delta" in event_type:
-                            reasoning_text = getattr(event, "delta", "")
-                            if reasoning_text:
-                                self._fire_reasoning_delta(reasoning_text)
-                        # Collect completed output items — some backends
-                        # (chatgpt.com/backend-api/codex) stream valid items
-                        # via response.output_item.done but the SDK's
-                        # get_final_response() returns an empty output list.
-                        elif event_type == "response.output_item.done":
-                            done_item = getattr(event, "item", None)
-                            if done_item is not None:
-                                collected_output_items.append(done_item)
-                        # Log non-completed terminal events for diagnostics
-                        elif event_type in ("response.incomplete", "response.failed"):
-                            resp_obj = getattr(event, "response", None)
-                            status = getattr(resp_obj, "status", None) if resp_obj else None
-                            incomplete_details = getattr(resp_obj, "incomplete_details", None) if resp_obj else None
-                            logger.warning(
-                                "Codex Responses stream received terminal event %s "
-                                "(status=%s, incomplete_details=%s, streamed_chars=%d). %s",
-                                event_type, status, incomplete_details,
-                                sum(len(p) for p in self._codex_streamed_text_parts),
-                                self._client_log_context(),
-                            )
-                    final_response = stream.get_final_response()
-                    # PATCH: ChatGPT Codex backend streams valid output items
-                    # but get_final_response() can return an empty output list.
-                    # Backfill from collected items or synthesize from deltas.
-                    _out = getattr(final_response, "output", None)
-                    if isinstance(_out, list) and not _out:
-                        if collected_output_items:
-                            final_response.output = list(collected_output_items)
-                            logger.debug(
-                                "Codex stream: backfilled %d output items from stream events",
-                                len(collected_output_items),
-                            )
-                        elif self._codex_streamed_text_parts and not has_tool_calls:
-                            assembled = "".join(self._codex_streamed_text_parts)
-                            final_response.output = [SimpleNamespace(
-                                type="message",
-                                role="assistant",
-                                status="completed",
-                                content=[SimpleNamespace(type="output_text", text=assembled)],
-                            )]
-                            logger.debug(
-                                "Codex stream: synthesized output from %d text deltas (%d chars)",
-                                len(self._codex_streamed_text_parts), len(assembled),
-                            )
-                    return final_response
-            except (_httpx.RemoteProtocolError, _httpx.ReadTimeout, _httpx.ConnectError, ConnectionError) as exc:
-                if attempt < max_stream_retries:
-                    logger.debug(
-                        "Codex Responses stream transport failed (attempt %s/%s); retrying. %s error=%s",
-                        attempt + 1,
-                        max_stream_retries + 1,
-                        self._client_log_context(),
-                        exc,
-                    )
-                    continue
-                logger.debug(
-                    "Codex Responses stream transport failed; falling back to create(stream=True). %s error=%s",
-                    self._client_log_context(),
-                    exc,
-                )
-                return self._run_codex_create_stream_fallback(api_kwargs, client=active_client)
-            except RuntimeError as exc:
-                err_text = str(exc)
-                missing_completed = "response.completed" in err_text
-                if missing_completed and attempt < max_stream_retries:
-                    logger.debug(
-                        "Responses stream closed before completion (attempt %s/%s); retrying. %s",
-                        attempt + 1,
-                        max_stream_retries + 1,
-                        self._client_log_context(),
-                    )
-                    continue
-                if missing_completed:
-                    logger.debug(
-                        "Responses stream did not emit response.completed; falling back to create(stream=True). %s",
-                        self._client_log_context(),
-                    )
-                    return self._run_codex_create_stream_fallback(api_kwargs, client=active_client)
-                raise
-
-    def _run_codex_create_stream_fallback(self, api_kwargs: dict, client: Any = None):
-        """Fallback path for stream completion edge cases on Codex-style Responses backends."""
-        active_client = client or self._ensure_primary_openai_client(reason="codex_create_stream_fallback")
-        fallback_kwargs = dict(api_kwargs)
-        fallback_kwargs["stream"] = True
-        fallback_kwargs = self._get_codex_transport().preflight_kwargs(fallback_kwargs, allow_stream=True)
-        stream_or_response = active_client.responses.create(**fallback_kwargs)
-
-        # Compatibility shim for mocks or providers that still return a concrete response.
-        if hasattr(stream_or_response, "output"):
-            return stream_or_response
-        if not hasattr(stream_or_response, "__iter__"):
-            return stream_or_response
-
-        terminal_response = None
-        collected_output_items: list = []
-        collected_text_deltas: list = []
-        try:
-            for event in stream_or_response:
-                self._touch_activity("receiving stream response")
-                event_type = getattr(event, "type", None)
-                if not event_type and isinstance(event, dict):
-                    event_type = event.get("type")
-
-                # Collect output items and text deltas for backfill
-                if event_type == "response.output_item.done":
-                    done_item = getattr(event, "item", None)
-                    if done_item is None and isinstance(event, dict):
-                        done_item = event.get("item")
-                    if done_item is not None:
-                        collected_output_items.append(done_item)
-                elif event_type in ("response.output_text.delta",):
-                    delta = getattr(event, "delta", "")
-                    if not delta and isinstance(event, dict):
-                        delta = event.get("delta", "")
-                    if delta:
-                        collected_text_deltas.append(delta)
-
-                if event_type not in {"response.completed", "response.incomplete", "response.failed"}:
-                    continue
-
-                terminal_response = getattr(event, "response", None)
-                if terminal_response is None and isinstance(event, dict):
-                    terminal_response = event.get("response")
-                if terminal_response is not None:
-                    # Backfill empty output from collected stream events
-                    _out = getattr(terminal_response, "output", None)
-                    if isinstance(_out, list) and not _out:
-                        if collected_output_items:
-                            terminal_response.output = list(collected_output_items)
-                            logger.debug(
-                                "Codex fallback stream: backfilled %d output items",
-                                len(collected_output_items),
-                            )
-                        elif collected_text_deltas:
-                            assembled = "".join(collected_text_deltas)
-                            terminal_response.output = [SimpleNamespace(
-                                type="message", role="assistant",
-                                status="completed",
-                                content=[SimpleNamespace(type="output_text", text=assembled)],
-                            )]
-                            logger.debug(
-                                "Codex fallback stream: synthesized from %d deltas (%d chars)",
-                                len(collected_text_deltas), len(assembled),
-                            )
-                    return terminal_response
-        finally:
-            close_fn = getattr(stream_or_response, "close", None)
-            if callable(close_fn):
-                try:
-                    close_fn()
-                except Exception:
-                    pass
-
-        if terminal_response is not None:
-            return terminal_response
-        raise RuntimeError("Responses create(stream=True) fallback did not emit a terminal response.")
-
-    def _try_refresh_codex_client_credentials(self, *, force: bool = True) -> bool:
-        if self.api_mode != "codex_responses" or self.provider != "openai-codex":
-            return False
-
-        try:
-            from hermes_cli.auth import resolve_codex_runtime_credentials
-
-            creds = resolve_codex_runtime_credentials(force_refresh=force)
-        except Exception as exc:
-            logger.debug("Codex credential refresh failed: %s", exc)
-            return False
-
-        api_key = creds.get("api_key")
-        base_url = creds.get("base_url")
-        if not isinstance(api_key, str) or not api_key.strip():
-            return False
-        if not isinstance(base_url, str) or not base_url.strip():
-            return False
-
-        self.api_key = api_key.strip()
-        self.base_url = base_url.strip().rstrip("/")
-        self._client_kwargs["api_key"] = self.api_key
-        self._client_kwargs["base_url"] = self.base_url
-
-        if not self._replace_primary_openai_client(reason="codex_credential_refresh"):
-            return False
-
-        return True
-
     def _try_refresh_nous_client_credentials(self, *, force: bool = True) -> bool:
         if self.api_mode != "chat_completions" or self.provider != "nous":
             return False
@@ -5154,11 +4816,6 @@ class AIAgent:
             self._client_kwargs["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
         elif base_url_host_matches(base_url, "portal.qwen.ai"):
             self._client_kwargs["default_headers"] = _qwen_portal_headers()
-        elif base_url_host_matches(base_url, "chatgpt.com"):
-            from agent.auxiliary_client import _codex_cloudflare_headers
-            self._client_kwargs["default_headers"] = _codex_cloudflare_headers(
-                self._client_kwargs.get("api_key", "")
-            )
         else:
             self._client_kwargs.pop("default_headers", None)
 
@@ -5300,14 +4957,7 @@ class AIAgent:
 
         def _call():
             try:
-                if self.api_mode == "codex_responses":
-                    request_client_holder["client"] = self._create_request_openai_client(reason="codex_stream_request")
-                    result["response"] = self._run_codex_stream(
-                        api_kwargs,
-                        client=request_client_holder["client"],
-                        on_first_delta=getattr(self, "_codex_on_first_delta", None),
-                    )
-                elif self.api_mode == "anthropic_messages":
+                if self.api_mode == "anthropic_messages":
                     result["response"] = self._anthropic_messages_create(api_kwargs)
                 elif self.api_mode == "bedrock_converse":
                     # Bedrock uses boto3 directly — no OpenAI client needed.
@@ -5528,10 +5178,9 @@ class AIAgent:
     ):
         """Streaming variant of _interruptible_api_call for real-time token delivery.
 
-        Handles all three api_modes:
+        Handles all api_modes:
         - chat_completions: stream=True on OpenAI-compatible endpoints
         - anthropic_messages: client.messages.stream() via Anthropic SDK
-        - codex_responses: delegates to _run_codex_stream (already streaming)
 
         Fires stream_delta_callback and _stream_callback for each text token.
         Tool-call turns suppress the callback — only text-only final responses
@@ -5541,17 +5190,6 @@ class AIAgent:
         Falls back to _interruptible_api_call on provider errors indicating
         streaming is not supported.
         """
-        if self.api_mode == "codex_responses":
-            # Codex streams internally via _run_codex_stream. The main dispatch
-            # in _interruptible_api_call already calls it; we just need to
-            # ensure on_first_delta reaches it. Store it on the instance
-            # temporarily so _run_codex_stream can pick it up.
-            self._codex_on_first_delta = on_first_delta
-            try:
-                return self._interruptible_api_call(api_kwargs)
-            finally:
-                self._codex_on_first_delta = None
-
         # Bedrock Converse uses boto3's converse_stream() with real-time delta
         # callbacks — same UX as Anthropic and chat_completions streaming.
         if self.api_mode == "bedrock_converse":
@@ -6330,8 +5968,6 @@ class AIAgent:
             return self._try_activate_fallback()  # skip invalid, try next
 
         # Use centralized router for client construction.
-        # raw_codex=True because the main agent needs direct responses.stream()
-        # access for Codex providers.
         try:
             from agent.auxiliary_client import resolve_provider_client
             # Pass base_url and api_key from fallback config so custom
@@ -6345,7 +5981,7 @@ class AIAgent:
             if fb_base_url_hint and base_url_host_matches(fb_base_url_hint, "ollama.com") and not fb_api_key_hint:
                 fb_api_key_hint = os.getenv("OLLAMA_API_KEY") or None
             fb_client, _resolved_fb_model = resolve_provider_client(
-                fb_provider, model=fb_model, raw_codex=True,
+                fb_provider, model=fb_model,
                 explicit_base_url=fb_base_url_hint,
                 explicit_api_key=fb_api_key_hint)
             if fb_client is None:
@@ -6363,20 +5999,8 @@ class AIAgent:
             # Determine api_mode from provider / base URL / model
             fb_api_mode = "chat_completions"
             fb_base_url = str(fb_client.base_url)
-            if fb_provider == "openai-codex":
-                fb_api_mode = "codex_responses"
-            elif fb_provider == "anthropic" or fb_base_url.rstrip("/").lower().endswith("/anthropic"):
+            if fb_provider == "anthropic" or fb_base_url.rstrip("/").lower().endswith("/anthropic"):
                 fb_api_mode = "anthropic_messages"
-            elif self._is_direct_openai_url(fb_base_url):
-                fb_api_mode = "codex_responses"
-            elif self._provider_model_requires_responses_api(
-                fb_model,
-                provider=fb_provider,
-            ):
-                # GPT-5.x models usually need Responses API, but keep
-                # provider-specific exceptions like Copilot gpt-5-mini on
-                # chat completions.
-                fb_api_mode = "codex_responses"
             elif fb_provider == "bedrock" or (
                 base_url_hostname(fb_base_url).startswith("bedrock-runtime.")
                 and base_url_host_matches(fb_base_url, "amazonaws.com")
@@ -6772,15 +6396,6 @@ class AIAgent:
             self._anthropic_transport = t
         return t
 
-    def _get_codex_transport(self):
-        """Return the cached ResponsesApiTransport instance (lazy singleton)."""
-        t = getattr(self, "_codex_transport", None)
-        if t is None:
-            from agent.transports import get_transport
-            t = get_transport("codex_responses")
-            self._codex_transport = t
-        return t
-
     def _get_chat_completions_transport(self):
         """Return the cached ChatCompletionsTransport instance (lazy singleton)."""
         t = getattr(self, "_chat_completions_transport", None)
@@ -6948,34 +6563,6 @@ class AIAgent:
                 max_tokens=self.max_tokens or 4096,
                 region=region,
                 guardrail_config=guardrail,
-            )
-
-        if self.api_mode == "codex_responses":
-            _ct = self._get_codex_transport()
-            is_github_responses = (
-                base_url_host_matches(self.base_url, "models.github.ai")
-                or base_url_host_matches(self.base_url, "api.githubcopilot.com")
-            )
-            is_codex_backend = (
-                self.provider == "openai-codex"
-                or (
-                    self._base_url_hostname == "chatgpt.com"
-                    and "/backend-api/codex" in self._base_url_lower
-                )
-            )
-            is_xai_responses = self.provider == "xai" or self._base_url_hostname == "api.x.ai"
-            return _ct.build_kwargs(
-                model=self.model,
-                messages=api_messages,
-                tools=self.tools,
-                reasoning_config=self.reasoning_config,
-                session_id=getattr(self, "session_id", None),
-                max_tokens=self.max_tokens,
-                request_overrides=self.request_overrides,
-                is_github_responses=is_github_responses,
-                is_codex_backend=is_codex_backend,
-                is_xai_responses=is_xai_responses,
-                github_reasoning_extra=self._github_models_reasoning_extra_body() if is_github_responses else None,
             )
 
         # ── chat_completions (default) ─────────────────────────────────────
@@ -7232,12 +6819,6 @@ class AIAgent:
             if preserved:
                 msg["reasoning_details"] = preserved
 
-        # Codex Responses API: preserve encrypted reasoning items for
-        # multi-turn continuity. These get replayed as input on the next turn.
-        codex_items = getattr(assistant_message, "codex_reasoning_items", None)
-        if codex_items:
-            msg["codex_reasoning_items"] = codex_items
-
         if assistant_message.tool_calls:
             tool_calls = []
             for tool_call in assistant_message.tool_calls:
@@ -7344,15 +6925,13 @@ class AIAgent:
     def _should_sanitize_tool_calls(self) -> bool:
         """Determine if tool_calls need sanitization for strict APIs.
 
-        Codex Responses API uses fields like call_id and response_item_id
-        that are not part of the standard Chat Completions schema. These
-        fields must be stripped when calling any other API to avoid
-        validation errors (400 Bad Request).
+        call_id and response_item_id fields must be stripped when calling
+        APIs that don't accept them to avoid validation errors (400 Bad Request).
 
         Returns:
-            bool: True if sanitization is needed (non-Codex API), False otherwise.
+            bool: True if sanitization is needed.
         """
-        return self.api_mode != "codex_responses"
+        return True
 
     def flush_memories(self, messages: list = None, min_turns: int = None):
         """Give the model one turn to persist memories before context is lost.
@@ -7451,18 +7030,7 @@ class AIAgent:
                 _aux_available = False
                 response = None
 
-            if not _aux_available and self.api_mode == "codex_responses":
-                # No auxiliary client -- use the Codex Responses path directly
-                codex_kwargs = self._build_api_kwargs(api_messages)
-                codex_kwargs["tools"] = self._get_codex_transport().convert_tools([memory_tool_def])
-                if _flush_temperature is not None:
-                    codex_kwargs["temperature"] = _flush_temperature
-                else:
-                    codex_kwargs.pop("temperature", None)
-                if "max_output_tokens" in codex_kwargs:
-                    codex_kwargs["max_output_tokens"] = 5120
-                response = self._run_codex_stream(codex_kwargs)
-            elif not _aux_available and self.api_mode == "anthropic_messages":
+            if not _aux_available and self.api_mode == "anthropic_messages":
                 # Native Anthropic — use the transport for kwargs
                 _tflush = self._get_anthropic_transport()
                 ant_kwargs = _tflush.build_kwargs(
@@ -7488,17 +7056,7 @@ class AIAgent:
 
             # Extract tool calls from the response, handling all API formats
             tool_calls = []
-            if self.api_mode == "codex_responses" and not _aux_available:
-                _ct_flush = self._get_codex_transport()
-                _cnr_flush = _ct_flush.normalize_response(response)
-                if _cnr_flush and _cnr_flush.tool_calls:
-                    tool_calls = [
-                        SimpleNamespace(
-                            id=tc.id, type="function",
-                            function=SimpleNamespace(name=tc.name, arguments=tc.arguments),
-                        ) for tc in _cnr_flush.tool_calls
-                    ]
-            elif self.api_mode == "anthropic_messages" and not _aux_available:
+            if self.api_mode == "anthropic_messages" and not _aux_available:
                 _tfn = self._get_anthropic_transport()
                 _flush_nr = _tfn.normalize_response(response, strip_tool_prefix=self._is_anthropic_oauth)
                 if _flush_nr and _flush_nr.tool_calls:
@@ -8537,55 +8095,47 @@ class AIAgent:
             if _is_nous:
                 summary_extra_body["tags"] = ["product=hermes-agent"]
 
-            if self.api_mode == "codex_responses":
-                codex_kwargs = self._build_api_kwargs(api_messages)
-                codex_kwargs.pop("tools", None)
-                summary_response = self._run_codex_stream(codex_kwargs)
-                _ct_sum = self._get_codex_transport()
-                _cnr_sum = _ct_sum.normalize_response(summary_response)
-                final_response = (_cnr_sum.content or "").strip()
+            summary_kwargs = {
+                "model": self.model,
+                "messages": api_messages,
+            }
+            if _summary_temperature is not None:
+                summary_kwargs["temperature"] = _summary_temperature
+            if self.max_tokens is not None:
+                summary_kwargs.update(self._max_tokens_param(self.max_tokens))
+
+            # Include provider routing preferences
+            provider_preferences = {}
+            if self.providers_allowed:
+                provider_preferences["only"] = self.providers_allowed
+            if self.providers_ignored:
+                provider_preferences["ignore"] = self.providers_ignored
+            if self.providers_order:
+                provider_preferences["order"] = self.providers_order
+            if self.provider_sort:
+                provider_preferences["sort"] = self.provider_sort
+            if provider_preferences:
+                summary_extra_body["provider"] = provider_preferences
+
+            if summary_extra_body:
+                summary_kwargs["extra_body"] = summary_extra_body
+
+            if self.api_mode == "anthropic_messages":
+                _tsum = self._get_anthropic_transport()
+                _ant_kw = _tsum.build_kwargs(model=self.model, messages=api_messages, tools=None,
+                               max_tokens=self.max_tokens, reasoning_config=self.reasoning_config,
+                               is_oauth=self._is_anthropic_oauth,
+                               preserve_dots=self._anthropic_preserve_dots())
+                summary_response = self._anthropic_messages_create(_ant_kw)
+                _sum_nr = _tsum.normalize_response(summary_response, strip_tool_prefix=self._is_anthropic_oauth)
+                final_response = (_sum_nr.content or "").strip()
             else:
-                summary_kwargs = {
-                    "model": self.model,
-                    "messages": api_messages,
-                }
-                if _summary_temperature is not None:
-                    summary_kwargs["temperature"] = _summary_temperature
-                if self.max_tokens is not None:
-                    summary_kwargs.update(self._max_tokens_param(self.max_tokens))
+                summary_response = self._ensure_primary_openai_client(reason="iteration_limit_summary").chat.completions.create(**summary_kwargs)
 
-                # Include provider routing preferences
-                provider_preferences = {}
-                if self.providers_allowed:
-                    provider_preferences["only"] = self.providers_allowed
-                if self.providers_ignored:
-                    provider_preferences["ignore"] = self.providers_ignored
-                if self.providers_order:
-                    provider_preferences["order"] = self.providers_order
-                if self.provider_sort:
-                    provider_preferences["sort"] = self.provider_sort
-                if provider_preferences:
-                    summary_extra_body["provider"] = provider_preferences
-
-                if summary_extra_body:
-                    summary_kwargs["extra_body"] = summary_extra_body
-
-                if self.api_mode == "anthropic_messages":
-                    _tsum = self._get_anthropic_transport()
-                    _ant_kw = _tsum.build_kwargs(model=self.model, messages=api_messages, tools=None,
-                                   max_tokens=self.max_tokens, reasoning_config=self.reasoning_config,
-                                   is_oauth=self._is_anthropic_oauth,
-                                   preserve_dots=self._anthropic_preserve_dots())
-                    summary_response = self._anthropic_messages_create(_ant_kw)
-                    _sum_nr = _tsum.normalize_response(summary_response, strip_tool_prefix=self._is_anthropic_oauth)
-                    final_response = (_sum_nr.content or "").strip()
+                if summary_response.choices and summary_response.choices[0].message.content:
+                    final_response = summary_response.choices[0].message.content
                 else:
-                    summary_response = self._ensure_primary_openai_client(reason="iteration_limit_summary").chat.completions.create(**summary_kwargs)
-
-                    if summary_response.choices and summary_response.choices[0].message.content:
-                        final_response = summary_response.choices[0].message.content
-                    else:
-                        final_response = ""
+                    final_response = ""
 
             if final_response:
                 if "<think>" in final_response:
@@ -8596,14 +8146,7 @@ class AIAgent:
                     final_response = "I reached the iteration limit and couldn't generate a summary."
             else:
                 # Retry summary generation
-                if self.api_mode == "codex_responses":
-                    codex_kwargs = self._build_api_kwargs(api_messages)
-                    codex_kwargs.pop("tools", None)
-                    retry_response = self._run_codex_stream(codex_kwargs)
-                    _ct_retry = self._get_codex_transport()
-                    _cnr_retry = _ct_retry.normalize_response(retry_response)
-                    final_response = (_cnr_retry.content or "").strip()
-                elif self.api_mode == "anthropic_messages":
+                if self.api_mode == "anthropic_messages":
                     _tretry = self._get_anthropic_transport()
                     _ant_kw2 = _tretry.build_kwargs(model=self.model, messages=api_messages, tools=None,
                                     is_oauth=self._is_anthropic_oauth,
@@ -8725,7 +8268,6 @@ class AIAgent:
         self._invalid_json_retries = 0
         self._empty_content_retries = 0
         self._incomplete_scratchpad_retries = 0
-        self._codex_incomplete_retries = 0
         self._thinking_prefill_retries = 0
         self._post_tool_empty_retried = False
         self._last_content_with_tools = None
@@ -8970,7 +8512,6 @@ class AIAgent:
         api_call_count = 0
         final_response = None
         interrupted = False
-        codex_ack_continuations = 0
         length_continue_retries = 0
         truncated_tool_call_retries = 0
         truncated_response_prefix = ""
@@ -9294,7 +8835,6 @@ class AIAgent:
             max_retries = 3
             primary_recovery_attempted = False
             max_compression_attempts = 3
-            codex_auth_retry_attempted=False
             anthropic_auth_retry_attempted=False
             nous_auth_retry_attempted=False
             thinking_sig_retry_attempted = False
@@ -9359,8 +8899,6 @@ class AIAgent:
                     api_kwargs = self._build_api_kwargs(api_messages)
                     if self._force_ascii_payload:
                         _sanitize_structure_non_ascii(api_kwargs)
-                    if self.api_mode == "codex_responses":
-                        api_kwargs = self._get_codex_transport().preflight_kwargs(api_kwargs, allow_stream=False)
 
                     try:
                         from hermes_cli.plugins import invoke_hook as _invoke_hook
@@ -9447,36 +8985,7 @@ class AIAgent:
                     # Validate response shape before proceeding
                     response_invalid = False
                     error_details = []
-                    if self.api_mode == "codex_responses":
-                        _ct_v = self._get_codex_transport()
-                        if not _ct_v.validate_response(response):
-                            if response is None:
-                                response_invalid = True
-                                error_details.append("response is None")
-                            else:
-                                # output_text fallback: stream backfill may have failed
-                                # but normalize can still recover from output_text
-                                _out_text = getattr(response, "output_text", None)
-                                _out_text_stripped = _out_text.strip() if isinstance(_out_text, str) else ""
-                                if _out_text_stripped:
-                                    logger.debug(
-                                        "Codex response.output is empty but output_text is present "
-                                        "(%d chars); deferring to normalization.",
-                                        len(_out_text_stripped),
-                                    )
-                                else:
-                                    _resp_status = getattr(response, "status", None)
-                                    _resp_incomplete = getattr(response, "incomplete_details", None)
-                                    logger.warning(
-                                        "Codex response.output is empty after stream backfill "
-                                        "(status=%s, incomplete_details=%s, model=%s). %s",
-                                        _resp_status, _resp_incomplete,
-                                        getattr(response, "model", None),
-                                        f"api_mode={self.api_mode} provider={self.provider}",
-                                    )
-                                    response_invalid = True
-                                    error_details.append("response.output is empty")
-                    elif self.api_mode == "anthropic_messages":
+                    if self.api_mode == "anthropic_messages":
                         _tv = self._get_anthropic_transport()
                         if not _tv.validate_response(response):
                             response_invalid = True
@@ -9640,19 +9149,7 @@ class AIAgent:
                         continue  # Retry the API call
 
                     # Check finish_reason before proceeding
-                    if self.api_mode == "codex_responses":
-                        status = getattr(response, "status", None)
-                        incomplete_details = getattr(response, "incomplete_details", None)
-                        incomplete_reason = None
-                        if isinstance(incomplete_details, dict):
-                            incomplete_reason = incomplete_details.get("reason")
-                        else:
-                            incomplete_reason = getattr(incomplete_details, "reason", None)
-                        if status == "incomplete" and incomplete_reason in {"max_output_tokens", "length"}:
-                            finish_reason = "length"
-                        else:
-                            finish_reason = "stop"
-                    elif self.api_mode == "anthropic_messages":
+                    if self.api_mode == "anthropic_messages":
                         _tfr = self._get_anthropic_transport()
                         finish_reason = _tfr.map_finish_reason(response.stop_reason)
                     elif self.api_mode == "bedrock_converse":
@@ -10211,16 +9708,6 @@ class AIAgent:
                     if recovered_with_pool:
                         continue
                     if (
-                        self.api_mode == "codex_responses"
-                        and self.provider == "openai-codex"
-                        and status_code == 401
-                        and not codex_auth_retry_attempted
-                    ):
-                        codex_auth_retry_attempted = True
-                        if self._try_refresh_codex_client_credentials(force=True):
-                            self._vprint(f"{self.log_prefix}🔐 Codex auth refreshed after 401. Retrying request...")
-                            continue
-                    if (
                         self.api_mode == "chat_completions"
                         and self.provider == "nous"
                         and status_code == 401
@@ -10732,17 +10219,11 @@ class AIAgent:
                         self._vprint(f"{self.log_prefix}   🌐 Endpoint: {_base}", force=True)
                         # Actionable guidance for common auth errors
                         if classified.is_auth or classified.reason == FailoverReason.billing:
-                            if _provider == "openai-codex" and status_code == 401:
-                                self._vprint(f"{self.log_prefix}   💡 Codex OAuth token was rejected (HTTP 401). Your token may have been", force=True)
-                                self._vprint(f"{self.log_prefix}      refreshed by another client (Codex CLI, VS Code). To fix:", force=True)
-                                self._vprint(f"{self.log_prefix}      1. Run `codex` in your terminal to generate fresh tokens.", force=True)
-                                self._vprint(f"{self.log_prefix}      2. Then run `hermes auth` to re-authenticate.", force=True)
-                            else:
-                                self._vprint(f"{self.log_prefix}   💡 Your API key was rejected by the provider. Check:", force=True)
-                                self._vprint(f"{self.log_prefix}      • Is the key valid? Run: hermes setup", force=True)
-                                self._vprint(f"{self.log_prefix}      • Does your account have access to {_model}?", force=True)
-                                if base_url_host_matches(str(_base), "openrouter.ai"):
-                                    self._vprint(f"{self.log_prefix}      • Check credits: https://openrouter.ai/settings/credits", force=True)
+                            self._vprint(f"{self.log_prefix}   💡 Your API key was rejected by the provider. Check:", force=True)
+                            self._vprint(f"{self.log_prefix}      • Is the key valid? Run: hermes setup", force=True)
+                            self._vprint(f"{self.log_prefix}      • Does your account have access to {_model}?", force=True)
+                            if base_url_host_matches(str(_base), "openrouter.ai"):
+                                self._vprint(f"{self.log_prefix}      • Check credits: https://openrouter.ai/settings/credits", force=True)
                         else:
                             self._vprint(f"{self.log_prefix}   💡 This type of error won't be fixed by retrying.", force=True)
                         logging.error(f"{self.log_prefix}Non-retryable client error: {api_error}")
@@ -10935,42 +10416,7 @@ class AIAgent:
                 break
 
             try:
-                if self.api_mode == "codex_responses":
-                    _ct = self._get_codex_transport()
-                    _cnr = _ct.normalize_response(response)
-                    # Back-compat shim: downstream expects SimpleNamespace with
-                    # codex-specific fields (.codex_reasoning_items, .reasoning_details,
-                    # and .call_id/.response_item_id on tool calls).
-                    _tc_list = None
-                    if _cnr.tool_calls:
-                        _tc_list = []
-                        for tc in _cnr.tool_calls:
-                            _tc_ns = SimpleNamespace(
-                                id=tc.id, type="function",
-                                function=SimpleNamespace(name=tc.name, arguments=tc.arguments),
-                            )
-                            if tc.provider_data:
-                                if tc.provider_data.get("call_id"):
-                                    _tc_ns.call_id = tc.provider_data["call_id"]
-                                if tc.provider_data.get("response_item_id"):
-                                    _tc_ns.response_item_id = tc.provider_data["response_item_id"]
-                            _tc_list.append(_tc_ns)
-                    assistant_message = SimpleNamespace(
-                        content=_cnr.content,
-                        tool_calls=_tc_list or None,
-                        reasoning=_cnr.reasoning,
-                        reasoning_content=None,
-                        codex_reasoning_items=(
-                            _cnr.provider_data.get("codex_reasoning_items")
-                            if _cnr.provider_data else None
-                        ),
-                        reasoning_details=(
-                            _cnr.provider_data.get("reasoning_details")
-                            if _cnr.provider_data else None
-                        ),
-                    )
-                    finish_reason = _cnr.finish_reason
-                elif self.api_mode == "anthropic_messages":
+                if self.api_mode == "anthropic_messages":
                     _transport = self._get_anthropic_transport()
                     _nr = _transport.normalize_response(
                         response, strip_tool_prefix=self._is_anthropic_oauth
@@ -11106,55 +10552,6 @@ class AIAgent:
                 # Reset incomplete scratchpad counter on clean response
                 self._incomplete_scratchpad_retries = 0
 
-                if self.api_mode == "codex_responses" and finish_reason == "incomplete":
-                    self._codex_incomplete_retries += 1
-
-                    interim_msg = self._build_assistant_message(assistant_message, finish_reason)
-                    interim_has_content = bool((interim_msg.get("content") or "").strip())
-                    interim_has_reasoning = bool(interim_msg.get("reasoning", "").strip()) if isinstance(interim_msg.get("reasoning"), str) else False
-                    interim_has_codex_reasoning = bool(interim_msg.get("codex_reasoning_items"))
-
-                    if interim_has_content or interim_has_reasoning or interim_has_codex_reasoning:
-                        last_msg = messages[-1] if messages else None
-                        # Duplicate detection: two consecutive incomplete assistant
-                        # messages with identical content AND reasoning are collapsed.
-                        # For reasoning-only messages (codex_reasoning_items differ but
-                        # visible content/reasoning are both empty), we also compare
-                        # the encrypted items to avoid silently dropping new state.
-                        last_codex_items = last_msg.get("codex_reasoning_items") if isinstance(last_msg, dict) else None
-                        interim_codex_items = interim_msg.get("codex_reasoning_items")
-                        duplicate_interim = (
-                            isinstance(last_msg, dict)
-                            and last_msg.get("role") == "assistant"
-                            and last_msg.get("finish_reason") == "incomplete"
-                            and (last_msg.get("content") or "") == (interim_msg.get("content") or "")
-                            and (last_msg.get("reasoning") or "") == (interim_msg.get("reasoning") or "")
-                            and last_codex_items == interim_codex_items
-                        )
-                        if not duplicate_interim:
-                            messages.append(interim_msg)
-                            self._emit_interim_assistant_message(interim_msg)
-
-                    if self._codex_incomplete_retries < 3:
-                        if not self.quiet_mode:
-                            self._vprint(f"{self.log_prefix}↻ Codex response incomplete; continuing turn ({self._codex_incomplete_retries}/3)")
-                        self._session_messages = messages
-                        self._save_session_log(messages)
-                        continue
-
-                    self._codex_incomplete_retries = 0
-                    self._persist_session(messages, conversation_history)
-                    return {
-                        "final_response": None,
-                        "messages": messages,
-                        "api_calls": api_call_count,
-                        "completed": False,
-                        "partial": True,
-                        "error": "Codex response remained incomplete after 3 continuation attempts",
-                    }
-                elif hasattr(self, "_codex_incomplete_retries"):
-                    self._codex_incomplete_retries = 0
-                
                 # Check for tool calls
                 if assistant_message.tool_calls:
                     if not self.quiet_mode:
@@ -11705,35 +11102,6 @@ class AIAgent:
                     # Reset retry counter/signature on successful content
                     self._empty_content_retries = 0
                     self._thinking_prefill_retries = 0
-
-                    if (
-                        self.api_mode == "codex_responses"
-                        and self.valid_tool_names
-                        and codex_ack_continuations < 2
-                        and self._looks_like_codex_intermediate_ack(
-                            user_message=user_message,
-                            assistant_content=final_response,
-                            messages=messages,
-                        )
-                    ):
-                        codex_ack_continuations += 1
-                        interim_msg = self._build_assistant_message(assistant_message, "incomplete")
-                        messages.append(interim_msg)
-                        self._emit_interim_assistant_message(interim_msg)
-
-                        continue_msg = {
-                            "role": "user",
-                            "content": (
-                                "[System: Continue now. Execute the required tool calls and only "
-                                "send your final answer after completing the task.]"
-                            ),
-                        }
-                        messages.append(continue_msg)
-                        self._session_messages = messages
-                        self._save_session_log(messages)
-                        continue
-
-                    codex_ack_continuations = 0
 
                     if truncated_response_prefix:
                         final_response = truncated_response_prefix + final_response
