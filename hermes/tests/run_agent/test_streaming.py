@@ -1133,3 +1133,88 @@ class TestPartialToolCallWarning:
             f"Unexpected warning on text-only partial stream: {content!r}"
         )
 
+    @patch("run_agent.AIAgent._replace_primary_openai_client")
+    @patch("run_agent.AIAgent._reset_stream_delivery_tracking")
+    @patch("run_agent.AIAgent._create_request_openai_client")
+    @patch("run_agent.AIAgent._close_request_openai_client")
+    def test_transient_error_mid_tool_retries_silently(
+        self, mock_close, mock_create, mock_reset, mock_replace
+    ):
+        """When a transient connection error (RemoteProtocolError) hits mid
+        tool-call after text was already sent, the agent retries silently
+        instead of embedding a 'Stream stalled' warning.  On success the
+        response contains the completed tool call with no stall message."""
+        import httpx
+        from run_agent import AIAgent
+
+        call_count = {"n": 0}
+
+        def _stream_factory(*a, **kw):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # First attempt: text + partial tool call → transient error
+                yield _make_stream_chunk(content="Writing the file now: ")
+                yield _make_stream_chunk(tool_calls=[
+                    _make_tool_call_delta(index=0, tc_id="call_x", name="write_file"),
+                ])
+                yield _make_stream_chunk(tool_calls=[
+                    _make_tool_call_delta(index=0, arguments='{"path": "/tmp/f", '),
+                ])
+                raise httpx.RemoteProtocolError("peer closed connection without sending a response", request=MagicMock())
+            else:
+                # Second attempt: clean completion
+                yield _make_stream_chunk(content="Writing the file now: ")
+                yield _make_stream_chunk(tool_calls=[
+                    _make_tool_call_delta(index=0, tc_id="call_x", name="write_file"),
+                ])
+                yield _make_stream_chunk(tool_calls=[
+                    _make_tool_call_delta(index=0, arguments='{"path": "/tmp/f", "content": "ok"}'),
+                ])
+                yield _make_stream_chunk(finish_reason="tool_calls")
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = _stream_factory
+        mock_create.return_value = mock_client
+
+        agent = AIAgent(
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1",
+            model="test/model",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+        )
+        agent.api_mode = "chat_completions"
+        agent._interrupt_requested = False
+        agent._current_streamed_assistant_text = ""
+
+        fired_deltas: list = []
+        agent._fire_stream_delta = lambda text: fired_deltas.append(text)
+
+        import os as _os
+        _prev = _os.environ.get("HERMES_STREAM_RETRIES")
+        _os.environ["HERMES_STREAM_RETRIES"] = "2"
+        try:
+            response = agent._interruptible_streaming_api_call({})
+        finally:
+            if _prev is None:
+                _os.environ.pop("HERMES_STREAM_RETRIES", None)
+            else:
+                _os.environ["HERMES_STREAM_RETRIES"] = _prev
+
+        assert call_count["n"] == 2, (
+            f"Expected 2 API calls (initial + retry), got {call_count['n']}"
+        )
+        assert response.id != "partial-stream-stub", (
+            "Response should not be a stub when silent retry succeeds"
+        )
+        assert response.choices[0].message.tool_calls is not None, (
+            "Completed tool call should be present after successful retry"
+        )
+        assert "Stream stalled" not in "".join(fired_deltas), (
+            f"Stall warning should not appear in fired deltas when retry succeeded: {fired_deltas}"
+        )
+        assert any("reconnecting" in d.lower() for d in fired_deltas), (
+            f"Expected inline reconnecting marker in deltas: {fired_deltas}"
+        )
+

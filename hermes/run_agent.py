@@ -5839,14 +5839,87 @@ class AIAgent:
                         return  # success
                     except Exception as e:
                         if deltas_were_sent["yes"]:
-                            # Streaming failed AFTER some tokens were already
-                            # delivered.  Don't retry or fall back — partial
-                            # content already reached the user.
-                            logger.warning(
-                                "Streaming failed after partial delivery, not retrying: %s", e
+                            # Streaming failed AFTER some tokens were delivered.
+                            # If a tool call was in-flight and the error is
+                            # transient, retry silently — no tool has executed
+                            # yet so it's safe wrt side-effects.  The user sees
+                            # a brief inline reconnecting marker then the agent
+                            # continues; far better than a "retry manually" stub.
+                            # Otherwise fall through to the stub path.
+                            _partial_tool_in_flight = bool(
+                                result.get("partial_tool_names")
                             )
-                            result["error"] = e
-                            return
+                            _is_timeout_mid = isinstance(
+                                e, (_httpx.ReadTimeout, _httpx.ConnectTimeout, _httpx.PoolTimeout)
+                            )
+                            _is_conn_err_mid = isinstance(
+                                e, (_httpx.ConnectError, _httpx.RemoteProtocolError, ConnectionError)
+                            )
+                            _is_sse_conn_err_mid = False
+                            if not _is_timeout_mid and not _is_conn_err_mid:
+                                from openai import APIError as _APIError_mid
+                                if isinstance(e, _APIError_mid) and not getattr(e, "status_code", None):
+                                    _err_lower_mid = str(e).lower()
+                                    _is_sse_conn_err_mid = any(
+                                        phrase in _err_lower_mid
+                                        for phrase in (
+                                            "connection lost", "connection reset",
+                                            "connection closed", "connection terminated",
+                                            "network error", "network connection",
+                                            "terminated", "peer closed",
+                                            "broken pipe", "upstream connect error",
+                                        )
+                                    )
+                            _can_silent_retry = (
+                                _partial_tool_in_flight
+                                and (_is_timeout_mid or _is_conn_err_mid or _is_sse_conn_err_mid)
+                                and _stream_attempt < _max_stream_retries
+                            )
+                            if not _can_silent_retry:
+                                logger.warning(
+                                    "Streaming failed after partial delivery, not retrying: %s", e
+                                )
+                                result["error"] = e
+                                return
+                            # Tool call in-flight + transient error + retries remaining:
+                            # retry silently, resetting accumulators so the next attempt's
+                            # chunks don't concat onto the dead stream's partial JSON.
+                            logger.info(
+                                "Streaming attempt %s/%s died mid tool-call "
+                                "(%s: %s) after user-visible text; retrying "
+                                "silently to avoid losing the action.",
+                                _stream_attempt + 1,
+                                _max_stream_retries + 1,
+                                type(e).__name__,
+                                e,
+                            )
+                            try:
+                                self._fire_stream_delta(
+                                    "\n\n⚠ Connection dropped mid tool-call; "
+                                    "reconnecting…\n\n"
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                self._reset_stream_delivery_tracking()
+                            except Exception:
+                                pass
+                            result["partial_tool_names"] = []
+                            deltas_were_sent["yes"] = False
+                            first_delta_fired["done"] = False
+                            stale = request_client_holder.get("client")
+                            if stale is not None:
+                                self._close_request_openai_client(
+                                    stale, reason="stream_mid_tool_retry_cleanup"
+                                )
+                                request_client_holder["client"] = None
+                            try:
+                                self._replace_primary_openai_client(
+                                    reason="stream_mid_tool_retry_pool_cleanup"
+                                )
+                            except Exception:
+                                pass
+                            continue
 
                         _is_timeout = isinstance(
                             e, (_httpx.ReadTimeout, _httpx.ConnectTimeout, _httpx.PoolTimeout)
@@ -5897,10 +5970,12 @@ class AIAgent:
                                     type(e).__name__,
                                     e,
                                 )
-                                self._emit_status(
-                                    f"⚠️ Connection to provider dropped "
-                                    f"({type(e).__name__}). Reconnecting… "
-                                    f"(attempt {_stream_attempt + 2}/{_max_stream_retries + 1})"
+                                logger.info(
+                                    "Connection to provider dropped (%s). Reconnecting… "
+                                    "(attempt %s/%s)",
+                                    type(e).__name__,
+                                    _stream_attempt + 2,
+                                    _max_stream_retries + 1,
                                 )
                                 self._touch_activity(
                                     f"stream retry {_stream_attempt + 2}/{_max_stream_retries + 1} "
@@ -5921,7 +5996,6 @@ class AIAgent:
                                     )
                                 except Exception:
                                     pass
-                                self._emit_status("🔄 Reconnected — resuming…")
                                 continue
                             self._emit_status(
                                 "❌ Connection to provider failed after "
