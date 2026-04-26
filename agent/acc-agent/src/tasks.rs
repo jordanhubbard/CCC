@@ -793,12 +793,19 @@ async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<Stri
 async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &str) -> Result<String, String> {
     let ws = workspace.to_str().unwrap_or(".");
 
+    // Fetch latest remote state so we know what origin/<branch> looks like.
+    // Best-effort: a fetch failure here just means we'll discover the
+    // problem on push.
+    let _ = Command::new("git")
+        .args(["-C", ws, "fetch", "origin", "--quiet"])
+        .output().await;
+
     let checkout = Command::new("git")
         .args(["-C", ws, "checkout", "-B", branch])
         .output().await
         .map_err(|e| format!("git checkout: {e}"))?;
     if !checkout.status.success() {
-        return Err(String::from_utf8_lossy(&checkout.stderr).to_string());
+        return Err(format!("git checkout: {}", flatten_stderr(&checkout.stderr)));
     }
 
     let add = Command::new("git")
@@ -806,7 +813,7 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
         .output().await
         .map_err(|e| format!("git add: {e}"))?;
     if !add.status.success() {
-        return Err(String::from_utf8_lossy(&add.stderr).to_string());
+        return Err(format!("git add: {}", flatten_stderr(&add.stderr)));
     }
 
     let commit = Command::new("git")
@@ -816,9 +823,17 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
     if !commit.status.success() {
         let stderr = String::from_utf8_lossy(&commit.stderr).to_string();
         if !stderr.contains("nothing to commit") {
-            return Err(stderr);
+            return Err(format!("git commit: {}", flatten_stderr(&commit.stderr)));
         }
     }
+
+    // Rebase any remote-side commits on phase/<branch> on top of ours so a
+    // concurrent agent's earlier push doesn't reject us with "fetch first".
+    // Best-effort: the remote branch may not exist yet (first phase_commit
+    // ever), in which case rebase fails and we just proceed to push.
+    let _ = Command::new("git")
+        .args(["-C", ws, "pull", "--rebase", "origin", branch, "--quiet"])
+        .output().await;
 
     let push = tokio::time::timeout(
         Duration::from_secs(600),
@@ -830,8 +845,31 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
     if push.status.success() {
         Ok(String::from_utf8_lossy(&push.stdout).to_string())
     } else {
-        Err(String::from_utf8_lossy(&push.stderr).to_string())
+        Err(format!("git push: {}", flatten_stderr(&push.stderr)))
     }
+}
+
+/// Collapse a multi-line stderr into the most informative single line:
+/// prefer lines that look like errors (`error:`, `fatal:`, `! [rejected]`,
+/// `failed to`) over `hint:` lines, then fall back to first non-empty line.
+/// Loggers truncate at the first newline, so without this the agent's task
+/// log shows just "hint: ..." while the real cause is buried below.
+fn flatten_stderr(stderr: &[u8]) -> String {
+    let s = String::from_utf8_lossy(stderr);
+    let lines: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() { return String::new(); }
+    for l in &lines {
+        let t = l.trim_start();
+        if t.starts_with("error:")
+            || t.starts_with("fatal:")
+            || t.starts_with("! [rejected]")
+            || t.starts_with("failed to")
+        {
+            return (*l).to_string();
+        }
+    }
+    // No diagnostic line found — return first non-empty (often a hint).
+    lines[0].to_string()
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
