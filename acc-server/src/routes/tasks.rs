@@ -432,17 +432,49 @@ async fn complete_task(
     drop(db); // release lock before potentially calling into projects state
     let _ = state.bus_tx.send(json!({"type":"tasks:completed","task_id":id,"agent":agent}).to_string());
 
-    // CCC-tk0: any completed task may have modified the project's
-    // AgentFS workspace. Mark the project dirty so a subsequent
-    // milestone-commit task knows to push and clear the bit. The
-    // milestone-commit task itself calls POST /api/projects/:id/clean
-    // so it doesn't re-mark its own project dirty.
+    // CCC-tk0 / drift-fix #3: any completed task may have modified the
+    // project's AgentFS workspace. Mark the project dirty ONLY if the
+    // workspace actually has uncommitted changes — agents whose writes
+    // silently fail (e.g., bullwinkle TCC) shouldn't trigger a phase
+    // commit of an unchanged tree. The milestone-commit task itself
+    // calls POST /api/projects/:id/clean so it doesn't re-mark its own
+    // project dirty.
     if let Some(pid) = task.get("project_id").and_then(|v| v.as_str()).map(String::from) {
         let task_type = task.get("task_type").and_then(|v| v.as_str()).unwrap_or("").to_string();
         if !pid.is_empty() && task_type != "phase_commit" {
             let state_clone = state.clone();
             tokio::spawn(async move {
-                let _ = crate::routes::projects::set_agentfs_dirty(&state_clone, &pid, true).await;
+                let projects = state_clone.projects.read().await;
+                let agentfs_path = projects.iter()
+                    .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(pid.as_str()))
+                    .and_then(|p| p.get("agentfs_path").and_then(|v| v.as_str()))
+                    .map(String::from);
+                drop(projects);
+                let actually_dirty = match agentfs_path.as_deref() {
+                    Some(p) if std::path::Path::new(p).join(".git").exists() => {
+                        match tokio::process::Command::new("git")
+                            .args(["-C", p, "status", "--porcelain"])
+                            .output().await
+                        {
+                            Ok(o) if o.status.success() => !o.stdout.is_empty(),
+                            // If the git command fails (e.g., not a checkout
+                            // on this host), trust the agent and mark dirty.
+                            _ => true,
+                        }
+                    }
+                    // No accessible agentfs path: fall back to the old
+                    // behavior of trusting the task signal.
+                    _ => true,
+                };
+                if actually_dirty {
+                    let _ = crate::routes::projects::set_agentfs_dirty(&state_clone, &pid, true).await;
+                } else {
+                    tracing::info!(
+                        component = "tasks",
+                        project = %pid,
+                        "task completed but git status --porcelain is empty — not marking dirty (likely silent write failure)",
+                    );
+                }
             });
         }
     }

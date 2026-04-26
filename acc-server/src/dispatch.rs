@@ -174,6 +174,83 @@ async fn tick(state: &Arc<AppState>, cfg: &DispatchConfig) {
     // posted progress. Defense in depth alongside agent-side
     // RECLAIM_COOLDOWN + heartbeat (CCC-t9b).
     sweep_expired_claims(state).await;
+
+    // Drift-fix #1: pull origin/main into clean AgentFS workspaces so
+    // they don't lag behind the actual git state. Skip dirty projects
+    // and projects with in-flight tasks (don't yank the rug).
+    auto_refresh_workspaces(state).await;
+}
+
+// ── Workspace refresh (drift-fix #1) ─────────────────────────────────────
+//
+// Once a project is git-cloned into AgentFS at create time, nothing
+// pulls origin/main again. If a human or CI pushes to main via a PR,
+// AgentFS stays frozen on the old clone state and agents work against
+// stale source. This periodic refresh closes that drift mode.
+//
+// Interval is intentionally coarse (REFRESH_TICK_INTERVAL_SECS) so we
+// don't fight phase_commit pushes or hammer remote git.
+
+const REFRESH_TICK_INTERVAL_SECS: i64 = 600; // every 10 minutes
+
+async fn auto_refresh_workspaces(state: &Arc<AppState>) {
+    // Throttle: only run on ticks that align with the refresh interval.
+    // tick() runs every cfg.tick_secs (default 15s); we run roughly
+    // once per REFRESH_TICK_INTERVAL_SECS.
+    let now_unix = Utc::now().timestamp();
+    if now_unix % REFRESH_TICK_INTERVAL_SECS >= 15 {
+        return;
+    }
+
+    let projects = state.projects.read().await.clone();
+    for project in projects.iter() {
+        let project_id = match project.get("id").and_then(|v| v.as_str()) {
+            Some(id) if !id.is_empty() => id.to_string(),
+            _ => continue,
+        };
+        let path = match project.get("agentfs_path").and_then(|v| v.as_str()) {
+            Some(p) if !p.is_empty() => p.to_string(),
+            _ => continue,
+        };
+        let status = project.get("status").and_then(|v| v.as_str()).unwrap_or("active");
+        if status != "active" { continue; }
+        let dirty = project.get("agentfs_dirty").and_then(|v| v.as_bool()).unwrap_or(false);
+        if dirty { continue; } // never overwrite uncommitted work
+        let clone_status = project.get("clone_status").and_then(|v| v.as_str()).unwrap_or("");
+        if clone_status != "ready" { continue; } // not yet cloned, or failed
+
+        // Skip if any task for this project is currently in flight —
+        // an agent is actively working in this directory and a pull
+        // mid-task could surprise its bash/editor tool calls.
+        let in_flight: i64 = {
+            let db = state.fleet_db.lock().await;
+            db.query_row(
+                "SELECT COUNT(*) FROM fleet_tasks
+                 WHERE project_id=?1 AND status IN ('claimed','in_progress')",
+                params![project_id],
+                |row| row.get(0),
+            ).unwrap_or(0)
+        };
+        if in_flight > 0 { continue; }
+
+        match crate::routes::projects::git_pull_workspace(&path).await {
+            Ok(s) if s == "already up to date" => {
+                // Quiet success — don't spam the log every 10 min for clean projects
+            }
+            Ok(s) => {
+                info!("[dispatch] refreshed AgentFS for project {project_id}: {s}");
+                let _ = state.bus_tx.send(json!({
+                    "type":"projects:refreshed","project_id":project_id,"summary":s,"source":"auto"
+                }).to_string());
+            }
+            Err(e) => {
+                // Diverged or fetch failure — log but don't escalate; the
+                // operator can investigate. We never do non-FF merges
+                // automatically.
+                info!("[dispatch] refresh failed for project {project_id}: {e}");
+            }
+        }
+    }
 }
 
 // ── Stale-claim sweeper (CCC-t9b) ─────────────────────────────────────────
@@ -247,6 +324,24 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
         let project_status = project.get("status").and_then(|v| v.as_str()).unwrap_or("active");
         if project_status != "active" {
             continue; // skip archived projects
+        }
+
+        // Drift-fix #4: stop auto-filing if the last 3 phase_commits for
+        // this project failed in a row. Operator must POST /clean
+        // manually (or fix the underlying problem and reset) before we
+        // resume. Prevents queueing dozens of doomed tasks.
+        let consecutive_failures = project.get("phase_commit_consecutive_failures")
+            .and_then(|v| v.as_i64()).unwrap_or(0);
+        if consecutive_failures >= 3 {
+            // Log once per project per 10 ticks (~150s) so the alert is
+            // visible without spamming.
+            if Utc::now().timestamp() % 150 < 15 {
+                info!(
+                    "[dispatch] phase_commit auto-fill paused for project {project_id} \
+                     — {consecutive_failures} consecutive failures; reset via /clean or manual fix"
+                );
+            }
+            continue;
         }
 
         // Skip if a phase_commit task is already pending or in flight for

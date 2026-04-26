@@ -677,6 +677,20 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
     match run_git_phase_commit(&workspace, &branch, &commit_msg).await {
         Ok(out) => {
             log(cfg, &format!("phase_commit {task_id}: pushed {branch}"));
+
+            // Drift-fix #2: phase branches were piling up on origin
+            // without ever being merged back to main (852 unmerged
+            // commits on phase/milestone observed). Try a fast-forward
+            // merge of phase/<phase> back into main and push. If the
+            // FF can't happen (e.g. someone landed a PR on main since
+            // we branched), leave main alone and surface for human
+            // review — never do non-FF merges automatically.
+            let merge_outcome = run_git_merge_to_main(&workspace, &branch).await;
+            match &merge_outcome {
+                Ok(s) => log(cfg, &format!("phase_commit {task_id}: merged {branch} → main ({s})")),
+                Err(e) => log(cfg, &format!("phase_commit {task_id}: merge to main skipped/failed: {e}")),
+            }
+
             // CCC-tk0: this is the milestone-commit task. Now that the
             // AgentFS state is committed and pushed to git, mark the
             // project's AgentFS as clean. Server-side dirty bit gets
@@ -689,10 +703,23 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
                     log(cfg, &format!("phase_commit {task_id}: marked project {project_id} clean"));
                 }
             }
-            complete_task(cfg, client, task_id, &format!("pushed branch {branch}: {out}")).await;
+            let summary = match merge_outcome {
+                Ok(s) => format!("pushed {branch}: {out}; main: {s}"),
+                Err(e) => format!("pushed {branch}: {out}; main: not merged ({e})"),
+            };
+            complete_task(cfg, client, task_id, &summary).await;
         }
         Err(e) => {
             log(cfg, &format!("phase_commit {task_id} git failed: {e}"));
+            // Drift-fix #4: tell the server this attempt failed so the
+            // dispatch loop can stop auto-filing if we hit 3 in a row.
+            if !project_id.is_empty() {
+                let path = format!("/api/projects/{project_id}/phase-commit-failed");
+                let body = serde_json::json!({"reason": e});
+                if let Err(re) = client.request_json("POST", &path, Some(&body)).await {
+                    log(cfg, &format!("phase_commit {task_id}: failure-report POST failed: {re}"));
+                }
+            }
             unclaim_task(cfg, client, task_id).await;
             // File investigation task
             let req = CreateTaskRequest {
@@ -707,6 +734,60 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
         }
     }
     mark_done(task_id);
+}
+
+/// Drift-fix #2: after pushing phase/<phase>, try to fast-forward main.
+/// Sequence:
+///   git fetch origin --quiet
+///   git checkout main
+///   git pull --ff-only origin main          # land any other commits
+///   git merge --ff-only <branch>            # FF main forward
+///   git push origin main
+///
+/// All steps after `git fetch` are best-effort: if any step fails we
+/// stop and return Err with stderr context. The phase branch remains
+/// pushed; only the main update is skipped.
+async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<String, String> {
+    let ws = workspace.to_str().unwrap_or(".");
+
+    let fetch = Command::new("git").args(["-C", ws, "fetch", "origin", "--quiet"])
+        .output().await.map_err(|e| format!("git fetch: {e}"))?;
+    if !fetch.status.success() {
+        return Err(format!("fetch: {}", String::from_utf8_lossy(&fetch.stderr).trim()));
+    }
+
+    let checkout = Command::new("git").args(["-C", ws, "checkout", "main"])
+        .output().await.map_err(|e| format!("git checkout main: {e}"))?;
+    if !checkout.status.success() {
+        return Err(format!("checkout main: {}", String::from_utf8_lossy(&checkout.stderr).trim()));
+    }
+
+    let pull = Command::new("git").args(["-C", ws, "pull", "--ff-only", "origin", "main", "--quiet"])
+        .output().await.map_err(|e| format!("git pull main: {e}"))?;
+    if !pull.status.success() {
+        let stderr = String::from_utf8_lossy(&pull.stderr).to_string();
+        // diverged main is a real possibility if main moved past our last
+        // pull; abort safely.
+        return Err(format!("pull --ff-only: {stderr}"));
+    }
+
+    let merge = Command::new("git").args(["-C", ws, "merge", "--ff-only", branch, "--quiet"])
+        .output().await.map_err(|e| format!("git merge: {e}"))?;
+    if !merge.status.success() {
+        let stderr = String::from_utf8_lossy(&merge.stderr).to_string();
+        return Err(format!("merge --ff-only {branch}: {stderr}"));
+    }
+
+    let push = tokio::time::timeout(
+        Duration::from_secs(600),
+        Command::new("git").args(["-C", ws, "push", "origin", "main"]).output(),
+    ).await
+    .map_err(|_| "git push main timed out".to_string())?
+    .map_err(|e| format!("git push main: {e}"))?;
+    if !push.status.success() {
+        return Err(format!("push main: {}", String::from_utf8_lossy(&push.stderr).trim()));
+    }
+    Ok("fast-forwarded".to_string())
 }
 
 async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &str) -> Result<String, String> {
