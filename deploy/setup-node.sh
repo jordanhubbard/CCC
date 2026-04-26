@@ -99,17 +99,20 @@ install_cron_linux() {
 }
 
 install_cron_macos() {
+  # On macOS, the "pull cron" is the acc-agent LaunchAgent itself (KeepAlive=true).
+  # acc-agent supervise spawns hermes, the bus listener, and the queue worker as
+  # children; the bus listener handles acc.update → agent-pull.sh on demand.
+  # There is no separate periodic cron on macOS.
   PLIST_SRC="$WORKSPACE/deploy/launchd/com.acc.agent.plist"
   PLIST_DST="$HOME/Library/LaunchAgents/com.acc.agent.plist"
   if [ -f "$PLIST_DST" ]; then
     warn "LaunchAgent already installed at $PLIST_DST — reloading"
     launchctl unload "$PLIST_DST" 2>/dev/null || true
   fi
-  # Substitute real paths in plist
-  sed "s|PULL_SCRIPT_PATH|$PULL_SCRIPT|g; s|LOG_PATH|$LOG_DIR/pull.log|g" \
-    "$PLIST_SRC" > "$PLIST_DST"
+  # Substitute AGENT_HOME placeholder with the actual home directory.
+  sed "s|AGENT_HOME|$HOME|g" "$PLIST_SRC" > "$PLIST_DST"
   launchctl load "$PLIST_DST"
-  success "LaunchAgent installed and loaded"
+  success "LaunchAgent installed and loaded (acc-agent supervise)"
 }
 
 info "Installing pull cron..."
@@ -605,20 +608,35 @@ fi
 
 # ── Set up systemd service (Linux only) ───────────────────────────────────
 if [[ "$PLATFORM" == "linux" ]] && command -v systemctl &>/dev/null; then
-  SERVICE_SRC="$WORKSPACE/deploy/systemd/ccc-agent.service"
-  SERVICE_DST="/etc/systemd/system/ccc-agent.service"
+  SERVICE_SRC="$WORKSPACE/deploy/systemd/acc-agent.service"
+  SERVICE_DST="/etc/systemd/system/acc-agent.service"
+  _rendered=$(sed "s|AGENT_USER|$(whoami)|g; s|AGENT_HOME|$HOME|g" "$SERVICE_SRC")
   if [ -f "$SERVICE_DST" ]; then
-    warn "ccc-agent.service already installed — skipping"
+    _installed=$(cat "$SERVICE_DST")
+    if [ "$_rendered" = "$_installed" ]; then
+      success "acc-agent.service already up-to-date"
+    else
+      warn "acc-agent.service exists but is stale — updating"
+      if [ -w "/etc/systemd/system" ] || command -v sudo &>/dev/null; then
+        echo "$_rendered" | sudo tee "$SERVICE_DST" > /dev/null && \
+        sudo systemctl daemon-reload && \
+        sudo systemctl restart acc-agent && \
+        success "acc-agent.service updated and restarted" || \
+        warn "Could not update systemd service (needs sudo)"
+      else
+        warn "No sudo access — update systemd service manually"
+      fi
+    fi
   else
     if [ -w "/etc/systemd/system" ] || command -v sudo &>/dev/null; then
-      sed "s|AGENT_USER|$(whoami)|g; s|AGENT_HOME|$HOME|g" "$SERVICE_SRC" | sudo tee "$SERVICE_DST" > /dev/null && \
+      echo "$_rendered" | sudo tee "$SERVICE_DST" > /dev/null && \
       sudo systemctl daemon-reload && \
-      sudo systemctl enable ccc-agent && \
-      sudo systemctl start ccc-agent && \
-      success "ccc-agent systemd service installed and started" || \
-      warn "Could not install systemd service (needs sudo). Run manually: sudo systemctl enable --now ccc-agent"
+      sudo systemctl enable acc-agent && \
+      sudo systemctl start acc-agent && \
+      success "acc-agent.service installed and started" || \
+      warn "Could not install systemd service (needs sudo). Run manually: sudo systemctl enable --now acc-agent"
     else
-      warn "No sudo access — install systemd service manually"
+      warn "No sudo access — install systemd service manually: sudo systemctl enable --now acc-agent"
     fi
   fi
 fi
