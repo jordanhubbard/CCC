@@ -17,6 +17,29 @@ use acc_model::{CreateTaskRequest, HeartbeatRequest, ReviewResult, TaskStatus, T
 use crate::config::Config;
 use crate::peers;
 
+/// Error type returned by `run_git_phase_commit`.
+///
+/// * `Transient` — a retriable network/infrastructure hiccup; the caller
+///   should silently requeue (no investigation task) and let the next
+///   dispatch cycle retry.
+/// * `Hard` — a permanent failure (auth rejected, non-fast-forward, local
+///   git error, …); the caller should file an investigation task so a human
+///   can look into it.
+#[derive(Debug)]
+pub(crate) enum PhaseCommitError {
+    Transient(String),
+    Hard(String),
+}
+
+impl std::fmt::Display for PhaseCommitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PhaseCommitError::Transient(msg) => write!(f, "(transient) {msg}"),
+            PhaseCommitError::Hard(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 const POLL_IDLE: Duration = Duration::from_secs(30);
 const POLL_BUSY: Duration = Duration::from_secs(5);
 
@@ -539,10 +562,18 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
          Original task ID: {review_of_id}\n\
          Worker's own summary: {summary}\n\n\
          The working directory contains the project files written by the worker.\n\n\
+         IMPORTANT — summary hallucination check: Before writing your verdict, run \
+         `git diff HEAD~1 HEAD` (or `git log -1 --stat`) in the working directory to \
+         see exactly what was changed. If the worker's summary mentions specific \
+         function names, types, or structural changes that do not appear anywhere in \
+         that diff or in the codebase, set `\"summary_hallucination\": true` in your \
+         response. A hallucinated summary misleads reviewers who read only the summary; \
+         flag it even if the underlying code changes are otherwise acceptable.\n\n\
          Review this work and respond with ONLY a single valid JSON object — no prose, no markdown:\n\
          {{\n\
            \"verdict\": \"approved\",\n\
            \"reason\": \"<one sentence>\",\n\
+           \"summary_hallucination\": false,\n\
            \"gaps\": [\n\
              {{\n\
                \"title\": \"<short task title for the gap>\",\n\
@@ -555,7 +586,9 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
          before this phase can be committed. Gaps may be filed even for approved work.\n\n\
          Check for: (1) task completion, (2) consistency with existing code style and architecture, \
          (3) any CI/CD blockers such as missing tests or broken imports, \
-         (4) remaining gaps the original task left unaddressed.",
+         (4) remaining gaps the original task left unaddressed, \
+         (5) whether the worker summary accurately reflects the actual diff (set \
+         `summary_hallucination` accordingly).",
         title = task["title"].as_str().unwrap_or("(task)"),
         summary = &work_summary[..work_summary.len().min(2000)],
     );
@@ -577,11 +610,11 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
     };
     let _ = ka_stop.send(());
 
-    let (verdict, reason, gaps) = match review_output {
+    let (verdict, reason, summary_hallucination, gaps) = match review_output {
         Ok(out) => parse_review_output(&out),
         Err(e) => {
             log(cfg, &format!("review subprocess failed: {e}"));
-            ("rejected".to_string(), format!("subprocess failed: {e}"), vec![])
+            ("rejected".to_string(), format!("subprocess failed: {e}"), false, vec![])
         }
     };
 
@@ -590,9 +623,20 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
         create_gap_task(cfg, client, &project_id, phase, task_id, gap).await;
     }
 
-    // Record verdict on the original work task
+    // Record verdict on the original work task; propagate hallucination flag
+    // so the server can persist it in the work task's metadata.
     if !review_of_id.is_empty() {
-        set_review_result_on_task(cfg, client, review_of_id, &verdict, &reason).await;
+        set_review_result_on_task(
+            cfg, client, review_of_id, &verdict, &reason,
+            if summary_hallucination { Some(true) } else { None },
+        ).await;
+    }
+
+    if summary_hallucination {
+        log(cfg, &format!(
+            "review {task_id}: SUMMARY HALLUCINATION detected — worker summary \
+             describes code not present in the diff; flagged in work task metadata"
+        ));
     }
 
     complete_task(cfg, client, task_id, &format!("verdict: {verdict}, reason: {reason}")).await;
@@ -610,20 +654,21 @@ async fn fetch_task_project_id(_cfg: &Config, client: &Client, task_id: &str, fa
     }
 }
 
-fn parse_review_output(output: &str) -> (String, String, Vec<Value>) {
+fn parse_review_output(output: &str) -> (String, String, bool, Vec<Value>) {
     let start = output.find('{').unwrap_or(output.len());
     let end = output.rfind('}').map(|i| i + 1).unwrap_or(output.len());
     if start >= end {
-        return ("rejected".to_string(), "unparseable output".to_string(), vec![]);
+        return ("rejected".to_string(), "unparseable output".to_string(), false, vec![]);
     }
     match serde_json::from_str::<Value>(&output[start..end]) {
         Ok(v) => {
             let verdict = v["verdict"].as_str().unwrap_or("rejected").to_string();
             let reason = v["reason"].as_str().unwrap_or("").to_string();
+            let summary_hallucination = v["summary_hallucination"].as_bool().unwrap_or(false);
             let gaps = v["gaps"].as_array().cloned().unwrap_or_default();
-            (verdict, reason, gaps)
+            (verdict, reason, summary_hallucination, gaps)
         }
-        Err(_) => ("rejected".to_string(), "unparseable output".to_string(), vec![]),
+        Err(_) => ("rejected".to_string(), "unparseable output".to_string(), false, vec![]),
     }
 }
 
@@ -649,14 +694,14 @@ async fn create_gap_task(cfg: &Config, client: &Client, project_id: &str, phase:
     }
 }
 
-async fn set_review_result_on_task(cfg: &Config, client: &Client, task_id: &str, verdict: &str, reason: &str) {
+async fn set_review_result_on_task(cfg: &Config, client: &Client, task_id: &str, verdict: &str, reason: &str, summary_hallucination: Option<bool>) {
     let result = match verdict {
         "approved" => ReviewResult::Approved,
         _ => ReviewResult::Rejected,
     };
     let _ = client
         .tasks()
-        .review_result(task_id, result, Some(&cfg.agent_name), Some(reason))
+        .review_result(task_id, result, Some(&cfg.agent_name), Some(reason), summary_hallucination)
         .await;
 }
 
@@ -685,7 +730,13 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
             // FF can't happen (e.g. someone landed a PR on main since
             // we branched), leave main alone and surface for human
             // review — never do non-FF merges automatically.
-            let merge_outcome = run_git_merge_to_main(&workspace, &branch).await;
+            //
+            // Use run_git_merge_to_main_inner here rather than the
+            // run_git_merge_to_main wrapper so that both git sequences
+            // (phase-commit and merge-to-main) can be composed under a
+            // single workspace mutex guard in the future without
+            // triggering a re-entrant deadlock on tokio::sync::Mutex.
+            let merge_outcome = run_git_merge_to_main_inner(&workspace, &branch).await;
             match &merge_outcome {
                 Ok(s) => log(cfg, &format!("phase_commit {task_id}: merged {branch} → main ({s})")),
                 Err(e) => log(cfg, &format!("phase_commit {task_id}: merge to main skipped/failed: {e}")),
@@ -709,7 +760,23 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
             };
             complete_task(cfg, client, task_id, &summary).await;
         }
-        Err(e) => {
+        Err(PhaseCommitError::Transient(e)) => {
+            // Transient network failure — silently requeue so the next
+            // dispatch cycle retries.  Do NOT file an investigation task;
+            // that would flood the queue with noise on flaky networks.
+            log(cfg, &format!("phase_commit {task_id} transient git failure (requeueing): {e}"));
+            // Drift-fix #4: tell the server this attempt failed so the
+            // dispatch loop can stop auto-filing if we hit 3 in a row.
+            if !project_id.is_empty() {
+                let path = format!("/api/projects/{project_id}/phase-commit-failed");
+                let body = serde_json::json!({"reason": e});
+                if let Err(re) = client.request_json("POST", &path, Some(&body)).await {
+                    log(cfg, &format!("phase_commit {task_id}: failure-report POST failed: {re}"));
+                }
+            }
+            unclaim_task(cfg, client, task_id).await;
+        }
+        Err(PhaseCommitError::Hard(e)) => {
             log(cfg, &format!("phase_commit {task_id} git failed: {e}"));
             // Drift-fix #4: tell the server this attempt failed so the
             // dispatch loop can stop auto-filing if we hit 3 in a row.
@@ -721,7 +788,7 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
                 }
             }
             unclaim_task(cfg, client, task_id).await;
-            // File investigation task
+            // File investigation task for hard (non-retriable) failures.
             let req = CreateTaskRequest {
                 project_id: project_id.to_string(),
                 title: format!("Investigate git failure: phase {phase}"),
@@ -736,7 +803,17 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
     mark_done(task_id);
 }
 
-/// Drift-fix #2: after pushing phase/<phase>, try to fast-forward main.
+/// Inner (mutex-free) implementation of the merge-to-main sequence.
+///
+/// This function contains all the git operations without acquiring any
+/// workspace mutex itself, making it safe to call from a context that
+/// already holds a workspace lock (e.g. from within `run_git_phase_commit`
+/// once that function is refactored to hold a per-workspace mutex).
+///
+/// Callers that do NOT already hold the workspace mutex should call the
+/// thin wrapper [`run_git_merge_to_main`] instead, which exists solely to
+/// provide a named entry-point that documents the locking contract.
+///
 /// Sequence:
 ///   git fetch origin --quiet
 ///   git checkout main
@@ -747,106 +824,348 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
 /// All steps after `git fetch` are best-effort: if any step fails we
 /// stop and return Err with stderr context. The phase branch remains
 /// pushed; only the main update is skipped.
-async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<String, String> {
+async fn run_git_merge_to_main_inner(workspace: &PathBuf, branch: &str) -> Result<String, PhaseCommitError> {
     let ws = workspace.to_str().unwrap_or(".");
 
     let fetch = Command::new("git").args(["-C", ws, "fetch", "origin", "--quiet"])
-        .output().await.map_err(|e| format!("git fetch: {e}"))?;
+        .output().await.map_err(|e| PhaseCommitError::Hard(format!("git fetch: {e}")))?;
     if !fetch.status.success() {
-        return Err(format!("fetch: {}", String::from_utf8_lossy(&fetch.stderr).trim()));
+        return Err(PhaseCommitError::Hard(format!("fetch: {}", String::from_utf8_lossy(&fetch.stderr).trim())));
     }
 
     let checkout = Command::new("git").args(["-C", ws, "checkout", "main"])
-        .output().await.map_err(|e| format!("git checkout main: {e}"))?;
+        .output().await.map_err(|e| PhaseCommitError::Hard(format!("git checkout main: {e}")))?;
     if !checkout.status.success() {
-        return Err(format!("checkout main: {}", String::from_utf8_lossy(&checkout.stderr).trim()));
+        return Err(PhaseCommitError::Hard(format!("checkout main: {}", String::from_utf8_lossy(&checkout.stderr).trim())));
     }
 
     let pull = Command::new("git").args(["-C", ws, "pull", "--ff-only", "origin", "main", "--quiet"])
-        .output().await.map_err(|e| format!("git pull main: {e}"))?;
+        .output().await.map_err(|e| PhaseCommitError::Hard(format!("git pull main: {e}")))?;
     if !pull.status.success() {
         let stderr = String::from_utf8_lossy(&pull.stderr).to_string();
         // diverged main is a real possibility if main moved past our last
         // pull; abort safely.
-        return Err(format!("pull --ff-only: {stderr}"));
+        return Err(PhaseCommitError::Hard(format!("pull --ff-only: {stderr}")));
     }
 
     let merge = Command::new("git").args(["-C", ws, "merge", "--ff-only", branch, "--quiet"])
-        .output().await.map_err(|e| format!("git merge: {e}"))?;
+        .output().await.map_err(|e| PhaseCommitError::Hard(format!("git merge: {e}")))?;
     if !merge.status.success() {
         let stderr = String::from_utf8_lossy(&merge.stderr).to_string();
-        return Err(format!("merge --ff-only {branch}: {stderr}"));
+        return Err(PhaseCommitError::Hard(format!("merge --ff-only {branch}: {stderr}")));
     }
 
     let push = tokio::time::timeout(
         Duration::from_secs(600),
         Command::new("git").args(["-C", ws, "push", "origin", "main"]).output(),
     ).await
-    .map_err(|_| "git push main timed out".to_string())?
-    .map_err(|e| format!("git push main: {e}"))?;
+    .map_err(|_| PhaseCommitError::Transient("git push main timed out".to_string()))?
+    .map_err(|e| PhaseCommitError::Hard(format!("git push main: {e}")))?;
     if !push.status.success() {
-        return Err(format!("push main: {}", String::from_utf8_lossy(&push.stderr).trim()));
+        return Err(PhaseCommitError::Hard(format!("push main: {}", String::from_utf8_lossy(&push.stderr).trim())));
     }
     Ok("fast-forwarded".to_string())
 }
 
-async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &str) -> Result<String, String> {
+/// Drift-fix #2: after pushing phase/<phase>, try to fast-forward main.
+///
+/// This is a thin wrapper around [`run_git_merge_to_main_inner`] for callers
+/// that do **not** already hold a workspace mutex.  The separation exists to
+/// prevent re-entrant deadlocks: if this function and `run_git_phase_commit`
+/// were ever composed under a single `tokio::sync::Mutex` guard (which is
+/// not reentrant), any code path that called this wrapper while already
+/// holding the guard would deadlock.  Factoring the logic into the inner
+/// function allows such composed callers to call `run_git_merge_to_main_inner`
+/// directly without re-acquiring the lock.
+async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<String, PhaseCommitError> {
+    run_git_merge_to_main_inner(workspace, branch).await
+}
+
+/// Return true when a `git push` stderr looks like a transient network
+/// hiccup that is worth retrying (connection-level failures, remote
+/// service unavailability).  Auth failures and non-fast-forward
+/// rejections are *permanent* — retrying them wastes time and may even
+/// trigger rate-limiting, so they are not considered transient.
+fn is_transient_network_error(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    // Permanent errors — hard-fail immediately.
+    if lower.contains("authentication failed")
+        || lower.contains("could not read username")
+        || lower.contains("invalid username or password")
+        || lower.contains("permission denied")
+        || lower.contains("rejected")
+        || lower.contains("non-fast-forward")
+        || lower.contains("[remote rejected]")
+    {
+        return false;
+    }
+    // Transient network / infrastructure signals.
+    lower.contains("could not resolve host")
+        || lower.contains("unable to connect")
+        || lower.contains("connection timed out")
+        || lower.contains("connection refused")
+        || lower.contains("network is unreachable")
+        || lower.contains("the remote end hung up")
+        || lower.contains("curl error")
+        || lower.contains("ssh: connect to host")
+        || lower.contains("broken pipe")
+        || lower.contains("temporary failure")
+        || lower.contains("service unavailable")
+        || lower.contains("503")
+}
+
+/// Remove a stale `.git/index.lock` if one is present.
+///
+/// A stale `index.lock` (left by a git process that was killed or crashed)
+/// causes every subsequent git operation to fail with:
+///
+///   "Another git process seems to be running in this repository"
+///
+/// This guard runs **before the first git command** in both the inline path
+/// (`run_git_phase_commit`) and the script-delegation path
+/// (`execute_phase_commit_task` → `phase-commit.sh`).  Wiring it into the
+/// shared entry point rather than only the inline path ensures the lock is
+/// cleared regardless of whether a workspace-local `scripts/phase-commit.sh`
+/// is present.
+///
+/// # Safety
+///
+/// We only remove the lock when it is older than `stale_threshold`.  A fresh
+/// lock belongs to a concurrently running git process; removing it would
+/// corrupt that process's index write.  The same 600 s threshold used by the
+/// shell script's `LOCK_TIMEOUT_S` default is used here.
+fn clear_stale_index_lock(workspace: &PathBuf) {
+    const STALE_THRESHOLD_SECS: u64 = 600;
+
+    let lock_path = workspace.join(".git").join("index.lock");
+    let meta = match std::fs::metadata(&lock_path) {
+        Ok(m) => m,
+        Err(_) => return, // file absent — nothing to do
+    };
+
+    let age_secs = meta
+        .modified()
+        .ok()
+        .and_then(|mtime| mtime.elapsed().ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    if age_secs > STALE_THRESHOLD_SECS {
+        if let Err(e) = std::fs::remove_file(&lock_path) {
+            // Log but do not abort — the subsequent git command will surface
+            // the real error if the lock is still held.
+            eprintln!(
+                "[tasks] clear_stale_index_lock: failed to remove {} (age={}s): {e}",
+                lock_path.display(),
+                age_secs
+            );
+        } else {
+            eprintln!(
+                "[tasks] clear_stale_index_lock: removed stale index.lock (age={}s): {}",
+                age_secs,
+                lock_path.display()
+            );
+        }
+    }
+    // Fresh lock (age <= STALE_THRESHOLD_SECS): leave in place.
+}
+
+pub(crate) async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &str) -> Result<String, PhaseCommitError> {
     let ws = workspace.to_str().unwrap_or(".");
 
-    // Fetch latest remote state so we know what origin/<branch> looks like.
-    // Best-effort: a fetch failure here just means we'll discover the
-    // problem on push.
-    let _ = Command::new("git")
-        .args(["-C", ws, "fetch", "origin", "--quiet"])
-        .output().await;
+    // ── Pre-flight: verify the workspace is a real git repository ────────────
+    //
+    // Root cause of "fatal: 'origin' does not appear to be a git repository":
+    //
+    //   resolve_workspace() can return a path that exists on disk (an empty
+    //   stub directory, or a CIFS share that mounted but was never populated)
+    //   without ever having been `git init`'d.  When git is invoked with
+    //   `-C <path>` against such a directory it silently accepts the chdir
+    //   and then fails to find a remote because there is no .git/config —
+    //   producing the misleading message about 'origin' rather than about the
+    //   missing repository.
+    //
+    // We check for both the traditional `.git/` directory layout and the
+    // git-worktree / bare-repo case (where `.git` is a file containing a
+    // `gitdir:` pointer).  `git rev-parse --git-dir` is the canonical way to
+    // detect either form, but spawning a process just to validate is wasteful;
+    // a simple filesystem check is sufficient for the CIFS use-case.
+    let git_marker = workspace.join(".git");
+    if !git_marker.exists() {
+        return Err(PhaseCommitError::Hard(format!(
+            "workspace is not a git repository (no .git entry): {}",
+            workspace.display()
+        )));
+    }
+
+    // ── Clear any stale index.lock before touching the index ─────────────────
+    //
+    // A killed git process can leave .git/index.lock behind, causing every
+    // subsequent git command to fail.  Clearing it here ensures the guard
+    // fires for the inline path.  The script-delegation path (phase-commit.sh)
+    // calls its own clear_stale_index_lock() shell function at the top of the
+    // script, before the exec delegation block, so it is also covered.
+    clear_stale_index_lock(workspace);
+
+    // Apply CIFS-safe git configuration before any index-touching operation.
+    //
+    // The workspace repo lives on a CIFS/SMB2-backed AccFS share.  Without
+    // these settings git's defaults cause two classes of failure on CIFS:
+    //
+    //   • core.trustctime=false   — CIFS ctime is unreliable; the default
+    //     (true) causes git to re-stat every tracked file on every status /
+    //     checkout, amplifying SMB2 round-trips and the window for D-state.
+    //
+    //   • core.preloadIndex=false — The default parallel stat storm across the
+    //     SMB2 connection saturates the mount under load and increases the
+    //     probability of a stall during index writes.
+    //
+    //   • gc.auto=0               — The default (6700 loose objects) triggers
+    //     background git-gc which writes large pack files to the CIFS share;
+    //     on a near-full filesystem this reliably produces D-state hangs and
+    //     can itself fill the remaining space.
+    //
+    //   • index.threads=1         — Serialises index I/O; safer on CIFS where
+    //     concurrent index readers can collide over the network lock.
+    //
+    // Root-cause analysis: docs/git-index-write-failure-investigation.md
+    //   (Incident 7 — CIFS D-state hang, 2026-04-26).
+    //
+    // Each `git config` call is best-effort: a failure here (e.g. the .git
+    // directory is read-only or the config file is locked) must not abort the
+    // commit — the default git behaviour is slower but still correct.
+    let cifs_configs: &[(&str, &str)] = &[
+        ("core.trustctime",        "false"),
+        ("core.checkStat",         "minimal"),
+        ("core.preloadIndex",      "false"),
+        ("index.threads",          "1"),
+        ("gc.auto",                "0"),
+        ("fetch.writeCommitGraph", "false"),
+    ];
+    for (key, value) in cifs_configs {
+        let _ = Command::new("git")
+            .args(["-C", ws, "config", "--local", key, value])
+            .output()
+            .await;
+    }
 
     let checkout = Command::new("git")
         .args(["-C", ws, "checkout", "-B", branch])
         .output().await
-        .map_err(|e| format!("git checkout: {e}"))?;
+        .map_err(|e| PhaseCommitError::Hard(format!("git checkout: {e}")))?;
     if !checkout.status.success() {
-        return Err(format!("git checkout: {}", flatten_stderr(&checkout.stderr)));
+        return Err(PhaseCommitError::Hard(String::from_utf8_lossy(&checkout.stderr).to_string()));
     }
 
     let add = Command::new("git")
         .args(["-C", ws, "add", "-A"])
         .output().await
-        .map_err(|e| format!("git add: {e}"))?;
+        .map_err(|e| PhaseCommitError::Hard(format!("git add: {e}")))?;
     if !add.status.success() {
-        return Err(format!("git add: {}", flatten_stderr(&add.stderr)));
+        return Err(PhaseCommitError::Hard(String::from_utf8_lossy(&add.stderr).to_string()));
     }
 
     let commit = Command::new("git")
         .args(["-C", ws, "commit", "-m", commit_msg])
         .output().await
-        .map_err(|e| format!("git commit: {e}"))?;
+        .map_err(|e| PhaseCommitError::Hard(format!("git commit: {e}")))?;
     if !commit.status.success() {
         let stderr = String::from_utf8_lossy(&commit.stderr).to_string();
         if !stderr.contains("nothing to commit") {
-            return Err(format!("git commit: {}", flatten_stderr(&commit.stderr)));
+            return Err(PhaseCommitError::Hard(stderr));
         }
     }
 
-    // Rebase any remote-side commits on phase/<branch> on top of ours so a
-    // concurrent agent's earlier push doesn't reject us with "fetch first".
-    // Best-effort: the remote branch may not exist yet (first phase_commit
-    // ever), in which case rebase fails and we just proceed to push.
-    let _ = Command::new("git")
-        .args(["-C", ws, "pull", "--rebase", "origin", branch, "--quiet"])
-        .output().await;
-
-    let push = tokio::time::timeout(
-        Duration::from_secs(600),
-        Command::new("git").args(["-C", ws, "push", "origin", branch]).output()
-    ).await
-    .map_err(|_| "git push timed out".to_string())?
-    .map_err(|e| format!("git push: {e}"))?;
-
-    if push.status.success() {
-        Ok(String::from_utf8_lossy(&push.stdout).to_string())
-    } else {
-        Err(format!("git push: {}", flatten_stderr(&push.stderr)))
+    // Fetch + rebase onto the remote branch before pushing so that if
+    // another agent instance has independently advanced origin/<branch>
+    // (e.g. concurrent phase-commit runs) we produce a fast-forward push
+    // rather than a non-fast-forward rejection.  Both steps are best-
+    // effort: a network failure here is not fatal — the push retry loop
+    // below will surface the non-fast-forward error on its first attempt
+    // and the next phase-commit cycle will try again.
+    //
+    // WHY fetch + rebase (not pull --rebase)?
+    // `git pull --rebase` is a single operation with no per-step timeout.
+    // On a CIFS-backed share a stalled fetch can hold the pull command in
+    // D-state indefinitely, blocking the entire agent.  Splitting into two
+    // timed operations (fetch, then rebase) bounds each step independently.
+    let _ = tokio::time::timeout(
+        Duration::from_secs(60),
+        Command::new("git")
+            .args(["-C", ws, "fetch", "origin", branch])
+            .output(),
+    ).await;
+    let rebase = tokio::time::timeout(
+        Duration::from_secs(60),
+        Command::new("git")
+            .args(["-C", ws, "rebase", &format!("origin/{branch}")])
+            .output(),
+    ).await;
+    // If the rebase itself fails (e.g. genuine conflict), abort it so
+    // the working tree is clean and the push will surface the real error.
+    if let Ok(Ok(rb)) = rebase {
+        if !rb.status.success() {
+            let _ = Command::new("git")
+                .args(["-C", ws, "rebase", "--abort"])
+                .output()
+                .await;
+        }
     }
+
+    // Retry loop: up to 3 attempts with exponential backoff (10 s, 20 s).
+    // Each attempt has its own 120 s timeout so one hung TCP connection
+    // cannot consume the full budget.  Permanent errors (auth, non-fast-
+    // forward) are surfaced immediately without waiting for the remaining
+    // retries.
+    const MAX_ATTEMPTS: u32 = 3;
+    const PUSH_TIMEOUT_SECS: u64 = 120;
+    const BACKOFF_SECS: [u64; 2] = [10, 20];
+
+    let mut last_err = String::new();
+    for attempt in 1..=MAX_ATTEMPTS {
+        let push_result = tokio::time::timeout(
+            Duration::from_secs(PUSH_TIMEOUT_SECS),
+            Command::new("git")
+                .args(["-C", ws, "push", "--set-upstream", "origin", branch])
+                .output(),
+        ).await;
+
+        match push_result {
+            Err(_) => {
+                // The per-attempt timeout fired — treat as transient.
+                last_err = format!("git push timed out after {PUSH_TIMEOUT_SECS}s (attempt {attempt}/{MAX_ATTEMPTS})");
+            }
+            Ok(Err(e)) => {
+                // OS-level spawn/IO error — unlikely to be transient, but
+                // surface the full message so the caller can decide.
+                return Err(PhaseCommitError::Hard(format!("git push: {e}")));
+            }
+            Ok(Ok(output)) => {
+                if output.status.success() {
+                    return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                // Hard-fail immediately on permanent errors.
+                if !is_transient_network_error(&stderr) {
+                    return Err(PhaseCommitError::Hard(stderr));
+                }
+                last_err = format!(
+                    "git push failed (attempt {attempt}/{MAX_ATTEMPTS}): {}",
+                    stderr.trim()
+                );
+            }
+        }
+
+        // Wait before the next attempt (no sleep after the last attempt).
+        if attempt < MAX_ATTEMPTS {
+            let wait = BACKOFF_SECS[(attempt as usize) - 1];
+            sleep(Duration::from_secs(wait)).await;
+        }
+    }
+
+    // All retry attempts were transient failures — signal Transient so the
+    // caller silently requeues without filing an investigation task.
+    Err(PhaseCommitError::Transient(last_err))
 }
 
 /// Collapse a multi-line stderr into the most informative single line:
