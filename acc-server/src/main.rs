@@ -170,7 +170,7 @@ async fn main() {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .unwrap();
+        .expect("server error");
 
     tracing::info!("Shutdown complete.");
 }

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED: This script sets up the Python hermes-agent venv which has been
+# replaced by the native Rust acc-agent binary. Use deploy/restart-agent.sh instead.
+# This file is kept for reference during migration only.
 # Creates ~/.acc/hermes-venv and installs hermes (editable) into it.
 # Safe to re-run — upgrades pip and reinstalls if the venv already exists.
 # Handles: Ubuntu (python3-venv), macOS (homebrew Python 3.11+), PEP 668.

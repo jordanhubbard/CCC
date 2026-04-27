@@ -34,17 +34,12 @@ echo "[restart-fleet] Querying ${ACC_URL}/api/agents?online=true"
 AGENTS_JSON=$(curl -sSf -H "Authorization: Bearer $TOKEN" "${ACC_URL}/api/agents?online=true")
 
 # Extract rows: name\tuser\thost\tport
-mapfile -t TARGETS < <(echo "$AGENTS_JSON" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-agents = d.get('agents', d) if isinstance(d, dict) else d
-for a in agents:
-    name = a.get('name', '?')
-    u = a.get('ssh_user') or ''
-    h = a.get('ssh_host') or ''
-    p = a.get('ssh_port') or 22
-    if u and h:
-        print(f'{name}\t{u}\t{h}\t{p}')")
+mapfile -t TARGETS < <(echo "$AGENTS_JSON" | jq -r '
+  (.agents // .) |
+  .[] |
+  select(.ssh_user != null and .ssh_user != "" and .ssh_host != null and .ssh_host != "") |
+  [(.name // "?"), .ssh_user, .ssh_host, (.ssh_port // 22)] |
+  @tsv')
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
     echo "[restart-fleet] No online agents with ssh_host populated" >&2

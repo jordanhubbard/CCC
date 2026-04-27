@@ -162,7 +162,7 @@ impl TelegramAdapter {
             // If Markdown fails, retry as plain text.
             if result["description"].as_str().map_or(false, |d| d.contains("parse")) {
                 let mut plain = body.clone();
-                plain.as_object_mut().unwrap().remove("parse_mode");
+                if let Some(obj) = plain.as_object_mut() { obj.remove("parse_mode"); }
                 let _ = self.http.post(self.api_url("sendMessage")).json(&plain).send().await;
             }
             return Err(format!("telegram send error: {}", result["description"].as_str().unwrap_or("?")));

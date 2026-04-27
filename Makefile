@@ -1,14 +1,14 @@
-# CCC — Makefile
+# ACC — Makefile
 # Entry points for common operator tasks.
 # All the actual logic lives in deploy/ scripts.
 #
 # OPERATOR QUICK-START (macOS, Linux, WSL2):
 #   make deps          # install mc + other operator tools for your platform
-#   make env           # create/verify ~/.ccc/.env with hub credentials
+#   make env           # create/verify ~/.acc/.env with hub credentials
 #   make sync          # git push + broadcast rcc.update to all agents
 
 .PHONY: help deps deps-check env sync \
-        init register build build-cli install-cli test release clean \
+        init register build build-cli install-cli test lint release clean \
         docker-build docker-up docker-down docker-logs
 
 help: ## Show this help
@@ -86,23 +86,23 @@ deps-check: ## Verify all operator tools are installed
 	@command -v jq   >/dev/null 2>&1 && echo "  ✓ jq" || echo "  ✗ jq   — run: make deps"
 	@command -v gh   >/dev/null 2>&1 && echo "  ✓ gh   (GitHub CLI)" || echo "  ✗ gh   — run: make deps"
 	@echo ""
-	@if [ -f "$$HOME/.ccc/.env" ]; then \
-		echo "  ✓ ~/.ccc/.env present"; \
-		grep -q "^CCC_URL=" "$$HOME/.ccc/.env"         && echo "  ✓ CCC_URL set"         || echo "  ✗ CCC_URL missing in ~/.ccc/.env"; \
-		grep -q "^CCC_AGENT_TOKEN=" "$$HOME/.ccc/.env" && echo "  ✓ CCC_AGENT_TOKEN set" || echo "  ✗ CCC_AGENT_TOKEN missing in ~/.ccc/.env"; \
+	@if [ -f "$$HOME/.acc/.env" ]; then \
+		echo "  ✓ ~/.acc/.env present"; \
+		grep -q "^ACC_URL=" "$$HOME/.acc/.env"         && echo "  ✓ ACC_URL set"         || echo "  ✗ ACC_URL missing in ~/.acc/.env"; \
+		grep -q "^ACC_AGENT_TOKEN=" "$$HOME/.acc/.env" && echo "  ✓ ACC_AGENT_TOKEN set" || echo "  ✗ ACC_AGENT_TOKEN missing in ~/.acc/.env"; \
 	else \
-		echo "  ✗ ~/.ccc/.env missing — run: make env"; \
+		echo "  ✗ ~/.acc/.env missing — run: make env"; \
 	fi
 
-env: ## Create or verify ~/.ccc/.env (prompts for missing values)
-	@mkdir -p "$$HOME/.ccc"
-	@if [ ! -f "$$HOME/.ccc/.env" ]; then \
-		cp deploy/.env.template "$$HOME/.ccc/.env"; \
-		chmod 600 "$$HOME/.ccc/.env"; \
-		echo "Created ~/.ccc/.env from template. Edit it to set CCC_URL and CCC_AGENT_TOKEN."; \
-		echo "  $$EDITOR ~/.ccc/.env"; \
+env: ## Create or verify ~/.acc/.env (prompts for missing values)
+	@mkdir -p "$$HOME/.acc"
+	@if [ ! -f "$$HOME/.acc/.env" ]; then \
+		cp deploy/.env.template "$$HOME/.acc/.env"; \
+		chmod 600 "$$HOME/.acc/.env"; \
+		echo "Created ~/.acc/.env from template. Edit it to set ACC_URL and ACC_AGENT_TOKEN."; \
+		echo "  $$EDITOR ~/.acc/.env"; \
 	else \
-		echo "~/.ccc/.env already exists."; \
+		echo "~/.acc/.env already exists."; \
 		$(MAKE) deps-check; \
 	fi
 
@@ -115,7 +115,7 @@ sync: ## Push local changes to GitHub and broadcast rcc.update to all agents
 # ── Onboarding ─────────────────────────────────────────────────────────────
 
 init: ## Interactive setup: configure this node
-	@bash deploy/ccc-init.sh
+	@bash deploy/acc-init.sh
 
 register: ## Register this agent with the CCC hub
 	@bash deploy/register-agent.sh
@@ -123,7 +123,7 @@ register: ## Register this agent with the CCC hub
 # ── Build ──────────────────────────────────────────────────────────────────
 
 build: ## Build all Rust binaries (acc-agent, acc-server, acc CLI)
-	@cargo build --release -p acc-agent -p acc-server
+	@cargo build --release -p acc-agent -p acc-server -p acc-cli
 	@bash scripts/install-acc.sh --build-only
 
 # ── Restart ────────────────────────────────────────────────────────────────
@@ -147,6 +147,9 @@ install-cli: ## Build and install acc CLI to $$HOME/.local/bin/acc (installs Rus
 
 test: ## Run all Rust tests
 	@cargo test --workspace
+
+lint: ## Run Clippy linter across workspace
+	@cargo clippy --workspace -- -D warnings
 
 # ── Release ────────────────────────────────────────────────────────────────
 
@@ -176,7 +179,5 @@ docker-logs: ## Tail logs from all CCC containers
 # ── Utilities ──────────────────────────────────────────────────────────────
 
 clean: ## Remove build artifacts
-	@cargo clean --manifest-path agent/Cargo.toml
-	@cargo clean --manifest-path acc-server/Cargo.toml
-	@cargo clean --manifest-path acc-cli/Cargo.toml
+	@cargo clean
 	@echo "Cleaned build artifacts."

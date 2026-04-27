@@ -201,6 +201,9 @@ else
 fi
 
 # ── Install Hermes agent runtime ─────────────────────────────────────────
+# DEPRECATED: Python hermes-agent has been replaced by native Rust acc-agent.
+# The following install logic is kept for reference during transition only.
+# acc-agent hermes --poll and acc-agent hermes --gateway replace 'hermes' entirely.
 info "Checking Hermes agent runtime..."
 
 HERMES_INSTALLED=false

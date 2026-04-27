@@ -108,63 +108,25 @@ _json_get() {
   if [ -x "$CCC_AGENT" ]; then
     "$CCC_AGENT" json get "$@" 2>/dev/null || true
   else
-    python3 - "$@" << 'PYEOF' 2>/dev/null
-import json, sys
-data = json.loads(sys.stdin.read())
-for path in sys.argv[1:]:
-    v = data
-    for key in path.lstrip('.').split('.'):
-        v = v.get(key, {}) if isinstance(v, dict) else None
-        if not v and v != 0: break
-    if v and not isinstance(v, (dict, list)):
-        sys.stdout.write(str(v)); sys.exit(0)
-PYEOF
+    local input
+    input=$(cat)
+    for path in "$@"; do
+      local val
+      val=$(echo "$input" | jq -r "$path // empty" 2>/dev/null)
+      if [[ -n "$val" && "$val" != "null" ]]; then
+        echo "$val"
+        return 0
+      fi
+    done
   fi
 }
 
-# ── 2. Install Hermes Agent ───────────────────────────────────────────────
-if command -v hermes &>/dev/null; then
-  success "Hermes agent already installed ($(hermes --version 2>/dev/null || echo 'version unknown'))"
-  # Ensure slack extras are present even on existing installs
-  if ! python3 -c "import slack_bolt" 2>/dev/null; then
-    info "slack-bolt not found — injecting slack extras..."
-    if command -v pipx &>/dev/null; then
-      pipx inject hermes-agent slack-bolt slack-sdk 2>/dev/null && success "Slack extras injected (pipx)" || true
-    fi
-    if ! python3 -c "import slack_bolt" 2>/dev/null; then
-      pip3 install slack-bolt slack-sdk 2>/dev/null && success "Slack extras installed (pip3)" || true
-    fi
-  fi
-else
-  info "Installing Hermes agent..."
-  if command -v pipx &>/dev/null; then
-    pipx install 'hermes-agent[slack]' 2>/dev/null && success "Hermes installed (pipx)" || true
-  fi
-  if ! command -v hermes &>/dev/null; then
-    pip3 install --user 'hermes-agent[slack]' 2>/dev/null && success "Hermes installed (pip3)" || true
-  fi
-  export PATH="$HOME/.local/bin:$PATH"
-  # Fallback: clone from GitHub source if pip failed (package may not be on PyPI)
-  if ! command -v hermes &>/dev/null; then
-    HERMES_SRC="$HOME/.acc/hermes-src"
-    if [[ ! -d "$HERMES_SRC/.git" ]]; then
-      info "Cloning hermes-agent from source..."
-      git clone --depth=1 ${HERMES_REPO} "$HERMES_SRC" 2>/dev/null || \
-        warn "hermes-agent source clone failed — install manually"
-    fi
-    if [[ -d "$HERMES_SRC" ]]; then
-      python3 -m venv "$HOME/.acc/hermes-venv" 2>/dev/null || true
-      "$HOME/.acc/hermes-venv/bin/pip" install -e "$HERMES_SRC[slack]" 2>/dev/null || \
-        "$HOME/.acc/hermes-venv/bin/pip" install -e "$HERMES_SRC" 2>/dev/null || true
-      ln -sf "$HOME/.acc/hermes-venv/bin/hermes" "$HOME/.local/bin/hermes" 2>/dev/null || true
-    fi
-  fi
-  if command -v hermes &>/dev/null; then
-    success "Hermes agent installed"
-  else
-    warn "Hermes agent install failed — install manually from: ${HERMES_REPO%%.git}"
-  fi
-fi
+# ── 2. Hermes is now native Rust (acc-agent hermes) ──────────────────────
+# The Python hermes-agent package is retired. The acc-agent binary includes
+# hermes --poll and hermes --gateway natively. It is built and installed by
+# deploy/restart-agent.sh which runs later in this bootstrap.
+info "Hermes runtime: native Rust (acc-agent hermes --poll / --gateway)"
+success "No separate Hermes install required"
 
 # ── 3. Clone / update CCC workspace ──────────────────────────────────────
 ACC_WORKSPACE="$HOME/.acc/workspace"
@@ -294,6 +256,9 @@ NVIDIA_API_KEY=${NVIDIA_KEY}
 ANTHROPIC_BASE_URL=http://localhost:9099
 ANTHROPIC_API_KEY=${NVIDIA_KEY}
 CLAUDE_CODE_DEFAULT_MODEL=azure/anthropic/claude-sonnet-4-6
+OPENAI_BASE_URL=${NVIDIA_API_BASE:-https://inference-api.nvidia.com/v1}
+OPENAI_API_KEY=${NVIDIA_KEY}
+HERMES_MODEL=azure/anthropic/claude-sonnet-4-6
 # TokenHub — preferred inference router (aggregates local vLLM + NVIDIA NIM)
 TOKENHUB_URL=${TOKENHUB_URL:-http://localhost:8090}
 TOKENHUB_API_KEY=${TOKENHUB_KEY}
@@ -327,29 +292,22 @@ if [ -x "$CCC_AGENT" ]; then
   echo "$BOOTSTRAP_JSON" | "$CCC_AGENT" json env-merge .secrets "$ENV_FILE" \
     && success "Secrets bundle written to .env" \
     || warn "Could not write secrets to .env (non-fatal)"
+elif command -v jq &>/dev/null; then
+  SKIP_KEYS='"CCC_AGENT_TOKEN","CCC_URL","AGENT_NAME","AGENT_HOST"'
+  count=0
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    val="${line#*=}"
+    if [[ -n "$key" && -n "$val" ]]; then
+      sed -i "/^${key}=/d" "$ENV_FILE" 2>/dev/null || true
+      printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+      count=$((count + 1))
+    fi
+  done < <(echo "$BOOTSTRAP_JSON" | jq -r --argjson skip "[$SKIP_KEYS]" \
+    '.secrets // {} | to_entries[] | select(.key as $k | $skip | index($k) == null) | select(.value | type == "string") | "\(.key)=\(.value)"' 2>/dev/null)
+  success "Secrets bundle written to .env ($count keys)"
 else
-  python3 - "$ENV_FILE" << 'PYEOF' 2>/dev/null || warn "Could not write secrets to .env (non-fatal)"
-import json, sys, os, re
-env_file = sys.argv[1]
-data = json.loads(sys.stdin.read())
-secrets = data.get('secrets', {})
-SKIP = {'CCC_AGENT_TOKEN','CCC_URL','AGENT_NAME','AGENT_HOST'}
-existing = open(env_file).read() if os.path.exists(env_file) else ''
-lines = existing.splitlines()
-count = 0
-for k, v in secrets.items():
-    if not isinstance(v, str): continue
-    if k in SKIP: continue
-    if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', k): continue
-    lines = [l for l in lines if not l.startswith(k + '=')]
-    lines.append(f'{k}={v}')
-    count += 1
-with open(env_file, 'w') as f:
-    f.write('\n'.join(lines) + '\n')
-os.chmod(env_file, 0o600)
-print(f'Wrote {count} secrets', file=sys.stderr)
-PYEOF
-  success "Secrets bundle written to .env"
+  warn "Neither acc-agent nor jq available — skipping secrets bundle (non-fatal)"
 fi
 
 # ── 7. Mount AccFS (Samba/SMB shared filesystem) ──────────────────────────
@@ -444,7 +402,7 @@ else
 fi
 
 # ── 9. Install Hermes skills and configure gateway ───────────────────────
-if command -v hermes &>/dev/null; then
+if command -v acc-agent &>/dev/null || [[ -x "$HOME/.acc/bin/acc-agent" ]]; then
   info "Configuring Hermes agent..."
   mkdir -p "$HOME/.hermes/skills"
 

@@ -72,6 +72,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "acc-qdrant"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "acc-server"
 version = "0.1.0"
 dependencies = [

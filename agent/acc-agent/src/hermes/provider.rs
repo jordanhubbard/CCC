@@ -151,7 +151,7 @@ impl LlmProvider for OpenAiProvider {
                 let content = &msg["content"];
                 // Content may be array (Anthropic) or string (simple)
                 let oai_content: Value = if content.is_array() {
-                    let parts = content.as_array().unwrap();
+                    let parts = content.as_array().map(Vec::as_slice).unwrap_or_default();
                     // Collect text blocks; tool_use becomes tool_calls on assistant, tool_result becomes tool on user
                     let text_parts: Vec<&Value> = parts.iter().filter(|p| p["type"] == "text").collect();
                     if text_parts.len() == 1 {

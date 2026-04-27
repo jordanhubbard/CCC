@@ -3,6 +3,12 @@
 ACC Stale Task Watchdog — detects agents that have gone idle or offline
 while still holding claimed/in-progress workqueue items.
 
+NOTE: Enforcement is now handled natively by acc-server (Rust):
+  - Stale claim expiry: dispatch.rs auto-unclaims tasks past claim_expires_at
+  - Offline agent detection: routes/watchdog.rs emits agent.abandoned_work events
+  - Active dispatch: dispatch.rs continuously re-routes unclaimed tasks
+This script remains as a read-only audit tool for cron-fleet-monitor reporting.
+
 Runs periodically (via Hermes cron or as part of cron-fleet-monitor).
 Outputs a JSON report to stdout.
 

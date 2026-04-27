@@ -945,10 +945,8 @@ async fn resolve_workspace(cfg: &Config, client: &Client, project_id: &str, task
         "default".to_string()
     } else {
         match client.projects().get(project_id).await {
-            Ok(p) if p.slug.as_deref().map(|s| !s.is_empty()).unwrap_or(false) => {
-                p.slug.unwrap()
-            }
-            _ => project_id.to_string(),
+            Ok(p) => p.slug.filter(|s| !s.is_empty()).unwrap_or_else(|| project_id.to_string()),
+            Err(_) => project_id.to_string(),
         }
     };
 

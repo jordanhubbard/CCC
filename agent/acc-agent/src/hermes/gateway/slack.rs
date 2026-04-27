@@ -193,6 +193,8 @@ impl SlackAdapter {
         let _guard = lock.lock().await;
 
         // Show a thinking indicator.
+        // TODO: capture the returned ts and delete/update this message after the response is ready;
+        // currently the "_thinking…_" message remains permanently in the channel.
         let _ = self.post_message(&channel, reply_thread.as_deref(), "_thinking…_").await;
 
         let mut history = self.sessions.load_history(&key).await;
