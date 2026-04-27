@@ -40,6 +40,7 @@ impl AnthropicProvider {
     }
 
     pub fn with_base_url(api_key: String, model: String, base_url: String) -> Self {
+        let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1").to_string();
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
@@ -127,6 +128,7 @@ impl OpenAiProvider {
     }
 
     pub fn with_base_url(api_key: String, model: String, base_url: String) -> Self {
+        let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1").to_string();
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()

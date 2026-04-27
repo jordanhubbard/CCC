@@ -25,7 +25,7 @@ pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String>
         .map_err(|e| format!("http client: {e}"))?;
     let api_base = std::env::var("ANTHROPIC_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
-    let api_base = api_base.trim_end_matches('/').to_string();
+    let api_base = api_base.trim_end_matches('/').trim_end_matches("/v1").to_string();
 
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .or_else(|_| std::env::var("NVIDIA_API_KEY"))
