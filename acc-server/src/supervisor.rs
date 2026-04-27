@@ -99,6 +99,7 @@ async fn run_process(
             cmd.env(k, v);
         }
 
+        cmd.kill_on_drop(true);
         match cmd.spawn() {
             Ok(mut child) => {
                 let pid = child.id();

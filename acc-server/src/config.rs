@@ -42,10 +42,27 @@ pub struct CccConfig {
     pub llm_providers: Vec<LlmProviderEntry>,
 }
 
+/// One process entry in the supervisor's managed process list.
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct SupervisedProcess {
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub health_url: Option<String>,
+    /// Delay between restart attempts (ms). Default: 1000.
+    #[serde(default = "default_restart_delay_ms")]
+    pub restart_delay_ms: u64,
+}
+
+fn default_restart_delay_ms() -> u64 { 1000 }
+
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct SupervisorConfig {
     pub enabled: bool,
+    pub processes: Vec<SupervisedProcess>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
@@ -75,6 +92,7 @@ pub struct ResolvedConfig {
     pub auth_db_path: String,
     pub fs_root: String,
     pub supervisor_enabled: bool,
+    pub supervisor_processes: Vec<SupervisedProcess>,
     pub qdrant_url: String,
     pub qdrant_api_key: Option<String>,
     /// Ordered LLM provider chain from config file + LLM_PROVIDERS env var.
@@ -195,6 +213,7 @@ pub fn load() -> ResolvedConfig {
     let supervisor_enabled = evar("SUPERVISOR_ENABLED")
         .map(|s| s == "true")
         .unwrap_or(j.supervisor.enabled);
+    let supervisor_processes = j.supervisor.processes.clone();
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
 
     let qdrant_url = resolve_str(
@@ -246,6 +265,7 @@ pub fn load() -> ResolvedConfig {
         auth_db_path,
         fs_root,
         supervisor_enabled,
+        supervisor_processes,
         qdrant_url,
         qdrant_api_key,
         llm_providers,

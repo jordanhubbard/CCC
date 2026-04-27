@@ -1,8 +1,4 @@
 //! hermes-rust — native Rust agent session driver.
-//!
-//! Routes to the native Rust agent loop by default.
-//! Set HERMES_BACKEND=python to use the Python subprocess wrapper instead
-//! (useful for in-flight sessions that started under the old backend).
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -10,7 +6,6 @@ mod agent;
 mod conversation;
 mod provider;
 mod tool;
-pub(crate) mod python_backend;
 
 use agent::HermesAgent;
 use provider::make_provider;
@@ -19,10 +14,6 @@ use acc_client::Client;
 use crate::config::Config;
 
 pub async fn run(args: &[String]) {
-    if std::env::var("HERMES_BACKEND").as_deref() == Ok("python") {
-        python_backend::run(args).await;
-        return;
-    }
     native_run(args).await;
 }
 
@@ -47,14 +38,6 @@ async fn native_run(args: &[String]) {
             "--item" => { i += 1; item_id = args.get(i).cloned(); }
             "--query" => { i += 1; query = args.get(i).cloned(); }
             "--poll" => poll = true,
-            "--gateway" | "--resume" => {
-                // Gateway and session-resume modes require the Python backend.
-                eprintln!(
-                    "[hermes-rust] {} requires HERMES_BACKEND=python",
-                    args[i].as_str()
-                );
-                std::process::exit(1);
-            }
             _ => {}
         }
         i += 1;

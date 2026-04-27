@@ -1,4 +1,4 @@
-use acc_server::{brain, build_app, config, db, dispatch, routes, state, AppState};
+use acc_server::{brain, build_app, config, db, dispatch, routes, state, supervisor, AppState};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -28,8 +28,24 @@ async fn main() {
     let cfg = config::load();
     let port = cfg.port;
 
-    let supervisor_handle = if cfg.supervisor_enabled {
-        tracing::info!("Supervisor enabled (no managed processes configured)");
+    let supervisor_handle = if cfg.supervisor_enabled && !cfg.supervisor_processes.is_empty() {
+        let processes: Vec<supervisor::ManagedProcess> = cfg.supervisor_processes.iter()
+            .map(|p| supervisor::ManagedProcess {
+                name: p.name.clone(),
+                command: p.command.clone(),
+                args: p.args.clone(),
+                env: p.env.clone(),
+                health_url: p.health_url.clone(),
+                restart_delay_ms: p.restart_delay_ms,
+            })
+            .collect();
+        let n = processes.len();
+        let (sup, handle) = supervisor::Supervisor::new(processes);
+        tokio::spawn(sup.run());
+        tracing::info!("Supervisor started: {} process(es)", n);
+        Some(handle)
+    } else if cfg.supervisor_enabled {
+        tracing::info!("Supervisor enabled but no processes configured");
         None
     } else {
         tracing::info!("Supervisor disabled");
