@@ -28,6 +28,7 @@ pub mod blobs;
 pub mod watchdog;
 pub mod github;
 pub mod logs;
+pub mod panes;
 
 use axum::{
     http::StatusCode,

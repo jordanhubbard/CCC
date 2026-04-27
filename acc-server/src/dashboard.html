@@ -6,6 +6,9 @@
 <title>ACC Fleet Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.19.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@4.19.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.5.0/lib/xterm-addon-fit.js"></script>
 <style>
   [x-cloak] { display: none !important; }
   .tab-active { @apply border-b-2 border-indigo-500 text-indigo-600; }
@@ -340,34 +343,39 @@
       </div>
     </div>
 
-    <!-- ── HERMES PANES (CCC-6m0) ── -->
+    <!-- ── HERMES PANES ── -->
     <div x-show="tab === 'panes'">
       <div class="flex items-center justify-between mb-4">
         <h1 class="text-lg font-semibold text-gray-900">Hermes Interactive Panes</h1>
-        <span class="text-xs text-gray-500">PTY-over-WebSocket per agent — placeholder; backend not yet implemented</span>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500" x-text="agents.filter(a => a.online && a.ssh_host).length + ' agent(s) reachable'"></span>
+          <button @click="refreshPanes()"
+            class="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition">Reconnect all</button>
+        </div>
       </div>
       <div class="grid grid-cols-2 gap-4">
-        <template x-for="a in agents.filter(x => x.online)" :key="a.name">
-          <div class="bg-gray-900 rounded-xl shadow-sm p-3 font-mono text-xs h-72 flex flex-col">
-            <div class="flex items-center justify-between mb-2 border-b border-gray-700 pb-2">
-              <span class="text-emerald-400 font-semibold" x-text="a.name"></span>
-              <span class="text-gray-500" x-text="a.ssh_user + '@' + (a.ssh_host || '?')"></span>
-            </div>
-            <div class="flex-1 flex items-center justify-center text-gray-500 text-center px-4">
-              <div>
-                <div class="text-yellow-400 mb-2">[ CCC-6m0 — pane backend pending ]</div>
-                <div class="text-xs">A WebSocket relay opening an SSH session to <span x-text="a.ssh_host"></span>
-                running <code>hermes</code> in an interactive 80x24 terminal will mount here.</div>
-                <div class="text-xs mt-2 text-gray-600">
-                  For now, run manually:<br>
-                  <code class="text-indigo-300" x-text="'ssh ' + a.ssh_user + '@' + (a.ssh_host || a.name) + ' hermes'"></code>
-                </div>
+        <template x-for="a in agents.filter(x => x.online && x.ssh_host)" :key="a.name">
+          <div class="bg-gray-900 rounded-xl shadow-sm overflow-hidden flex flex-col" style="height:18rem">
+            <div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 flex-shrink-0">
+              <span class="text-emerald-400 font-semibold font-mono text-xs" x-text="a.name"></span>
+              <div class="flex items-center gap-2">
+                <span class="text-gray-500 font-mono text-xs" x-text="(a.ssh_user||'root') + '@' + a.ssh_host"></span>
+                <span class="text-xs px-1.5 py-0.5 rounded font-medium"
+                  :class="{
+                    'bg-emerald-900 text-emerald-300': panesStatus[a.name] === 'connected',
+                    'bg-yellow-900 text-yellow-300': panesStatus[a.name] === 'connecting',
+                    'bg-red-900 text-red-300':  panesStatus[a.name] === 'error' || panesStatus[a.name] === 'disconnected',
+                    'bg-gray-700 text-gray-400': !panesStatus[a.name],
+                  }"
+                  x-text="panesStatus[a.name] || 'idle'"></span>
               </div>
             </div>
+            <div :id="'term-' + a.name" class="flex-1 min-h-0" style="overflow:hidden"></div>
           </div>
         </template>
-        <div x-show="agents.filter(x => x.online).length === 0" class="col-span-2 text-center text-gray-400 text-sm py-8">
-          No agents online.
+        <div x-show="agents.filter(x => x.online && x.ssh_host).length === 0"
+          class="col-span-2 text-center text-gray-400 text-sm py-8">
+          No agents online with SSH configured.
         </div>
       </div>
     </div>
@@ -527,6 +535,8 @@ function dashboard() {
     logSource: null,
     logFilter: '',
     logIdentifierFilter: '',
+    panesTerminals: {},
+    panesStatus: {},
     taskFilter: { status: 'open', project_id: '' },
     loading: { projects: false, tasks: false, agents: false },
     toast: '',
@@ -541,6 +551,13 @@ function dashboard() {
       if (this.token) {
         await this.loadTab('projects');
         this.loadProjects(); // ensure projects loaded for task filter
+        // Set up panes terminals whenever the panes tab is activated
+        this.$watch('tab', (val) => {
+          if (val === 'panes') {
+            // Wait for Alpine x-show + x-for to render, then for the browser to paint
+            this.$nextTick(() => setTimeout(() => this.setupPaneTerminals(), 80));
+          }
+        });
       }
     },
 
@@ -806,6 +823,115 @@ function dashboard() {
       if (s < 3600) return `${Math.floor(s/60)}m ago`;
       if (s < 86400) return `${Math.floor(s/3600)}h ago`;
       return `${Math.floor(s/86400)}d ago`;
+    },
+
+    // ── Hermes Panes (PTY-over-WebSocket) ──
+
+    setupPaneTerminals() {
+      const onlineAgents = this.agents.filter(a => a.online && a.ssh_host);
+      for (const a of onlineAgents) {
+        if (this.panesTerminals[a.name]) continue; // already initialized
+        const el = document.getElementById('term-' + a.name);
+        if (!el || el.offsetParent === null) continue; // not rendered/visible yet
+
+        const term = new Terminal({
+          theme: {
+            background: '#111827',
+            foreground: '#e0e0e0',
+            cursor: '#7c6af7',
+            selectionBackground: 'rgba(124,106,247,0.3)',
+            black: '#1a1a2e', brightBlack: '#333',
+            red: '#ff5555',   brightRed: '#ff8080',
+            green: '#50fa7b', brightGreen: '#80ffaa',
+            yellow: '#f1fa8c',brightYellow: '#ffff80',
+            blue: '#6272a4',  brightBlue: '#8080ff',
+            magenta: '#ff79c6',brightMagenta: '#ffaadd',
+            cyan: '#8be9fd',  brightCyan: '#aaeeff',
+            white: '#f8f8f2', brightWhite: '#ffffff',
+          },
+          fontFamily: 'Consolas, Menlo, "DejaVu Sans Mono", monospace',
+          fontSize: 12,
+          cursorBlink: true,
+          scrollback: 2000,
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(el);
+        fitAddon.fit();
+
+        // Refit when the container resizes
+        const ro = new ResizeObserver(() => fitAddon.fit());
+        ro.observe(el);
+
+        // Connect WebSocket
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${proto}://${location.host}/api/panes/${encodeURIComponent(a.name)}/ws?token=${encodeURIComponent(this.token)}`;
+        const ws = new WebSocket(wsUrl);
+
+        this.$set(this.panesStatus, a.name, 'connecting');
+
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'output') {
+              term.write(msg.data);
+            } else if (msg.type === 'status') {
+              this.$set(this.panesStatus, a.name, msg.state || 'disconnected');
+              if (msg.state === 'disconnected') {
+                term.write('\r\n\x1b[33m[hermes session ended — click Reconnect all to retry]\x1b[0m\r\n');
+              }
+            }
+          } catch { /* ignore */ }
+        };
+
+        ws.onopen = () => {
+          this.$set(this.panesStatus, a.name, 'connecting');
+          // Send initial size
+          const { cols, rows } = term;
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        };
+
+        ws.onclose = () => {
+          if (this.panesStatus[a.name] !== 'disconnected') {
+            this.$set(this.panesStatus, a.name, 'disconnected');
+          }
+        };
+
+        ws.onerror = () => {
+          this.$set(this.panesStatus, a.name, 'error');
+          term.write('\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n');
+        };
+
+        // Forward keyboard input
+        term.onData((data) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'input', data }));
+          }
+        });
+
+        // Forward resize events
+        term.onResize(({ cols, rows }) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+          }
+        });
+
+        this.panesTerminals[a.name] = { term, ws, fitAddon, ro };
+      }
+    },
+
+    refreshPanes() {
+      // Tear down all existing terminals and reconnect
+      for (const [name, p] of Object.entries(this.panesTerminals)) {
+        try { p.ws.close(); } catch { /* ignore */ }
+        try { p.ro.disconnect(); } catch { /* ignore */ }
+        try { p.term.dispose(); } catch { /* ignore */ }
+        const el = document.getElementById('term-' + name);
+        if (el) el.innerHTML = '';
+      }
+      this.panesTerminals = {};
+      this.panesStatus = {};
+      this.$nextTick(() => setTimeout(() => this.setupPaneTerminals(), 80));
     },
   };
 }
