@@ -355,7 +355,8 @@
       </div>
       <div class="grid grid-cols-2 gap-4">
         <template x-for="a in agents.filter(x => x.online && x.ssh_host)" :key="a.name">
-          <div class="bg-gray-900 rounded-xl shadow-sm overflow-hidden flex flex-col" style="height:18rem">
+          <div class="bg-gray-900 rounded-xl shadow-sm overflow-hidden flex flex-col"
+            style="min-height:26rem; min-width:600px">
             <div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 flex-shrink-0">
               <span class="text-emerald-400 font-semibold font-mono text-xs" x-text="a.name"></span>
               <div class="flex items-center gap-2">
@@ -370,7 +371,7 @@
                   x-text="panesStatus[a.name] || 'idle'"></span>
               </div>
             </div>
-            <div :id="'term-' + a.name" class="flex-1 min-h-0" style="overflow:hidden"></div>
+            <div :id="'term-' + a.name" class="flex-1 min-h-0" style="overflow:hidden; padding:4px"></div>
           </div>
         </template>
         <div x-show="agents.filter(x => x.online && x.ssh_host).length === 0"
@@ -551,13 +552,6 @@ function dashboard() {
       if (this.token) {
         await this.loadTab('projects');
         this.loadProjects(); // ensure projects loaded for task filter
-        // Set up panes terminals whenever the panes tab is activated
-        this.$watch('tab', (val) => {
-          if (val === 'panes') {
-            // Wait for Alpine x-show + x-for to render, then for the browser to paint
-            this.$nextTick(() => setTimeout(() => this.setupPaneTerminals(), 80));
-          }
-        });
       }
     },
 
@@ -607,7 +601,12 @@ function dashboard() {
       else if (id === 'agents') await this.loadAgents();
       else if (id === 'bus') this.connectBus();
       else if (id === 'logs') this.connectLogs();
-      else if (id === 'panes') await this.loadAgents();
+      else if (id === 'panes') {
+        await this.loadAgents();
+        // Agents are loaded; wait for Alpine to render x-for, then paint, then init terminals
+        await this.$nextTick();
+        setTimeout(() => this.setupPaneTerminals(), 100);
+      }
     },
 
     // ── Projects ──
@@ -832,9 +831,11 @@ function dashboard() {
       for (const a of onlineAgents) {
         if (this.panesTerminals[a.name]) continue; // already initialized
         const el = document.getElementById('term-' + a.name);
-        if (!el || el.offsetParent === null) continue; // not rendered/visible yet
+        if (!el) continue;
 
         const term = new Terminal({
+          cols: 80,
+          rows: 24,
           theme: {
             background: '#111827',
             foreground: '#e0e0e0',
@@ -857,10 +858,18 @@ function dashboard() {
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(el);
-        fitAddon.fit();
 
-        // Refit when the container resizes
-        const ro = new ResizeObserver(() => fitAddon.fit());
+        // Fit to container, then enforce minimum 80×24
+        const enforceFit = () => {
+          try { fitAddon.fit(); } catch { /* ignore */ }
+          const cols = Math.max(term.cols, 80);
+          const rows = Math.max(term.rows, 24);
+          if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
+        };
+        enforceFit();
+
+        // Refit when the container resizes (enforces minimum each time)
+        const ro = new ResizeObserver(enforceFit);
         ro.observe(el);
 
         // Connect WebSocket
@@ -886,9 +895,7 @@ function dashboard() {
 
         ws.onopen = () => {
           this.$set(this.panesStatus, a.name, 'connecting');
-          // Send initial size
-          const { cols, rows } = term;
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         };
 
         ws.onclose = () => {
@@ -902,14 +909,12 @@ function dashboard() {
           term.write('\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n');
         };
 
-        // Forward keyboard input
         term.onData((data) => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'input', data }));
           }
         });
 
-        // Forward resize events
         term.onResize(({ cols, rows }) => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'resize', cols, rows }));
