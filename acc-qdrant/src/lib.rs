@@ -2,11 +2,13 @@ pub mod client;
 pub mod embed;
 pub mod error;
 pub mod types;
+pub mod utils;
 
 pub use client::QdrantClient;
 pub use embed::EmbedClient;
 pub use error::QdrantError;
 pub use types::{Point, SearchResult};
+pub use utils::{chunk_text, deterministic_id};
 
 #[cfg(test)]
 mod tests {

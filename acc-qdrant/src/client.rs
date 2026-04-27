@@ -220,4 +220,69 @@ impl QdrantClient {
 
         points.into_iter().map(SearchResult::try_from).collect()
     }
+
+    /// Upsert raw JSON point objects (supports both UUID string and u64 integer IDs).
+    ///
+    /// Each element in `points` must be a JSON object with `id`, `vector`, and `payload`.
+    pub async fn upsert_points_raw(
+        &self,
+        collection: &str,
+        points: Vec<serde_json::Value>,
+    ) -> Result<(), QdrantError> {
+        debug!("upserting {} raw points into '{collection}'", points.len());
+        let body = json!({ "points": points });
+        let resp = self
+            .put(&format!("/collections/{collection}/points"))
+            .json(&body)
+            .send()
+            .await
+            .map_err(QdrantError::Http)?;
+        Self::check_status(resp).await?;
+        Ok(())
+    }
+
+    /// Return the number of points currently in `collection`, or 0 on error/404.
+    pub async fn collection_point_count(&self, name: &str) -> u64 {
+        let resp = match self.get(&format!("/collections/{name}")).send().await {
+            Ok(r) => r,
+            Err(_) => return 0,
+        };
+        if !resp.status().is_success() {
+            return 0;
+        }
+        let raw: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(_) => return 0,
+        };
+        raw["result"]["points_count"].as_u64().unwrap_or(0)
+    }
+
+    /// Ensure a collection exists, creating it (with keyword payload indexes) if absent.
+    ///
+    /// Returns the current point count (0 for newly-created collections).
+    pub async fn ensure_collection(
+        &self,
+        name: &str,
+        vector_size: u64,
+        index_fields: &[&str],
+    ) -> Result<u64, QdrantError> {
+        if !self.collection_exists(name).await? {
+            self.create_collection(name, vector_size).await?;
+            for field in index_fields {
+                let body = json!({
+                    "field_name": field,
+                    "field_schema": "keyword"
+                });
+                // Ignore index-creation errors (index may already exist on retry)
+                let _ = self
+                    .put(&format!("/collections/{name}/index"))
+                    .json(&body)
+                    .send()
+                    .await;
+            }
+            Ok(0)
+        } else {
+            Ok(self.collection_point_count(name).await)
+        }
+    }
 }

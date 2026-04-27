@@ -12,6 +12,7 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
+md5 = "0.7"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
