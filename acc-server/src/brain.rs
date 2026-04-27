@@ -56,6 +56,9 @@ pub struct BrainQueue {
     pub llm_url: String,
     pub llm_key: String,
     pub models: Vec<String>,
+    /// Priority-ordered provider chain: (url, key, model). When non-empty, used
+    /// instead of llm_url/llm_key/models for fallthrough across providers.
+    pub brain_providers: Vec<(String, String, String)>,
     pub tick_ms: u64,
     // Notify the worker when a new request is enqueued
     pub notify: tokio::sync::Notify,
@@ -94,9 +97,27 @@ impl BrainQueue {
             llm_url,
             llm_key,
             models,
+            brain_providers: Vec::new(),
             tick_ms,
             notify: tokio::sync::Notify::new(),
         }
+    }
+
+    /// Build from the config's provider chain. Falls back to env-var/default logic
+    /// for any provider that omits url or api_key.
+    pub fn from_config(providers: &[crate::config::LlmProviderEntry]) -> Self {
+        let mut base = Self::new();
+        if !providers.is_empty() {
+            base.brain_providers = providers
+                .iter()
+                .map(|p| {
+                    let url = p.url.clone().unwrap_or_else(|| base.llm_url.clone());
+                    let key = p.api_key.clone().unwrap_or_else(|| base.llm_key.clone());
+                    (url, key, p.model.clone())
+                })
+                .collect();
+        }
+        base
     }
 
     pub async fn load(&self) {
@@ -147,10 +168,18 @@ impl BrainQueue {
 
     pub async fn status(&self) -> Value {
         let state = self.state.read().await;
+        let providers: Vec<Value> = if !self.brain_providers.is_empty() {
+            self.brain_providers
+                .iter()
+                .map(|(url, _, model)| json!({"url": url, "model": model}))
+                .collect()
+        } else {
+            vec![json!({"url": self.llm_url, "models": self.models})]
+        };
         json!({
             "ok": true,
             "backend": "openai-compat",
-            "url": self.llm_url,
+            "providers": providers,
             "queueDepth": state.queue.len(),
             "completedCount": state.completed.len(),
             "lastTick": state.last_tick,
@@ -274,14 +303,34 @@ impl BrainQueue {
         messages: &[Value],
         max_tokens: u32,
     ) -> Result<(String, u32), String> {
-        for model in &self.models {
-            match self
-                .call_model_once(client, model, messages, max_tokens)
-                .await
-            {
-                Ok((text, tokens)) if !text.is_empty() => return Ok((text, tokens)),
-                Ok(_) => warn!("brain: empty response from {}", model),
-                Err(e) => warn!("brain: {} failed: {} — trying next", model, e),
+        if !self.brain_providers.is_empty() {
+            for (url, key, model) in &self.brain_providers {
+                match self
+                    .call_model_once(client, url, key, model, messages, max_tokens)
+                    .await
+                {
+                    Ok((text, tokens)) if !text.is_empty() => return Ok((text, tokens)),
+                    Ok(_) => warn!("brain: empty response from {} @ {}", model, url),
+                    Err(e) => warn!("brain: {}/{} failed: {} — trying next", url, model, e),
+                }
+            }
+        } else {
+            for model in &self.models {
+                match self
+                    .call_model_once(
+                        client,
+                        &self.llm_url,
+                        &self.llm_key,
+                        model,
+                        messages,
+                        max_tokens,
+                    )
+                    .await
+                {
+                    Ok((text, tokens)) if !text.is_empty() => return Ok((text, tokens)),
+                    Ok(_) => warn!("brain: empty response from {}", model),
+                    Err(e) => warn!("brain: {} failed: {} — trying next", model, e),
+                }
             }
         }
         Err("all models failed".to_string())
@@ -290,13 +339,15 @@ impl BrainQueue {
     async fn call_model_once(
         &self,
         client: &reqwest::Client,
+        url: &str,
+        key: &str,
         model: &str,
         messages: &[Value],
         max_tokens: u32,
     ) -> Result<(String, u32), String> {
         let resp = client
-            .post(format!("{}/v1/chat/completions", self.llm_url))
-            .bearer_auth(&self.llm_key)
+            .post(format!("{}/v1/chat/completions", url))
+            .bearer_auth(key)
             .json(&json!({
                 "model": model,
                 "messages": messages,

@@ -9,6 +9,21 @@ use std::path::PathBuf;
 
 // ── JSON schema ───────────────────────────────────────────────────────────────
 
+/// One LLM provider entry in the ordered fallback chain.
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct LlmProviderEntry {
+    /// "anthropic" | "openai" | "openai-compat"
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    /// Base URL (required for openai-compat; optional for anthropic/openai)
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub label: Option<String>,
+    pub priority: u8,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct CccConfig {
@@ -23,6 +38,8 @@ pub struct CccConfig {
     pub fs_root: Option<String>,
     pub supervisor: SupervisorConfig,
     pub qdrant: QdrantConfig,
+    /// Ordered LLM provider chain. Lower priority number = tried first.
+    pub llm_providers: Vec<LlmProviderEntry>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
@@ -60,6 +77,8 @@ pub struct ResolvedConfig {
     pub supervisor_enabled: bool,
     pub qdrant_url: String,
     pub qdrant_api_key: Option<String>,
+    /// Ordered LLM provider chain from config file + LLM_PROVIDERS env var.
+    pub llm_providers: Vec<LlmProviderEntry>,
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────
@@ -190,6 +209,30 @@ pub fn load() -> ResolvedConfig {
     let auth_db_path = evar("AUTH_DB_PATH")
         .unwrap_or_else(|| format!("{}/.acc/auth.db", home));
 
+    // LLM providers: merge JSON config with LLM_PROVIDERS env var.
+    // JSON config provides the baseline; env var entries are appended then the whole
+    // list is sorted by priority so lower numbers are tried first.
+    // Format: comma-separated `type|url|api_key|model[|label[|priority]]` (pipe-delimited
+    // to avoid conflicts with `://` in URLs).
+    let mut llm_providers = j.llm_providers.clone();
+    if let Ok(raw) = std::env::var("LLM_PROVIDERS") {
+        if !raw.is_empty() {
+            for (i, part) in raw.split(',').enumerate() {
+                let fields: Vec<&str> = part.trim().splitn(6, '|').collect();
+                if fields.len() < 4 { continue; }
+                llm_providers.push(LlmProviderEntry {
+                    provider_type: fields[0].to_string(),
+                    url: if fields[1].is_empty() { None } else { Some(fields[1].to_string()) },
+                    api_key: if fields[2].is_empty() { None } else { Some(fields[2].to_string()) },
+                    model: fields[3].to_string(),
+                    label: fields.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    priority: fields.get(5).and_then(|s| s.parse().ok()).unwrap_or(i as u8),
+                });
+            }
+        }
+    }
+    llm_providers.sort_by_key(|e| e.priority);
+
     ResolvedConfig {
         port,
         data_dir,
@@ -205,5 +248,6 @@ pub fn load() -> ResolvedConfig {
         supervisor_enabled,
         qdrant_url,
         qdrant_api_key,
+        llm_providers,
     }
 }

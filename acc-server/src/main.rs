@@ -80,7 +80,7 @@ async fn main() {
         agents: RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
         secrets: RwLock::new(serde_json::Map::new()),
         projects: tokio::sync::RwLock::new(Vec::new()),
-        brain: Arc::new(brain::BrainQueue::new()),
+        brain: Arc::new(brain::BrainQueue::from_config(&cfg.llm_providers)),
         bus_tx: tokio::sync::broadcast::channel(256).0,
         bus_seq: std::sync::atomic::AtomicU64::new(
             acc_server::routes::bus::initial_bus_seq(&cfg.bus_log_path),

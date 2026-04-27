@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct LlmResponse {
@@ -261,7 +262,150 @@ impl LlmProvider for OpenAiProvider {
 /// Select provider based on environment variables.
 /// - HERMES_PROVIDER=openai → OpenAiProvider (also triggered by OPENAI_BASE_URL or HERMES_BACKEND_URL)
 /// - default → AnthropicProvider
+// ── Provider configuration ────────────────────────────────────────────────────
+
+/// One entry in an ordered provider list. Priority is ascending (0 = try first).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderEntry {
+    /// "anthropic" | "openai" | "openai-compat"
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    /// Base URL (required for openai-compat; optional for anthropic/openai).
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub label: Option<String>,
+    #[serde(default)]
+    pub priority: u8,
+}
+
+impl ProviderEntry {
+    fn build(&self) -> Box<dyn LlmProvider> {
+        let key = self.api_key.clone().unwrap_or_default();
+        match self.provider_type.as_str() {
+            "anthropic" => {
+                let base = self.url.clone()
+                    .unwrap_or_else(|| "https://api.anthropic.com".to_string());
+                Box::new(AnthropicProvider::with_base_url(key, self.model.clone(), base))
+            }
+            _ => {
+                // "openai" | "openai-compat" — anything with a /v1/chat/completions endpoint
+                let base = self.url.clone()
+                    .unwrap_or_else(|| "https://api.openai.com".to_string());
+                Box::new(OpenAiProvider::with_base_url(key, self.model.clone(), base))
+            }
+        }
+    }
+}
+
+// ── ProviderChain ─────────────────────────────────────────────────────────────
+
+/// Wraps multiple providers in priority order. On each completion attempt, tries
+/// providers sequentially and returns the first successful non-empty response.
+/// Falls through on any error or empty content.
+pub struct ProviderChain {
+    providers: Vec<(String, Box<dyn LlmProvider>)>, // (label, provider)
+}
+
+impl ProviderChain {
+    pub fn new(mut entries: Vec<ProviderEntry>) -> Self {
+        entries.sort_by_key(|e| e.priority);
+        let providers = entries
+            .into_iter()
+            .map(|e| {
+                let label = e.label.clone()
+                    .unwrap_or_else(|| format!("{}/{}", e.provider_type, e.model));
+                (label, e.build())
+            })
+            .collect();
+        Self { providers }
+    }
+
+}
+
+impl LlmProvider for ProviderChain {
+    fn complete<'a>(
+        &'a self,
+        system: &'a str,
+        messages: &'a [Value],
+        tools: &'a [Value],
+        max_tokens: u32,
+    ) -> Pin<Box<dyn Future<Output = ProviderResult> + Send + 'a>> {
+        Box::pin(async move {
+            let mut last_err = String::from("no providers configured");
+            for (label, provider) in &self.providers {
+                match provider.complete(system, messages, tools, max_tokens).await {
+                    Ok(resp) if !resp.content.is_empty() => {
+                        tracing::debug!("ProviderChain: success via {label}");
+                        return Ok(resp);
+                    }
+                    Ok(_) => {
+                        tracing::warn!("ProviderChain: empty response from {label}, trying next");
+                        last_err = format!("{label}: empty response");
+                    }
+                    Err(e) => {
+                        tracing::warn!("ProviderChain: {label} failed: {e}, trying next");
+                        last_err = format!("{label}: {e}");
+                    }
+                }
+            }
+            Err(format!("all providers failed; last error: {last_err}"))
+        })
+    }
+}
+
+/// Parse provider list from the `LLM_PROVIDERS` env var.
+///
+/// Format: comma-separated entries, each field separated by `|` (pipe).
+///   `type|url|api_key|model[|label[|priority]]`
+/// Empty fields are allowed (omit url/key to inherit from env).
+/// Example: `openai-compat|http://localhost:11434/v1||llama3,anthropic|||claude-opus-4-7|main|1`
+///
+/// Pipe is used instead of colon to avoid conflicts with `://` in URLs.
+pub fn providers_from_env() -> Vec<ProviderEntry> {
+    let raw = match std::env::var("LLM_PROVIDERS") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return vec![],
+    };
+    let mut entries: Vec<ProviderEntry> = raw
+        .split(',')
+        .enumerate()
+        .filter_map(|(i, part)| {
+            let fields: Vec<&str> = part.trim().splitn(6, '|').collect();
+            if fields.len() < 4 { return None; }
+            let url = if fields[1].is_empty() { None } else { Some(fields[1].to_string()) };
+            let api_key = if fields[2].is_empty() { None } else { Some(fields[2].to_string()) };
+            let model = fields[3].to_string();
+            let label = fields.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string());
+            let priority = fields.get(5)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(i as u8);
+            Some(ProviderEntry {
+                provider_type: fields[0].to_string(),
+                url, api_key, model, label, priority,
+            })
+        })
+        .collect();
+    entries.sort_by_key(|e| e.priority);
+    entries
+}
+
+/// Build the provider to use for inference.
+///
+/// Priority:
+/// 1. `LLM_PROVIDERS` env var (multi-provider chain with fallthrough)
+/// 2. `HERMES_PROVIDER=openai` / `OPENAI_BASE_URL` / `HERMES_BACKEND_URL` → single OpenAiProvider
+/// 3. Default → single AnthropicProvider
 pub fn make_provider(api_key: String, model: String) -> Box<dyn LlmProvider> {
+    let chain_entries = providers_from_env();
+    if !chain_entries.is_empty() {
+        tracing::info!(
+            "hermes-rust: using provider chain: {:?}",
+            chain_entries.iter().map(|e| &e.model).collect::<Vec<_>>()
+        );
+        return Box::new(ProviderChain::new(chain_entries));
+    }
+
     let use_openai = std::env::var("HERMES_PROVIDER").as_deref() == Ok("openai")
         || std::env::var("OPENAI_BASE_URL").is_ok()
         || std::env::var("HERMES_BACKEND_URL").is_ok();
@@ -456,5 +600,159 @@ mod tests {
         let messages = req["messages"].as_array().unwrap();
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[0]["content"], "my system prompt");
+    }
+
+    // ── ProviderChain tests ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn provider_chain_returns_first_success() {
+        let recorded = Arc::new(Mutex::new(vec![]));
+        let (url, _h) = mock_server(openai_mock_router(recorded.clone())).await;
+        let chain = ProviderChain {
+            providers: vec![(
+                "test".to_string(),
+                Box::new(OpenAiProvider::with_base_url("key".into(), "m".into(), url))
+                    as Box<dyn LlmProvider>,
+            )],
+        };
+        let resp = chain.complete("sys", &[], &[], 512).await.unwrap();
+        assert_eq!(resp.content[0]["text"], "oai reply");
+    }
+
+    #[tokio::test]
+    async fn provider_chain_falls_through_on_error() {
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+
+        // First provider always 500s
+        let failing_router = Router::new()
+            .route("/v1/chat/completions", post(|| async {
+                (StatusCode::INTERNAL_SERVER_ERROR, "oops").into_response()
+            }));
+        let (fail_url, _h1) = mock_server(failing_router).await;
+
+        // Second provider succeeds
+        let recorded = Arc::new(Mutex::new(vec![]));
+        let (ok_url, _h2) = mock_server(openai_mock_router(recorded.clone())).await;
+
+        let chain = ProviderChain {
+            providers: vec![
+                (
+                    "failing".to_string(),
+                    Box::new(OpenAiProvider::with_base_url("key".into(), "m".into(), fail_url))
+                        as Box<dyn LlmProvider>,
+                ),
+                (
+                    "working".to_string(),
+                    Box::new(OpenAiProvider::with_base_url("key".into(), "m".into(), ok_url))
+                        as Box<dyn LlmProvider>,
+                ),
+            ],
+        };
+        let resp = chain.complete("sys", &[], &[], 512).await.unwrap();
+        assert_eq!(resp.content[0]["text"], "oai reply");
+        // Second provider was reached
+        assert_eq!(recorded.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_chain_returns_error_when_all_fail() {
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+
+        let failing_router = Router::new()
+            .route("/v1/chat/completions", post(|| async {
+                (StatusCode::INTERNAL_SERVER_ERROR, "nope").into_response()
+            }));
+        let (url, _h) = mock_server(failing_router).await;
+
+        let chain = ProviderChain {
+            providers: vec![(
+                "bad".to_string(),
+                Box::new(OpenAiProvider::with_base_url("key".into(), "m".into(), url))
+                    as Box<dyn LlmProvider>,
+            )],
+        };
+        let result = chain.complete("sys", &[], &[], 512).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("all providers failed"));
+    }
+
+    // ── providers_from_env tests ─────────────────────────────────────────────
+    // These tests exercise the parse_providers_str helper logic inline since
+    // providers_from_env() reads from the real env var (global state, unsafe
+    // to set in parallel tests). The format is pipe-delimited to avoid conflicts
+    // with `://` in URLs.
+
+    fn parse_providers_str(raw: &str) -> Vec<ProviderEntry> {
+        let mut entries: Vec<ProviderEntry> = raw
+            .split(',')
+            .enumerate()
+            .filter_map(|(i, part)| {
+                let fields: Vec<&str> = part.trim().splitn(6, '|').collect();
+                if fields.len() < 4 { return None; }
+                let url = if fields[1].is_empty() { None } else { Some(fields[1].to_string()) };
+                let api_key = if fields[2].is_empty() { None } else { Some(fields[2].to_string()) };
+                let model = fields[3].to_string();
+                let label = fields.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string());
+                let priority = fields.get(5).and_then(|s| s.parse().ok()).unwrap_or(i as u8);
+                Some(ProviderEntry {
+                    provider_type: fields[0].to_string(),
+                    url, api_key, model, label, priority,
+                })
+            })
+            .collect();
+        entries.sort_by_key(|e| e.priority);
+        entries
+    }
+
+    #[test]
+    fn providers_from_env_parses_minimal_entry() {
+        // Pipe-delimited so URLs with `://` aren't split incorrectly
+        let entries = parse_providers_str("openai-compat|http://localhost:11434/v1|mykey|llama3");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].provider_type, "openai-compat");
+        assert_eq!(entries[0].url.as_deref(), Some("http://localhost:11434/v1"));
+        assert_eq!(entries[0].api_key.as_deref(), Some("mykey"));
+        assert_eq!(entries[0].model, "llama3");
+        assert!(entries[0].label.is_none());
+        assert_eq!(entries[0].priority, 0);
+    }
+
+    #[test]
+    fn providers_from_env_parses_empty_url_and_key() {
+        let entries = parse_providers_str("anthropic|||claude-opus-4-7|anthropic-main|1");
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].url.is_none(), "empty url field should produce None");
+        assert!(entries[0].api_key.is_none(), "empty key field should produce None");
+        assert_eq!(entries[0].label.as_deref(), Some("anthropic-main"));
+        assert_eq!(entries[0].priority, 1);
+    }
+
+    #[test]
+    fn providers_from_env_skips_entries_with_fewer_than_4_fields() {
+        // Only 3 pipe-separated fields — should be skipped
+        let result = parse_providers_str("openai|http://x.com|only-three");
+        assert!(result.is_empty(), "entry with < 4 fields must be skipped");
+    }
+
+    #[test]
+    fn providers_from_env_sorted_by_explicit_priority() {
+        // Three entries with explicit priorities out of natural order
+        let raw = "openai|||gpt-4o||10,anthropic|||claude-opus-4-7||5,openai-compat|http://x/v1||llama3||1";
+        let entries = parse_providers_str(raw);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].model, "llama3");       // priority 1
+        assert_eq!(entries[1].model, "claude-opus-4-7"); // priority 5
+        assert_eq!(entries[2].model, "gpt-4o");       // priority 10
+    }
+
+    #[test]
+    fn providers_from_env_url_with_scheme_and_port_parsed_correctly() {
+        // Verify that http://host:port/path is kept intact (the whole motivation
+        // for switching from colon to pipe as the field delimiter)
+        let entries = parse_providers_str("openai-compat|http://vllm.internal:8000/v1||mistral-7b");
+        assert_eq!(entries[0].url.as_deref(), Some("http://vllm.internal:8000/v1"));
+        assert_eq!(entries[0].model, "mistral-7b");
     }
 }
