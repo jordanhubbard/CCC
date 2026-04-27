@@ -528,6 +528,23 @@ pub fn select_best_agent(
                     .unwrap_or(false);
                 if !has_cap { return None; }
             }
+            // Check task metadata.requires[] against agent's registered tool_capabilities[]
+            if let Some(requires) = task["metadata"]["requires"].as_array() {
+                if !requires.is_empty() {
+                    let agent_tool_caps: std::collections::HashSet<&str> = agent
+                        ["tool_capabilities"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+                        .unwrap_or_default();
+                    let all_satisfied = requires
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .all(|req| agent_tool_caps.contains(req));
+                    if !all_satisfied {
+                        return None;
+                    }
+                }
+            }
             Some((name.clone(), load))
         })
         .collect();

@@ -27,6 +27,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/tasks/:id/review-result", put(set_review_result))
         .route("/api/tasks/:id/vote", put(vote_on_task))
         .route("/api/tasks/:id/fanout", post(fanout_task))
+        .route("/api/tasks/:id/keepalive", put(keepalive_task))
+        .route("/api/tasks/:id/turns",     get(get_turns).post(append_turn))
 }
 
 #[derive(Deserialize)]
@@ -40,16 +42,24 @@ struct TaskQuery {
     offset: Option<i64>,
 }
 
-// Columns 0-12 (original) + 13-17 (new)
+// Columns 0-12 (original) + 13-17 (new) + 18-19 (output, inputs)
 const TASK_COLS: &str = "id,project_id,title,description,status,priority,claimed_by,claimed_at,\
     claim_expires_at,completed_at,completed_by,created_at,metadata,\
-    task_type,review_of,phase,blocked_by,review_result";
+    task_type,review_of,phase,blocked_by,review_result,output,inputs";
 
 fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Value> {
     let metadata_str: String = row.get(12)?;
     let metadata: Value = serde_json::from_str(&metadata_str).unwrap_or(json!({}));
     let blocked_by_str: String = row.get(16).unwrap_or_else(|_| "[]".to_string());
     let blocked_by: Value = serde_json::from_str(&blocked_by_str).unwrap_or(json!([]));
+    let output_val: Value = {
+        let s: Option<String> = row.get(18).unwrap_or(None);
+        s.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null)
+    };
+    let inputs_val: Value = {
+        let s: String = row.get(19).unwrap_or_else(|_| "{}".to_string());
+        serde_json::from_str(&s).unwrap_or(json!({}))
+    };
     Ok(json!({
         "id":               row.get::<_, String>(0)?,
         "project_id":       row.get::<_, String>(1)?,
@@ -69,6 +79,8 @@ fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Value> {
         "phase":            row.get::<_, Option<String>>(15)?,
         "blocked_by":       blocked_by,
         "review_result":    row.get::<_, Option<String>>(17)?,
+        "output":           output_val,
+        "inputs":           inputs_val,
     }))
 }
 
@@ -451,11 +463,14 @@ async fn complete_task(
         return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
     }
     let agent = body.get("agent").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let output_str: Option<String> = body.get("output").map(|v| v.to_string());
     let db = state.fleet_db.lock().await;
     let now = chrono::Utc::now().to_rfc3339();
     let rows = db.execute(
-        "UPDATE fleet_tasks SET status='completed', completed_at=?1, completed_by=?2, claim_expires_at=NULL, updated_at=?1 WHERE id=?3 AND status IN ('claimed','in_progress','open')",
-        params![now, agent, id],
+        "UPDATE fleet_tasks SET status='completed', completed_at=?1, completed_by=?2, \
+         claim_expires_at=NULL, output=?4, updated_at=?1 \
+         WHERE id=?3 AND status IN ('claimed','in_progress','open')",
+        params![now, agent, id, output_str],
     ).unwrap_or(0);
     if rows == 0 {
         return (StatusCode::NOT_FOUND, Json(json!({"error":"Task not found"}))).into_response();
@@ -478,6 +493,20 @@ async fn complete_task(
             let _ = state.bus_tx.send(
                 json!({"type":"tasks:dispatch_nudge","task_id":unblocked_id,"reason":"blocker_completed"}).to_string()
             );
+            // Collect blocked_by list for this unblocked task, then populate inputs
+            let blocked_by_str: String = {
+                let conn = state.fleet_db.lock().await;
+                conn.query_row(
+                    "SELECT blocked_by FROM fleet_tasks WHERE id=?1",
+                    rusqlite::params![unblocked_id],
+                    |r| r.get(0),
+                ).unwrap_or_else(|_| "[]".to_string())
+            };
+            let blocked_by: Vec<String> = serde_json::from_str(&blocked_by_str).unwrap_or_default();
+            {
+                let conn = state.fleet_db.lock().await;
+                let _ = crate::db::db_populate_inputs(&conn, unblocked_id, &blocked_by);
+            }
         }
     }
 
@@ -874,6 +903,79 @@ async fn fanout_task(
     }
 
     (StatusCode::CREATED, Json(json!({"ok":true,"parent_id":id,"children":child_ids}))).into_response()
+}
+
+// ── PUT /api/tasks/:id/keepalive ─────────────────────────────────────────────
+
+async fn keepalive_task(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    if !state.is_authed(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+    }
+    let agent = body.get("agent").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let extend_mins: i64 = body.get("extend_mins").and_then(|v| v.as_i64()).unwrap_or(30);
+    let now = chrono::Utc::now();
+    let new_expires = (now + chrono::Duration::minutes(extend_mins)).to_rfc3339();
+    let db = state.fleet_db.lock().await;
+    let rows = db.execute(
+        "UPDATE fleet_tasks SET claim_expires_at=?1, updated_at=?2 \
+         WHERE id=?3 AND claimed_by=?4 AND status IN ('claimed','in_progress')",
+        params![new_expires, now.to_rfc3339(), id, agent],
+    ).unwrap_or(0);
+    if rows == 0 {
+        return (StatusCode::NOT_FOUND,
+            Json(json!({"error":"task not found or not claimed by this agent"}))).into_response();
+    }
+    Json(json!({"ok":true,"claim_expires_at":new_expires})).into_response()
+}
+
+// ── POST /api/tasks/:id/turns ─────────────────────────────────────────────────
+
+async fn append_turn(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    if !state.is_authed(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+    }
+    let turn_index = body["turn_index"].as_i64().unwrap_or(0);
+    let role = body["role"].as_str().unwrap_or("assistant").to_string();
+    let content = body.get("content")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "[]".to_string());
+    let input_tokens = body["input_tokens"].as_i64().unwrap_or(0);
+    let output_tokens = body["output_tokens"].as_i64().unwrap_or(0);
+    let stop_reason = body["stop_reason"].as_str().map(str::to_string);
+    let db = state.fleet_db.lock().await;
+    match crate::db::db_save_turn(
+        &db, &id, turn_index, &role, &content,
+        input_tokens, output_tokens, stop_reason.as_deref(),
+    ) {
+        Ok(()) => Json(json!({"ok":true})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error":e.to_string()}))).into_response(),
+    }
+}
+
+// ── GET /api/tasks/:id/turns ──────────────────────────────────────────────────
+
+async fn get_turns(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if !state.is_authed(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+    }
+    let db = state.fleet_db.lock().await;
+    let turns = crate::db::db_load_turns(&db, &id);
+    Json(json!({"ok":true,"turns":turns,"count":turns.len()})).into_response()
 }
 
 #[cfg(test)]

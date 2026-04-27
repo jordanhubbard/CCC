@@ -10,7 +10,7 @@ use rusqlite::{Connection, Result, params};
 use serde_json::Value;
 use std::path::Path;
 
-const CURRENT_VERSION: i64 = 5;
+const CURRENT_VERSION: i64 = 6;
 
 /// Open a database connection, create schema if needed, run any pending migrations.
 pub fn open(path: &str) -> Result<Connection> {
@@ -288,6 +288,41 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             }
         }
         set_schema_version(conn, 5)?;
+    }
+
+    if version < 6 {
+        // Add output and inputs columns to fleet_tasks (idempotent)
+        for (col, def) in &[
+            ("output", "TEXT"),
+            ("inputs", "TEXT NOT NULL DEFAULT '{}'"),
+        ] {
+            let exists: bool = conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name=?1",
+                rusqlite::params![col],
+                |r| r.get::<_, i64>(0),
+            ).unwrap_or(0) > 0;
+            if !exists {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE fleet_tasks ADD COLUMN {} {};", col, def
+                ))?;
+            }
+        }
+        // Create conversations table and index
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS conversations (
+                task_id    TEXT NOT NULL,
+                turn_index INTEGER NOT NULL,
+                role       TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                input_tokens  INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                stop_reason   TEXT,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                PRIMARY KEY (task_id, turn_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversations_task ON conversations(task_id, turn_index);
+        ")?;
+        set_schema_version(conn, 6)?;
     }
 
     set_schema_version(conn, CURRENT_VERSION)?;
@@ -787,6 +822,85 @@ pub fn db_find_newly_unblocked(conn: &Connection, completed_id: &str) -> Vec<Str
         })
         .map(|(id, _)| id)
         .collect()
+}
+
+/// Persist one conversation turn for a task.
+pub fn db_save_turn(
+    conn: &Connection,
+    task_id: &str,
+    turn_index: i64,
+    role: &str,
+    content: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+    stop_reason: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO conversations \
+         (task_id, turn_index, role, content, input_tokens, output_tokens, stop_reason) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        rusqlite::params![task_id, turn_index, role, content, input_tokens, output_tokens, stop_reason],
+    )?;
+    Ok(())
+}
+
+/// Load all turns for a task, ordered by turn_index ascending.
+pub fn db_load_turns(conn: &Connection, task_id: &str) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let mut stmt = match conn.prepare(
+        "SELECT turn_index,role,content,input_tokens,output_tokens,stop_reason,created_at \
+         FROM conversations WHERE task_id=?1 ORDER BY turn_index ASC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    stmt.query_map(rusqlite::params![task_id], |row| {
+        let content_str: String = row.get(2)?;
+        let content_val: serde_json::Value =
+            serde_json::from_str(&content_str).unwrap_or(serde_json::Value::String(content_str));
+        Ok(json!({
+            "turn_index":    row.get::<_, i64>(0)?,
+            "role":          row.get::<_, String>(1)?,
+            "content":       content_val,
+            "input_tokens":  row.get::<_, i64>(3)?,
+            "output_tokens": row.get::<_, i64>(4)?,
+            "stop_reason":   row.get::<_, Option<String>>(5)?,
+            "created_at":    row.get::<_, String>(6)?,
+        }))
+    })
+    .ok()
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+/// Collect outputs from all completed blockers and write them as the task's inputs map.
+/// Call this after a task becomes newly unblocked.
+pub fn db_populate_inputs(
+    conn: &Connection,
+    task_id: &str,
+    blocked_by: &[String],
+) -> rusqlite::Result<()> {
+    let mut inputs = serde_json::Map::new();
+    for blocker_id in blocked_by {
+        let output: Option<String> = conn
+            .query_row(
+                "SELECT output FROM fleet_tasks WHERE id=?1 AND status='completed'",
+                rusqlite::params![blocker_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(None);
+        if let Some(s) = output {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                inputs.insert(blocker_id.clone(), v);
+            }
+        }
+    }
+    let inputs_str = serde_json::to_string(&inputs).unwrap_or_else(|_| "{}".to_string());
+    conn.execute(
+        "UPDATE fleet_tasks SET inputs=?1 WHERE id=?2",
+        rusqlite::params![inputs_str, task_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

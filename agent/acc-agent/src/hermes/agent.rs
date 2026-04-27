@@ -52,6 +52,7 @@ impl HermesAgent {
     }
 
     pub async fn run_item(&self, item_id: String, query: String) {
+        self.register_capabilities().await;
         self.log(&format!("starting item={item_id} query_len={}", query.len()));
 
         if !self.claim(&item_id).await {
@@ -80,12 +81,14 @@ impl HermesAgent {
     }
 
     pub async fn run_query(&self, query: String) {
+        self.register_capabilities().await;
         self.log(&format!("running ad-hoc query len={}", query.len()));
         let (_, output) = self.run_conversation(None, query).await;
         println!("{output}");
     }
 
     pub async fn poll_queue(&self) {
+        self.register_capabilities().await;
         self.log(&format!(
             "starting queue poll (agent={}, hub={})",
             self.cfg.agent_name, self.cfg.acc_url
@@ -115,8 +118,23 @@ impl HermesAgent {
         query: String,
     ) -> (bool, String) {
         let system = self.system_prompt();
-        let mut history = ConversationHistory::new();
-        history.push_user_text(&query);
+
+        // Attempt to resume from stored turns if we have a task ID.
+        let mut history = if let Some(ref id) = item_id {
+            let stored_turns = self.load_turns(id).await;
+            if !stored_turns.is_empty() {
+                self.log(&format!("resuming from {} stored turns", stored_turns.len()));
+                ConversationHistory::from_turns(&stored_turns)
+            } else {
+                let mut h = ConversationHistory::new();
+                h.push_user_text(&query);
+                h
+            }
+        } else {
+            let mut h = ConversationHistory::new();
+            h.push_user_text(&query);
+            h
+        };
 
         let tools_api = self.tools.to_api_format();
 
@@ -183,6 +201,18 @@ impl HermesAgent {
             }
 
             history.push_assistant_content(resp.content.clone());
+            if let Some(ref id) = item_id {
+                let assistant_content = json!(resp.content);
+                self.save_turn(
+                    id,
+                    history.messages.len() as i64 - 1,
+                    "assistant",
+                    &assistant_content,
+                    resp.input_tokens,
+                    resp.output_tokens,
+                    &resp.stop_reason,
+                ).await;
+            }
 
             match resp.stop_reason.as_str() {
                 "end_turn" => {
@@ -195,7 +225,19 @@ impl HermesAgent {
                 }
                 "tool_use" => {
                     let tool_results = self.execute_tools(&resp.content).await;
-                    history.push_tool_results(tool_results);
+                    history.push_tool_results(tool_results.clone());
+                    if let Some(ref id) = item_id {
+                        let results_content = json!(tool_results);
+                        self.save_turn(
+                            id,
+                            history.messages.len() as i64 - 1,
+                            "user",
+                            &results_content,
+                            0,
+                            0,
+                            "tool_results",
+                        ).await;
+                    }
                 }
                 "max_tokens" => {
                     self.log(&format!(
@@ -217,6 +259,67 @@ impl HermesAgent {
 
         let _ = ka_stop.send(());
         (success, final_output)
+    }
+
+    async fn register_capabilities(&self) {
+        let caps = self.tools.names();
+        let url = format!(
+            "{}/api/agents/{}/capabilities",
+            self.cfg.acc_url, self.cfg.agent_name
+        );
+        let body = serde_json::json!({"capabilities": caps});
+        let _ = reqwest::Client::new()
+            .put(&url)
+            .header("Authorization", format!("Bearer {}", self.cfg.acc_token))
+            .json(&body)
+            .send()
+            .await;
+        self.log(&format!("registered capabilities: {}", caps.join(", ")));
+    }
+
+    async fn load_turns(&self, task_id: &str) -> Vec<Value> {
+        let url = format!("{}/api/tasks/{}/turns", self.cfg.acc_url, task_id);
+        let resp = reqwest::Client::new()
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.cfg.acc_token))
+            .send()
+            .await;
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                r.json::<Value>().await
+                    .ok()
+                    .and_then(|v| v["turns"].as_array().cloned())
+                    .unwrap_or_default()
+            }
+            _ => vec![],
+        }
+    }
+
+    async fn save_turn(
+        &self,
+        task_id: &str,
+        turn_index: i64,
+        role: &str,
+        content: &Value,
+        input_tokens: u32,
+        output_tokens: u32,
+        stop_reason: &str,
+    ) {
+        let url = format!("{}/api/tasks/{}/turns", self.cfg.acc_url, task_id);
+        let body = serde_json::json!({
+            "turn_index":    turn_index,
+            "role":          role,
+            "content":       content,
+            "input_tokens":  input_tokens,
+            "output_tokens": output_tokens,
+            "stop_reason":   stop_reason,
+        });
+        let _ = reqwest::Client::new()
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.cfg.acc_token))
+            .json(&body)
+            .send()
+            .await;
     }
 
     async fn execute_tools(&self, content: &[Value]) -> Vec<Value> {

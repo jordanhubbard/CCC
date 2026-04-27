@@ -34,6 +34,26 @@ impl ConversationHistory {
         }));
     }
 
+    pub fn from_turns(turns: &[serde_json::Value]) -> Self {
+        let mut history = Self::new();
+        for turn in turns {
+            let role = turn["role"].as_str().unwrap_or("user");
+            let content = turn["content"].clone();
+            let content_arr = if content.is_array() {
+                content.as_array().cloned().unwrap_or_default()
+            } else {
+                vec![serde_json::json!({"type": "text", "text": content.to_string()})]
+            };
+            history.messages.push(serde_json::json!({
+                "role": role,
+                "content": content_arr
+            }));
+            history.input_tokens += turn["input_tokens"].as_u64().unwrap_or(0) as u32;
+            history.output_tokens += turn["output_tokens"].as_u64().unwrap_or(0) as u32;
+        }
+        history
+    }
+
     pub fn total_tokens(&self) -> u32 {
         self.input_tokens + self.output_tokens
     }

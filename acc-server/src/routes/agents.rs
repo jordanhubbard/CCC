@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use serde_json::{json, Value};
@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use crate::AppState;
 use crate::state::db_flush_agents;
+use crate::state;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -19,6 +20,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/agents/:name", get(get_agent_by_name).post(upsert_agent).patch(patch_agent).delete(delete_agent))
         .route("/api/agents/:name/heartbeat", post(agent_heartbeat))
         .route("/api/agents/:name/health", get(get_agent_health))
+        .route("/api/agents/:name/capabilities", put(register_tool_capabilities))
         .route("/api/heartbeat/:agent", post(post_heartbeat))
         .route("/api/heartbeats", get(get_heartbeats))
 }
@@ -391,6 +393,41 @@ async fn delete_agent(
     drop(agents);
     db_flush_agents(&state).await;
     Json(json!({"ok": true, "name": name, "deleted": true})).into_response()
+}
+
+/// PUT /api/agents/:name/capabilities
+/// Body: {"capabilities": ["bash", "read_file", "llm:claude-opus-4-7"]}
+/// Stores tool_capabilities[] separately from the legacy capabilities{} object.
+/// Called by agents at startup to advertise their live tool set.
+async fn register_tool_capabilities(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    if !state.is_authed(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+    }
+    let caps: Vec<String> = body["capabilities"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+
+    let mut agents = state.agents.write().await;
+    let agents_map = match agents.as_object_mut()
+        .ok_or(())
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":"agents not object"}))))
+    {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
+    let agent = agents_map.entry(name.clone()).or_insert(json!({}));
+    agent["tool_capabilities"] = serde_json::json!(caps);
+    agent["lastSeen"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+    drop(agents);
+    state::db_flush_agents(&state).await;
+
+    Json(json!({"ok":true,"name":name,"capabilities":caps})).into_response()
 }
 
 async fn post_heartbeat(
