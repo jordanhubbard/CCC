@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::AppState;
-use crate::state::flush_agents;
+use crate::state::db_flush_agents;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -204,7 +204,7 @@ async fn agent_heartbeat(
     }
 
     drop(agents);
-    flush_agents(&state).await;
+    db_flush_agents(&state).await;
 
     Json(json!({ "ok": true })).into_response()
 }
@@ -272,7 +272,7 @@ async fn register_agent(
 
     agents_map.insert(name.clone(), agent.clone());
     drop(agents);
-    flush_agents(&state).await;
+    db_flush_agents(&state).await;
 
     (StatusCode::CREATED, Json(json!({"ok": true, "token": token, "agent": agent}))).into_response()
 }
@@ -321,7 +321,7 @@ async fn upsert_agent(
     let token = agents_map[&name].get("token").and_then(|t| t.as_str()).unwrap_or("").to_string();
     let agent = agents_map[&name].clone();
     drop(agents);
-    flush_agents(&state).await;
+    db_flush_agents(&state).await;
 
     Json(json!({"ok": true, "token": token, "agent": agent})).into_response()
 }
@@ -370,7 +370,7 @@ async fn patch_agent(
 
     let updated = agents_map[&name].clone();
     drop(agents);
-    flush_agents(&state).await;
+    db_flush_agents(&state).await;
 
     Json(json!({"ok": true, "agent": updated})).into_response()
 }
@@ -389,7 +389,7 @@ async fn delete_agent(
         return (StatusCode::NOT_FOUND, Json(json!({"error": "Agent not found"}))).into_response();
     }
     drop(agents);
-    flush_agents(&state).await;
+    db_flush_agents(&state).await;
     Json(json!({"ok": true, "name": name, "deleted": true})).into_response()
 }
 
@@ -429,7 +429,7 @@ async fn post_heartbeat(
         }
     }
     drop(agents);
-    flush_agents(&state).await;
+    db_flush_agents(&state).await;
 
     let q = state.queue.read().await;
     let pending_work: Vec<Value> = q.items.iter()

@@ -94,16 +94,12 @@ pub mod testing {
         let fleet_db = db::open_fleet(":memory:").expect("open fleet db");
         let fleet_db = Arc::new(tokio::sync::Mutex::new(fleet_db));
 
+        let bus_log = dir.join("bus.jsonl").to_string_lossy().into_owned();
         Arc::new(AppState {
             auth_tokens: HashSet::from([TEST_TOKEN.to_string()]),
             user_token_hashes: std::sync::RwLock::new(initial_hashes),
             auth_db,
             fleet_db,
-            queue_path:    dir.join("queue.json").to_string_lossy().into_owned(),
-            agents_path:   dir.join("agents.json").to_string_lossy().into_owned(),
-            secrets_path:  dir.join("secrets.json").to_string_lossy().into_owned(),
-            bus_log_path:  dir.join("bus.jsonl").to_string_lossy().into_owned(),
-            projects_path: dir.join("projects.json").to_string_lossy().into_owned(),
             queue:    RwLock::new(state::QueueData::default()),
             agents:   RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
             secrets:  RwLock::new(serde_json::Map::new()),
@@ -111,7 +107,7 @@ pub mod testing {
             brain:    Arc::new(brain::BrainQueue::new()),
             bus_tx:   tokio::sync::broadcast::channel(256).0,
             bus_seq:  std::sync::atomic::AtomicU64::new(
-                crate::routes::bus::initial_bus_seq(&dir.join("bus.jsonl").to_string_lossy()),
+                crate::routes::bus::initial_bus_seq(&bus_log),
             ),
             start_time: std::time::SystemTime::now(),
             fs_root:  dir.join("fs").to_string_lossy().into_owned(),
@@ -122,6 +118,7 @@ pub mod testing {
             dlq_path:   dir.join("bus-dlq.jsonl").to_string_lossy().into_owned(),
             user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
             watchdog: routes::watchdog::WatchdogState::new(),
+            bus_log_path: bus_log,
         })
     }
 

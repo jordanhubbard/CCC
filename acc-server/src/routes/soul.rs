@@ -9,7 +9,7 @@
 ///   GET  /api/agents/:name/soul            — export soul (triggers agent export, returns cached)
 ///   POST /api/agents/:name/soul/data       — agent uploads its packaged host files
 ///   POST /api/agents/move                  — move agent identity to a different host
-use crate::state::flush_agents;
+use crate::state::db_flush_agents;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -202,7 +202,7 @@ async fn move_agent(
             // Mark a tombstone so the slot is gone
         }
         drop(agents);
-        flush_agents(&state).await;
+        db_flush_agents(&state).await;
     }
 
     // Step 3: send soul.import to target machine (agent will restart as source name)

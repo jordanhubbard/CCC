@@ -131,11 +131,6 @@ mod tests {
             user_token_hashes: std::sync::RwLock::new(initial_hashes),
             auth_db,
             fleet_db,
-            queue_path: dir.join("queue.json").to_string_lossy().into_owned(),
-            agents_path: dir.join("agents.json").to_string_lossy().into_owned(),
-            secrets_path: dir.join("secrets.json").to_string_lossy().into_owned(),
-            bus_log_path: dir.join("bus.jsonl").to_string_lossy().into_owned(),
-            projects_path: dir.join("projects.json").to_string_lossy().into_owned(),
             queue: RwLock::new(crate::state::QueueData::default()),
             agents: RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
             secrets: RwLock::new(serde_json::Map::new()),
@@ -150,7 +145,9 @@ mod tests {
             blob_store: RwLock::new(store),
             blobs_path: blobs_path.to_string(),
             dlq_path: dir.join("bus-dlq.jsonl").to_string_lossy().into_owned(),
-            max_blob_bytes: 100 * 1024 * 1024, // 100 MiB default for unit tests
+            bus_log_path: dir.join("bus.jsonl").to_string_lossy().into_owned(),
+            user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
+            watchdog: crate::routes::watchdog::WatchdogState::new(),
         })
     }
 

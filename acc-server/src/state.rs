@@ -22,13 +22,8 @@ pub struct AppState {
     pub user_token_hashes: std::sync::RwLock<HashSet<String>>,
     /// Auth SQLite database (always-on).
     pub auth_db: Arc<tokio::sync::Mutex<rusqlite::Connection>>,
-    /// Fleet task pool SQLite database (always-on).
+    /// Fleet task pool SQLite database (always-on, single source of truth for all state).
     pub fleet_db: Arc<tokio::sync::Mutex<Connection>>,
-    pub queue_path: String,
-    pub agents_path: String,
-    pub secrets_path: String,
-    pub bus_log_path: String,
-    pub projects_path: String,
     pub queue: RwLock<QueueData>,
     pub agents: RwLock<serde_json::Value>,
     pub secrets: RwLock<serde_json::Map<String, serde_json::Value>>,
@@ -53,6 +48,8 @@ pub struct AppState {
     pub user_token_roles: std::sync::RwLock<std::collections::HashMap<String, String>>,
     /// Watchdog state: tracks abandoned-work detection and alerts.
     pub watchdog: crate::routes::watchdog::WatchdogState,
+    /// Filesystem path for bus log (JSONL append-only, not state storage).
+    pub bus_log_path: String,
 }
 
 impl AppState {
@@ -139,151 +136,87 @@ impl AppState {
     }
 }
 
+/// Load all in-memory state from fleet_db (SQLite single source of truth).
 pub async fn load_all(state: &Arc<AppState>) {
-    load_queue(state).await;
-    load_agents(state).await;
-    load_secrets(state).await;
-    load_projects(state).await;
+    let conn = state.fleet_db.lock().await;
+    *state.agents.write().await  = crate::db::db_load_agents(&conn);
+    let items     = crate::db::db_load_queue_items(&conn);
+    let completed = crate::db::db_load_queue_completed(&conn);
+    *state.queue.write().await   = QueueData { items, completed };
+    *state.secrets.write().await = crate::db::db_load_secrets(&conn);
+    *state.projects.write().await = crate::db::db_load_projects(&conn);
+    tracing::info!("State loaded from SQLite (fleet_db)");
 }
 
-pub async fn load_projects(state: &Arc<AppState>) {
-    match tokio::fs::read_to_string(&state.projects_path).await {
-        Ok(content) => {
-            if let Ok(data) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
-                *state.projects.write().await = data;
-                tracing::info!("Loaded projects from {}", state.projects_path);
+// ── DB flush helpers — write in-memory cache back to fleet_db ────────────────
+// Each does a full DELETE + INSERT for the resource so the DB always matches
+// exactly what's in memory. Fine for fleet sizes of ~5–50 agents.
+
+pub async fn db_flush_agents(state: &Arc<AppState>) {
+    let agents = state.agents.read().await;
+    let conn = state.fleet_db.lock().await;
+    if let Err(e) = conn.execute("DELETE FROM agents", []) {
+        tracing::warn!("db_flush_agents: clear failed: {}", e);
+        return;
+    }
+    if let Some(map) = agents.as_object() {
+        for data in map.values() {
+            if let Err(e) = crate::db::db_upsert_agent(&conn, data) {
+                tracing::warn!("db_flush_agents: upsert failed: {}", e);
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::info!("Projects file not found, starting empty");
-        }
-        Err(e) => tracing::warn!("Failed to load projects: {}", e),
     }
 }
 
-pub async fn load_queue(state: &Arc<AppState>) {
-    match tokio::fs::read_to_string(&state.queue_path).await {
-        Ok(content) => {
-            if let Ok(data) = serde_json::from_str::<QueueData>(&content) {
-                *state.queue.write().await = data;
-                tracing::info!("Loaded queue from {}", state.queue_path);
-            }
+pub async fn db_flush_queue(state: &Arc<AppState>) {
+    let q = state.queue.read().await;
+    let conn = state.fleet_db.lock().await;
+    // Replace active items entirely so deletions/moves are reflected.
+    if let Err(e) = conn.execute("DELETE FROM queue_items", []) {
+        tracing::warn!("db_flush_queue: clear failed: {}", e);
+        return;
+    }
+    for item in &q.items {
+        if let Err(e) = crate::db::db_upsert_queue_item(&conn, item) {
+            tracing::warn!("db_flush_queue: upsert item failed: {}", e);
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::info!("Queue file not found, starting empty");
-        }
-        Err(e) => {
-            tracing::warn!("Failed to load queue: {}", e);
+    }
+    // Completed items are append-only; INSERT OR REPLACE is safe.
+    for item in &q.completed {
+        if let Err(e) = crate::db::db_upsert_queue_completed(&conn, item) {
+            tracing::warn!("db_flush_queue: upsert completed failed: {}", e);
         }
     }
 }
 
-pub async fn flush_queue(state: &Arc<AppState>) {
-    let data = state.queue.read().await;
-    let content = match serde_json::to_string_pretty(&*data) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to serialize queue: {}", e);
-            return;
+pub async fn db_flush_secrets(state: &Arc<AppState>) {
+    let secrets = state.secrets.read().await;
+    let conn = state.fleet_db.lock().await;
+    if let Err(e) = conn.execute("DELETE FROM secrets", []) {
+        tracing::warn!("db_flush_secrets: clear failed: {}", e);
+        return;
+    }
+    for (key, value) in secrets.iter() {
+        let val_str = value
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| value.to_string());
+        if let Err(e) = crate::db::db_upsert_secret(&conn, key, &val_str) {
+            tracing::warn!("db_flush_secrets: upsert failed: {}", e);
         }
-    };
-    drop(data);
-    if let Err(e) = write_atomic(&state.queue_path, &content).await {
-        tracing::warn!("Failed to flush queue: {}", e);
     }
 }
 
-pub async fn load_agents(state: &Arc<AppState>) {
-    match tokio::fs::read_to_string(&state.agents_path).await {
-        Ok(content) => {
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-                let obj = if data.is_array() {
-                    // legacy array format -> convert to map
-                    let mut map = serde_json::Map::new();
-                    for agent in data.as_array().unwrap() {
-                        if let Some(name) = agent.get("name").and_then(|n| n.as_str()) {
-                            map.insert(name.to_string(), agent.clone());
-                        }
-                    }
-                    serde_json::Value::Object(map)
-                } else {
-                    data
-                };
-                *state.agents.write().await = obj;
-                tracing::info!("Loaded agents from {}", state.agents_path);
-            }
+pub async fn db_flush_projects(state: &Arc<AppState>) {
+    let projects = state.projects.read().await;
+    let conn = state.fleet_db.lock().await;
+    if let Err(e) = conn.execute("DELETE FROM projects", []) {
+        tracing::warn!("db_flush_projects: clear failed: {}", e);
+        return;
+    }
+    for project in projects.iter() {
+        if let Err(e) = crate::db::db_upsert_project(&conn, project) {
+            tracing::warn!("db_flush_projects: upsert failed: {}", e);
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::info!("Agents file not found, starting empty");
-        }
-        Err(e) => tracing::warn!("Failed to load agents: {}", e),
     }
-}
-
-pub async fn flush_agents(state: &Arc<AppState>) {
-    let data = state.agents.read().await;
-    let content = match serde_json::to_string_pretty(&*data) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to serialize agents: {}", e);
-            return;
-        }
-    };
-    drop(data);
-    if let Some(parent) = std::path::Path::new(&state.agents_path).parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    if let Err(e) = write_atomic(&state.agents_path, &content).await {
-        tracing::warn!("Failed to flush agents: {}", e);
-    }
-}
-
-pub async fn load_secrets(state: &Arc<AppState>) {
-    match tokio::fs::read_to_string(&state.secrets_path).await {
-        Ok(content) => {
-            if let Ok(data) =
-                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-            {
-                *state.secrets.write().await = data;
-                tracing::info!("Loaded secrets from {}", state.secrets_path);
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => tracing::warn!("Failed to load secrets: {}", e),
-    }
-}
-
-pub async fn flush_secrets(state: &Arc<AppState>) {
-    let data = state.secrets.read().await;
-    let content = match serde_json::to_string_pretty(&*data) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("Failed to serialize secrets: {}", e);
-            return;
-        }
-    };
-    drop(data);
-    if let Some(parent) = std::path::Path::new(&state.secrets_path).parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    if let Err(e) = write_atomic(&state.secrets_path, &content).await {
-        tracing::warn!("Failed to flush secrets: {}", e);
-    }
-    // chmod 600
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ =
-            std::fs::set_permissions(&state.secrets_path, std::fs::Permissions::from_mode(0o600));
-    }
-}
-
-async fn write_atomic(path: &str, content: &str) -> std::io::Result<()> {
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    let tmp = format!("{}.tmp", path);
-    tokio::fs::write(&tmp, content).await?;
-    tokio::fs::rename(&tmp, path).await?;
-    Ok(())
 }

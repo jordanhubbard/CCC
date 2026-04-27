@@ -458,6 +458,188 @@ fn migrate_projects(conn: &Connection, path: &str) -> usize {
     count
 }
 
+// ── Load helpers (fleet_db → in-memory) ──────────────────────────────────────
+
+pub fn db_load_agents(conn: &Connection) -> Value {
+    let mut stmt = match conn.prepare("SELECT data FROM agents") {
+        Ok(s) => s,
+        Err(_) => return Value::Object(serde_json::Map::new()),
+    };
+    let mut map = serde_json::Map::new();
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0));
+    if let Ok(rows) = rows {
+        for row in rows.flatten() {
+            if let Ok(v) = serde_json::from_str::<Value>(&row) {
+                if let Some(name) = v.get("name").and_then(|n| n.as_str()) {
+                    map.insert(name.to_string(), v);
+                }
+            }
+        }
+    }
+    Value::Object(map)
+}
+
+pub fn db_load_queue_items(conn: &Connection) -> Vec<Value> {
+    let mut items = Vec::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT data FROM queue_items ORDER BY created_at ASC") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                if let Ok(v) = serde_json::from_str::<Value>(&row) {
+                    items.push(v);
+                }
+            }
+        }
+    }
+    items
+}
+
+pub fn db_load_queue_completed(conn: &Connection) -> Vec<Value> {
+    let mut completed = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT data FROM queue_completed ORDER BY completed_at DESC LIMIT 500",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                if let Ok(v) = serde_json::from_str::<Value>(&row) {
+                    completed.push(v);
+                }
+            }
+        }
+    }
+    completed
+}
+
+pub fn db_load_secrets(conn: &Connection) -> serde_json::Map<String, Value> {
+    let mut map = serde_json::Map::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM secrets") {
+        if let Ok(rows) =
+            stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        {
+            for row in rows.flatten() {
+                let (key, val) = row;
+                let json_val = serde_json::from_str::<Value>(&val)
+                    .unwrap_or_else(|_| Value::String(val));
+                map.insert(key, json_val);
+            }
+        }
+    }
+    map
+}
+
+pub fn db_load_projects(conn: &Connection) -> Vec<Value> {
+    let mut projects = Vec::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT data FROM projects") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                if let Ok(v) = serde_json::from_str::<Value>(&row) {
+                    projects.push(v);
+                }
+            }
+        }
+    }
+    projects
+}
+
+// ── Persist helpers (in-memory → fleet_db) ───────────────────────────────────
+
+pub fn db_upsert_agent(conn: &Connection, data: &Value) -> Result<()> {
+    let name = data.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    let host = data.get("host").and_then(|h| h.as_str()).unwrap_or("");
+    let status = if data
+        .get("decommissioned")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        "decommissioned"
+    } else {
+        "online"
+    };
+    let last_heartbeat = data.get("lastSeen").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let blob = data.to_string();
+    conn.execute(
+        "INSERT OR REPLACE INTO agents (name, host, status, last_heartbeat, data) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![name, host, status, last_heartbeat, blob],
+    )?;
+    Ok(())
+}
+
+pub fn db_delete_agent(conn: &Connection, name: &str) -> Result<()> {
+    conn.execute("DELETE FROM agents WHERE name = ?1", params![name])?;
+    Ok(())
+}
+
+pub fn db_upsert_queue_item(conn: &Connection, item: &Value) -> Result<()> {
+    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+    let priority = item.get("priority").and_then(|v| v.as_i64()).unwrap_or(0);
+    let now = chrono::Utc::now().to_rfc3339();
+    let created_at = item
+        .get("created")
+        .or_else(|| item.get("created_at"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(&now);
+    let blob = item.to_string();
+    conn.execute(
+        "INSERT OR REPLACE INTO queue_items \
+         (id, status, priority, created_at, updated_at, data) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, status, priority, created_at, &now, blob],
+    )?;
+    Ok(())
+}
+
+pub fn db_upsert_queue_completed(conn: &Connection, item: &Value) -> Result<()> {
+    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let now = chrono::Utc::now().to_rfc3339();
+    let completed_at = item
+        .get("completedAt")
+        .or_else(|| item.get("completed_at"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(&now);
+    let blob = item.to_string();
+    conn.execute(
+        "INSERT OR REPLACE INTO queue_completed (id, completed_at, data) VALUES (?1, ?2, ?3)",
+        params![id, completed_at, blob],
+    )?;
+    Ok(())
+}
+
+pub fn db_upsert_secret(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR REPLACE INTO secrets (key, value, updated_at) VALUES (?1, ?2, ?3)",
+        params![key, value, now],
+    )?;
+    Ok(())
+}
+
+pub fn db_delete_secret(conn: &Connection, key: &str) -> Result<()> {
+    conn.execute("DELETE FROM secrets WHERE key = ?1", params![key])?;
+    Ok(())
+}
+
+pub fn db_upsert_project(conn: &Connection, project: &Value) -> Result<()> {
+    let id = project
+        .get("id")
+        .and_then(|v| v.as_str())
+        .or_else(|| project.get("full_name").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let name = project.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let full_name = project.get("full_name").and_then(|v| v.as_str()).unwrap_or("");
+    let blob = project.to_string();
+    conn.execute(
+        "INSERT OR REPLACE INTO projects (id, name, full_name, data) VALUES (?1, ?2, ?3, ?4)",
+        params![id, name, full_name, blob],
+    )?;
+    Ok(())
+}
+
+pub fn db_delete_project(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 /// Insert a bus message into SQLite. Used when SQLite mode is active.
 pub fn insert_bus_message(conn: &Connection, msg: &Value) -> Result<()> {
     let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");

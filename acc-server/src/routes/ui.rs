@@ -99,7 +99,7 @@ async fn post_bootstrap_token(
     let mut secrets = state.secrets.write().await;
     secrets.insert(format!("bootstrap/{}", agent_name), json!(token));
     drop(secrets);
-    crate::state::flush_secrets(&state).await;
+    crate::state::db_flush_secrets(&state).await;
     (
         StatusCode::CREATED,
         Json(json!({"ok": true, "token": token, "agent": agent_name})),

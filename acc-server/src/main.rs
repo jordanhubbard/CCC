@@ -67,26 +67,25 @@ async fn main() {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/home".to_string());
             format!("{}/.acc/data/acc.db", home)
         });
-    let fleet_db = db::open_fleet(&fleet_db_path).expect("failed to open fleet database");
-    let fleet_db = Arc::new(tokio::sync::Mutex::new(fleet_db));
 
-    let queue_path_c    = cfg.queue_path.clone();
-    let agents_path_c   = cfg.agents_path.clone();
-    let secrets_path_c  = cfg.secrets_path.clone();
-    let projects_path_c = cfg.projects_path.clone();
-    let db_path         = cfg.db_path.clone();
-    let fs_root         = cfg.fs_root.clone();
+    // Open fleet DB, migrate any existing JSON files in on first run, then wrap.
+    let fleet_db_conn = db::open_fleet(&fleet_db_path).expect("failed to open fleet database");
+    db::migrate_from_json(
+        &fleet_db_conn,
+        &cfg.queue_path,
+        &cfg.agents_path,
+        &cfg.secrets_path,
+        &cfg.projects_path,
+    );
+    let fleet_db = Arc::new(tokio::sync::Mutex::new(fleet_db_conn));
+
+    let fs_root = cfg.fs_root.clone();
 
     let app_state = Arc::new(AppState {
         auth_tokens: cfg.auth_tokens,
         user_token_hashes: std::sync::RwLock::new(initial_hashes),
         auth_db,
         fleet_db: fleet_db.clone(),
-        queue_path: cfg.queue_path,
-        agents_path: cfg.agents_path,
-        secrets_path: cfg.secrets_path,
-        bus_log_path: cfg.bus_log_path.clone(),
-        projects_path: cfg.projects_path,
         queue: RwLock::new(state::QueueData::default()),
         agents: RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
         secrets: RwLock::new(serde_json::Map::new()),
@@ -105,30 +104,15 @@ async fn main() {
         dlq_path: format!("{}/bus-dlq.jsonl", cfg.data_dir),
         user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
         watchdog: routes::watchdog::WatchdogState::new(),
+        bus_log_path: cfg.bus_log_path.clone(),
     });
 
+    // Load in-memory caches from fleet_db (single source of truth).
     state::load_all(&app_state).await;
     routes::lessons::load_lessons().await;
     routes::metrics::load_metrics().await;
     routes::issues::load_issues().await;
     routes::conversations::load_conversations().await;
-
-    if let Some(db_path) = &db_path {
-        match db::open(db_path) {
-            Ok(conn) => {
-                db::migrate_from_json(
-                    &conn,
-                    &queue_path_c,
-                    &agents_path_c,
-                    &secrets_path_c,
-                    &projects_path_c,
-                );
-                tracing::info!("SQLite mode active: {}", db_path);
-                drop(conn);
-            }
-            Err(e) => tracing::warn!("Failed to open SQLite database {}: {}", db_path, e),
-        }
-    }
 
     let app = build_app(app_state.clone());
 
@@ -145,15 +129,6 @@ async fn main() {
             format!("{}", app_state.auth_tokens.len())
         }
     );
-
-    let flush_state = app_state.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-        loop {
-            interval.tick().await;
-            state::flush_queue(&flush_state).await;
-        }
-    });
 
     let brain_arc = app_state.brain.clone();
     let brain_client = reqwest::Client::builder()
@@ -187,16 +162,14 @@ async fn main() {
     }
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(app_state.clone()))
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
 
-    tracing::info!("Flushing state before exit...");
-    state::flush_queue(&app_state).await;
     tracing::info!("Shutdown complete.");
 }
 
-async fn shutdown_signal(state: Arc<AppState>) {
+async fn shutdown_signal() {
     use tokio::signal;
     let ctrl_c = async {
         signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
@@ -215,6 +188,4 @@ async fn shutdown_signal(state: Arc<AppState>) {
         _ = ctrl_c    => { tracing::info!("Received Ctrl+C, shutting down"); },
         _ = terminate => { tracing::info!("Received SIGTERM, shutting down"); },
     }
-
-    state::flush_queue(&state).await;
 }

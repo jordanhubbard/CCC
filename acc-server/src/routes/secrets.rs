@@ -1,4 +1,4 @@
-use crate::state::flush_secrets;
+use crate::state::db_flush_secrets;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -81,7 +81,7 @@ async fn set_secret(
     let mut secrets = state.secrets.write().await;
     secrets.insert(key.clone(), value.clone());
     drop(secrets);
-    flush_secrets(&state).await;
+    db_flush_secrets(&state).await;
     Json(json!({"ok": true, "key": key, "value": value})).into_response()
 }
 
@@ -106,6 +106,6 @@ async fn delete_secret(
             .into_response();
     }
     drop(secrets);
-    flush_secrets(&state).await;
+    db_flush_secrets(&state).await;
     Json(json!({"ok": true, "key": key, "deleted": true})).into_response()
 }

@@ -1,4 +1,4 @@
-use crate::state::flush_queue;
+use crate::state::db_flush_queue;
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -322,7 +322,7 @@ async fn post_queue(
     q.items.push(item.clone());
     drop(q);
 
-    flush_queue(&state).await;
+    db_flush_queue(&state).await;
 
     (StatusCode::CREATED, Json(json!({"ok": true, "item": item}))).into_response()
 }
@@ -371,7 +371,7 @@ async fn patch_item(
 
             let updated = q.items[pos].clone();
             drop(q);
-            flush_queue(&state).await;
+            db_flush_queue(&state).await;
             (StatusCode::OK, Json(json!({"ok": true, "item": updated}))).into_response()
         }
     }
@@ -406,7 +406,7 @@ async fn delete_item(
         }
         q.completed.push(item.clone());
         drop(q);
-        flush_queue(&state).await;
+        db_flush_queue(&state).await;
         return (StatusCode::OK, Json(json!({"ok": true, "item": item, "cancelled": true}))).into_response();
     }
 
@@ -535,7 +535,7 @@ async fn claim_item(
 
             let updated = item.clone();
             drop(q);
-            flush_queue(&state).await;
+            db_flush_queue(&state).await;
             (StatusCode::OK, Json(json!({"ok": true, "item": updated}))).into_response()
         }
     }
@@ -602,7 +602,7 @@ async fn complete_item(
 
             q.completed.push(item.clone());
             drop(q);
-            flush_queue(&state).await;
+            db_flush_queue(&state).await;
             (StatusCode::OK, Json(json!({"ok": true, "item": item}))).into_response()
         }
     }
@@ -686,7 +686,7 @@ async fn fail_item(
 
             let updated = item.clone();
             drop(q);
-            flush_queue(&state).await;
+            db_flush_queue(&state).await;
             (StatusCode::OK, Json(json!({"ok": true, "item": updated}))).into_response()
         }
     }
@@ -773,7 +773,7 @@ async fn stale_reset_item(
             }
             let updated = item.clone();
             drop(q);
-            flush_queue(&state).await;
+            db_flush_queue(&state).await;
             (StatusCode::OK, Json(json!({"ok": true, "item": updated}))).into_response()
         }
     }

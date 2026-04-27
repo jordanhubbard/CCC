@@ -54,14 +54,14 @@ pub async fn set_agentfs_dirty(state: &Arc<AppState>, project_id: &str, dirty: b
             if let Some(obj) = p.as_object_mut() {
                 obj.insert("agentfs_dirty".to_string(), json!(dirty));
                 obj.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
-            }
+        }
             found = true;
             break;
-        }
     }
+}
     if found {
         write_projects(state, projects).await;
-    }
+}
     found
 }
 
@@ -76,10 +76,10 @@ async fn mark_project_clean(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
     if !set_agentfs_dirty(&state, &id, false).await {
         return (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"Project not found"}))).into_response();
-    }
+}
     // Successful phase_commit also resets the consecutive-failure counter.
     let _ = set_phase_commit_failures(&state, &id, 0).await;
     let _ = state.bus_tx.send(
@@ -100,34 +100,34 @@ async fn refresh_project_workspace(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
     let projects = read_projects(&state).await;
     let project = projects.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id));
     let project = match project {
         Some(p) => p.clone(),
         None => return (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"Project not found"}))).into_response(),
-    };
+};
     let path = project.get("agentfs_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if path.is_empty() {
         return (axum::http::StatusCode::CONFLICT, Json(json!({"error":"project has no agentfs_path"}))).into_response();
-    }
+}
     let dirty = project.get("agentfs_dirty").and_then(|v| v.as_bool()).unwrap_or(false);
     if dirty {
         return (axum::http::StatusCode::CONFLICT, Json(json!({
             "error":"agentfs_dirty",
             "message":"refusing to refresh — uncommitted changes in AgentFS. phase_commit first."
-        }))).into_response();
-    }
+    }))).into_response();
+}
 
     match git_pull_workspace(&path).await {
         Ok(summary) => {
             let _ = state.bus_tx.send(json!({
                 "type":"projects:refreshed","project_id":id,"summary":summary
-            }).to_string());
+        }).to_string());
             (axum::http::StatusCode::OK, Json(json!({"ok":true,"project_id":id,"summary":summary}))).into_response()
-        }
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":e}))).into_response(),
     }
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":e}))).into_response(),
+}
 }
 
 /// Run `git fetch origin && git merge --ff-only origin/<branch>` in `path`.
@@ -135,7 +135,7 @@ async fn refresh_project_workspace(
 pub async fn git_pull_workspace(path: &str) -> Result<String, String> {
     if !std::path::Path::new(path).join(".git").exists() {
         return Err(format!("not a git workspace: {path}"));
-    }
+}
     // Determine current branch (usually main)
     let branch_out = tokio::process::Command::new("git")
         .args(["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -143,9 +143,9 @@ pub async fn git_pull_workspace(path: &str) -> Result<String, String> {
         .map_err(|e| format!("git rev-parse: {e}"))?;
     let branch = if branch_out.status.success() {
         String::from_utf8_lossy(&branch_out.stdout).trim().to_string()
-    } else {
+} else {
         "main".to_string()
-    };
+};
 
     let fetch = tokio::process::Command::new("git")
         .args(["-C", path, "fetch", "origin", "--quiet"])
@@ -153,7 +153,7 @@ pub async fn git_pull_workspace(path: &str) -> Result<String, String> {
         .map_err(|e| format!("git fetch: {e}"))?;
     if !fetch.status.success() {
         return Err(format!("fetch failed: {}", String::from_utf8_lossy(&fetch.stderr)));
-    }
+}
 
     let merge = tokio::process::Command::new("git")
         .args(["-C", path, "merge", "--ff-only", &format!("origin/{branch}"), "--quiet"])
@@ -161,14 +161,14 @@ pub async fn git_pull_workspace(path: &str) -> Result<String, String> {
         .map_err(|e| format!("git merge: {e}"))?;
     if merge.status.success() {
         Ok(format!("fast-forwarded {branch}"))
-    } else {
+} else {
         let stderr = String::from_utf8_lossy(&merge.stderr).to_string();
         if stderr.contains("Already up to date") || stderr.is_empty() {
             Ok("already up to date".to_string())
-        } else {
+    } else {
             Err(format!("merge --ff-only failed (likely diverged): {stderr}"))
-        }
     }
+}
 }
 
 /// Set the consecutive phase_commit failure counter on a project.
@@ -181,11 +181,11 @@ pub async fn set_phase_commit_failures(state: &Arc<AppState>, project_id: &str, 
             if let Some(obj) = p.as_object_mut() {
                 obj.insert("phase_commit_consecutive_failures".to_string(), json!(value));
                 obj.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
-            }
+        }
             found = true;
             break;
-        }
     }
+}
     if found { write_projects(state, projects).await; }
     found
 }
@@ -213,24 +213,24 @@ async fn report_phase_commit_failure(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
     let cur = get_phase_commit_failures(&state, &id).await;
     let next = cur + 1;
     if !set_phase_commit_failures(&state, &id, next).await {
         return (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"Project not found"}))).into_response();
-    }
+}
     let reason = body.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let _ = state.bus_tx.send(json!({
         "type":"projects:phase_commit_failed",
         "project_id":id,
         "consecutive_failures":next,
         "reason":reason,
-    }).to_string());
+}).to_string());
     (axum::http::StatusCode::OK, Json(json!({
         "ok":true,
         "project_id":id,
         "consecutive_failures":next,
-    }))).into_response()
+}))).into_response()
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -245,9 +245,13 @@ async fn write_projects(state: &AppState, projects: Vec<Value>) {
         let mut lock = state.projects.write().await;
         *lock = projects.clone();
     }
-    // Persist to disk
-    if let Ok(json) = serde_json::to_string_pretty(&projects) {
-        let _ = tokio::fs::write(&state.projects_path, json).await;
+    // Persist to SQLite (fleet_db is the single source of truth).
+    let conn = state.fleet_db.lock().await;
+    let _ = conn.execute("DELETE FROM projects", []);
+    for project in &projects {
+        if let Err(e) = crate::db::db_upsert_project(&conn, project) {
+            tracing::warn!("write_projects: upsert failed: {}", e);
+        }
     }
 }
 
@@ -275,26 +279,26 @@ async fn list_projects(
     let filtered: Vec<&Value> = projects.iter().filter(|p| {
         if let Some(st) = status_filter {
             if p.get("status").and_then(|v| v.as_str()) != Some(st) { return false; }
-        }
+    }
         if let Some(ref tag) = tag_filter {
             let has_tag = p.get("tags")
                 .and_then(|v| v.as_array())
                 .map(|arr| arr.iter().any(|t| {
                     t.as_str().map(|s| s.to_lowercase() == *tag).unwrap_or(false)
-                }))
+            }))
                 .unwrap_or(false);
             if !has_tag { return false; }
-        }
+    }
         if let Some(ref q) = q {
             let name  = p.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
             let slug  = p.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
             let desc  = p.get("description").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
             if !name.contains(q.as_str()) && !slug.contains(q.as_str()) && !desc.contains(q.as_str()) {
                 return false;
-            }
         }
+    }
         true
-    }).collect();
+}).collect();
 
     let total = filtered.len();
     let page: Vec<Value> = filtered.into_iter().skip(offset)
@@ -315,13 +319,13 @@ async fn get_project_by_id(
     match projects.into_iter().find(|p| {
         p.get("id").and_then(|v| v.as_str()) == Some(&id)
             || p.get("slug").and_then(|v| v.as_str()) == Some(&id)
-    }) {
+}) {
         Some(p) => (axum::http::StatusCode::OK, Json(p)).into_response(),
         None => (
             axum::http::StatusCode::NOT_FOUND,
             Json(json!({"error": "Project not found"})),
         ).into_response(),
-    }
+}
 }
 
 // ── GET /api/projects/:owner/:repo ────────────────────────────────────────
@@ -335,13 +339,13 @@ async fn get_project(
     match projects.into_iter().find(|p| {
         p.get("id").and_then(|v| v.as_str()) == Some(&full_name)
             || p.get("full_name").and_then(|v| v.as_str()) == Some(&full_name)
-    }) {
+}) {
         Some(p) => (axum::http::StatusCode::OK, Json(p)).into_response(),
         None => (
             axum::http::StatusCode::NOT_FOUND,
             Json(json!({"error": "Project not found"})),
         ).into_response(),
-    }
+}
 }
 
 // ── GET /api/projects/:owner/:repo/github ────────────────────────────────
@@ -360,9 +364,9 @@ async fn project_github(
         if let Some(entry) = cache.get(&full_name) {
             if entry.fetched_at.elapsed() < Duration::from_secs(300) {
                 return (axum::http::StatusCode::OK, Json(entry.data.clone())).into_response();
-            }
         }
     }
+}
 
     // Run `gh issue list`
     let issues = run_gh_json(
@@ -385,7 +389,7 @@ async fn project_github(
         "fetchedAt": chrono::Utc::now().to_rfc3339(),
         "issues": normalize_issues(&issues),
         "prs": normalize_prs(&prs),
-    });
+});
 
     // Update cache
     {
@@ -393,8 +397,8 @@ async fn project_github(
         cache.insert(full_name, GhCacheEntry {
             data: result.clone(),
             fetched_at: Instant::now(),
-        });
-    }
+    });
+}
 
     (axum::http::StatusCode::OK, Json(result)).into_response()
 }
@@ -407,7 +411,7 @@ fn run_gh_json(args: &str) -> Result<Value, String> {
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
-    }
+}
     serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
 }
 
@@ -419,12 +423,12 @@ fn normalize_issues(issues: &Value) -> Value {
         "url":    i["url"],
         "labels": i["labels"].as_array().unwrap_or(&vec![]).iter().map(|l| json!({
             "name": l["name"], "color": l["color"]
-        })).collect::<Vec<_>>(),
+    })).collect::<Vec<_>>(),
         "author":       i["author"]["login"].as_str().unwrap_or_else(|| i["author"].as_str().unwrap_or("")),
         "createdAt":    i["createdAt"],
         "updatedAt":    i["updatedAt"],
         "commentCount": i["comments"].as_array().map(|a| a.len()).unwrap_or(0),
-    })).collect::<Vec<_>>())
+})).collect::<Vec<_>>())
 }
 
 fn normalize_prs(prs: &Value) -> Value {
@@ -441,8 +445,8 @@ fn normalize_prs(prs: &Value) -> Value {
         "updatedAt":      p["updatedAt"],
         "labels": p["labels"].as_array().unwrap_or(&vec![]).iter().map(|l| json!({
             "name": l["name"], "color": l["color"]
-        })).collect::<Vec<_>>(),
-    })).collect::<Vec<_>>())
+    })).collect::<Vec<_>>(),
+})).collect::<Vec<_>>())
 }
 
 // ── POST /api/projects ────────────────────────────────────────────────────
@@ -454,11 +458,11 @@ async fn create_project(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
     let name = match body.get("name").and_then(|v| v.as_str()) {
         Some(n) if !n.is_empty() => n.to_string(),
         _ => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error":"name required"}))).into_response(),
-    };
+};
     let id = format!("proj-{}", chrono::Utc::now().timestamp_millis());
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -493,7 +497,7 @@ async fn create_project(
         "notes":        body.get("notes").cloned().unwrap_or(json!("")),
         "createdAt":    now.clone(),
         "updatedAt":    now,
-    });
+});
     let mut projects = read_projects(&state).await;
     projects.push(project.clone());
     write_projects(&state, projects).await;
@@ -517,23 +521,23 @@ async fn create_project(
             let new_status = match output {
                 Ok(o) if o.status.success() => "ready",
                 _ => "failed",
-            };
+        };
             // Update clone_status in projects list
             let mut projects = read_projects(&state_clone).await;
             if let Some(p) = projects.iter_mut().find(|p| {
                 p.get("id").and_then(|v| v.as_str()) == Some(&id_clone)
-            }) {
+        }) {
                 if let Some(obj) = p.as_object_mut() {
                     obj.insert("clone_status".to_string(), json!(new_status));
                     obj.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
-                }
             }
+        }
             write_projects(&state_clone, projects).await;
-        } else {
+    } else {
             // No git_url — just ensure the directory exists
             let _ = tokio::fs::create_dir_all(&agentfs_path_clone).await;
-        }
-    });
+    }
+});
 
     (axum::http::StatusCode::CREATED, Json(json!({"ok": true, "project": project}))).into_response()
 }
@@ -548,11 +552,11 @@ async fn update_project(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
     let mut projects = read_projects(&state).await;
     let idx = projects.iter().position(|p| {
         p.get("id").and_then(|v| v.as_str()) == Some(&id)
-    });
+});
     match idx {
         None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"Project not found"}))).into_response(),
         Some(i) => {
@@ -562,14 +566,14 @@ async fn update_project(
                            "owner", "assignee", "notes"] {
                 if let Some(v) = body.get(field) {
                     p.insert(field.to_string(), v.clone());
-                }
             }
+        }
             p.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
             let updated = projects[i].clone();
             write_projects(&state, projects).await;
             (axum::http::StatusCode::OK, Json(json!({"ok": true, "project": updated}))).into_response()
-        }
     }
+}
 }
 
 // ── DELETE /api/projects/:id ──────────────────────────────────────────────
@@ -585,13 +589,13 @@ async fn delete_project(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
     let hard = params.get("hard").map(|v| v == "true").unwrap_or(false);
     let force = params.get("force").map(|v| v == "true").unwrap_or(false);
     let projects = read_projects(&state).await;
     let idx = projects.iter().position(|p| {
         p.get("id").and_then(|v| v.as_str()) == Some(&id)
-    });
+});
     match idx {
         None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"Project not found"}))).into_response(),
         Some(i) => {
@@ -609,9 +613,9 @@ async fn delete_project(
                         "error": "agentfs_dirty",
                         "message": "Project has unpushed AgentFS changes. Run the milestone-commit task to push, or pass force=true to discard.",
                         "project_id": id,
-                    })),
+                })),
                 ).into_response();
-            }
+        }
             let mut projects = projects;
             if hard {
                 let removed = projects.remove(i);
@@ -619,18 +623,18 @@ async fn delete_project(
                 // Best-effort cleanup of agentfs workspace directory
                 if let Some(path) = removed.get("agentfs_path").and_then(|v| v.as_str()) {
                     let _ = tokio::fs::remove_dir_all(path).await;
-                }
+            }
                 (axum::http::StatusCode::OK, Json(json!({"ok": true, "deleted": removed}))).into_response()
-            } else {
+        } else {
                 let p = projects[i].as_object_mut().unwrap();
                 p.insert("status".to_string(), json!("archived"));
                 p.insert("updatedAt".to_string(), json!(chrono::Utc::now().to_rfc3339()));
                 let archived = projects[i].clone();
                 write_projects(&state, projects).await;
                 (axum::http::StatusCode::OK, Json(json!({"ok": true, "project": archived}))).into_response()
-            }
         }
     }
+}
 }
 
 // ── Beads import core (shared by HTTP handler and background scanner) ─────
@@ -642,7 +646,7 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
     let agentfs_path = match project.get("agentfs_path").and_then(|v| v.as_str()) {
         Some(p) if !p.is_empty() => p.to_string(),
         _ => return (0, 0),
-    };
+};
     let project_ref = project.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if project_ref.is_empty() { return (0, 0); }
 
@@ -650,14 +654,14 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
     let content = match tokio::fs::read_to_string(&issues_path).await {
         Ok(c) => c,
         Err(_) => return (0, 0),
-    };
+};
 
     let import_statuses = ["open", "in_progress", "in-progress", "blocked"];
     let assignee = project.get("assignee").and_then(|v| v.as_str()).unwrap_or("all").to_string();
 
     let map_priority = |issue: &Value| -> i64 {
         issue.get("priority").and_then(|v| v.as_i64()).unwrap_or(2).clamp(0, 4)
-    };
+};
     let map_tags = |issue: &Value| -> Value {
         let mut tags: Vec<String> = issue.get("tags")
             .and_then(|v| v.as_array())
@@ -665,10 +669,10 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
             .unwrap_or_default();
         if let Some(t) = issue.get("issue_type").and_then(|v| v.as_str()) {
             if t != "task" && !tags.contains(&t.to_string()) { tags.push(t.to_string()); }
-        }
+    }
         if !tags.contains(&"beads".to_string()) { tags.push("beads".to_string()); }
         json!(tags)
-    };
+};
     let norm = |s: &str| s.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -683,7 +687,7 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
         let issue: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => continue,
-        };
+    };
         let status = issue.get("status").and_then(|v| v.as_str()).unwrap_or("open");
         if !import_statuses.contains(&status) { continue; }
 
@@ -704,7 +708,7 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
         let mut description = issue.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
         if description.len() < 20 {
             description = format!("{} (imported from beads {})", description, beads_id);
-        }
+    }
         let task_id = format!("task-beads-{}-{}", beads_id, chrono::Utc::now().timestamp_millis());
         let issue_type = issue.get("issue_type").and_then(|v| v.as_str()).unwrap_or("task").to_string();
         let metadata = json!({
@@ -712,7 +716,7 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
             "source": "beads-scanner",
             "tags": tags,
             "assignee": assignee,
-        });
+    });
 
         if db.execute(
             "INSERT INTO fleet_tasks (id, project_id, title, description, priority, task_type, metadata, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)",
@@ -723,12 +727,12 @@ pub async fn import_project_beads_inner(state: &AppState, project: &Value) -> (u
                 "task_id": task_id,
                 "project_id": project_ref,
                 "beads_id": beads_id,
-            }).to_string());
+        }).to_string());
             imported += 1;
-        } else {
+    } else {
             skipped += 1;
-        }
     }
+}
 
     (imported, skipped)
 }
@@ -748,16 +752,16 @@ pub async fn run_beads_scanner(state: Arc<AppState>) {
             p.get("status").and_then(|v| v.as_str()) != Some("archived")
             && p.get("clone_status").and_then(|v| v.as_str()) == Some("ready")
             && p.get("agentfs_path").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
-        }).collect();
+    }).collect();
         let mut total_imported = 0usize;
         for project in &active {
             let (n, _) = import_project_beads_inner(&state, project).await;
             total_imported += n;
-        }
+    }
         if total_imported > 0 {
             tracing::info!("beads-scanner: imported {} new task(s) across {} project(s)", total_imported, active.len());
-        }
     }
+}
 }
 
 // ── POST /api/projects/:id/import-beads ───────────────────────────────────
@@ -781,24 +785,24 @@ async fn import_beads(
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
-    }
+}
 
     // Find the project
     let projects = read_projects(&state).await;
     let project = match projects.iter().find(|p| {
         p.get("id").and_then(|v| v.as_str()) == Some(&id)
             || p.get("slug").and_then(|v| v.as_str()) == Some(&id)
-    }) {
+}) {
         Some(p) => p.clone(),
         None => return (axum::http::StatusCode::NOT_FOUND, Json(json!({"error": "Project not found"}))).into_response(),
-    };
+};
 
     let agentfs_path = match project.get("agentfs_path").and_then(|v| v.as_str()) {
         Some(p) if !p.is_empty() => p.to_string(),
         _ => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
             "error": "Project has no agentfs_path set"
-        }))).into_response(),
-    };
+    }))).into_response(),
+};
 
     // dry_run mode: parse and report without writing
     let dry_run = params.get("dry_run").map(|v| v == "true").unwrap_or(false);
@@ -814,8 +818,8 @@ async fn import_beads(
             "dry_run": true,
             "would_import": to_import.len(),
             "issues": to_import,
-        }))).into_response();
-    }
+    }))).into_response();
+}
 
     let (imported, skipped) = import_project_beads_inner(&state, &project).await;
 
@@ -823,5 +827,5 @@ async fn import_beads(
         "ok":      true,
         "imported": imported,
         "skipped":  skipped,
-    }))).into_response()
+}))).into_response()
 }
