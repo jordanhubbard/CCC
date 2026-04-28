@@ -12,6 +12,17 @@ A distributed AI agent coordination platform designed around the realities of ho
 
 ---
 
+## Current Control-Plane Decisions
+
+- `/api/tasks` is the only durable orchestration plane.
+- `/api/queue` is compatibility ingress for older workers and must not gain new durable workflow semantics.
+- `/api/exec` is operator-only remote execution and is not part of normal scheduling.
+- Durable workflows are grouped by `outcome_id` and each task declares a `workflow_role`.
+- Final commit is represented as a `commit` role task and is claimable only by the persisted `finisher_agent`.
+- Agents publish live executor/session/capacity telemetry so routing can prefer ready CLI sessions over generic API execution for coding work.
+
+See `docs/specs/outcome-workflow-implementation-spec.md` and `docs/workflow-runbook.md` for the implementation contract and operations checklist.
+
 ## Components
 
 ### 1. Agent Control Center (ACC) — The Hub

@@ -58,6 +58,11 @@ If another model is planning code changes, this is the primary execution-order d
 
 ## 5. Ancillary Specs
 
+### [../workflow-runbook.md](/Users/jordanh/Src/ACC/docs/workflow-runbook.md)
+Purpose:
+- define operator inspection and recovery steps for outcome workflows
+- document wrong-finisher, rejected-review, stuck-join, and commit-failure handling
+
 ### [github-beads-sync.md](/Users/jordanh/Src/ACC/docs/specs/github-beads-sync.md)
 Purpose:
 - define GitHub/Beads synchronization behavior

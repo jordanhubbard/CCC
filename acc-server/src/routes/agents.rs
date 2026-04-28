@@ -1,3 +1,6 @@
+use crate::state;
+use crate::state::db_flush_agents;
+use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -8,19 +11,25 @@ use axum::{
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::AppState;
-use crate::state::db_flush_agents;
-use crate::state;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/agents", get(get_agents).post(post_agent))
         .route("/api/agents/names", get(get_agent_names))
         .route("/api/agents/register", post(register_agent))
-        .route("/api/agents/:name", get(get_agent_by_name).post(upsert_agent).patch(patch_agent).delete(delete_agent))
+        .route(
+            "/api/agents/:name",
+            get(get_agent_by_name)
+                .post(upsert_agent)
+                .patch(patch_agent)
+                .delete(delete_agent),
+        )
         .route("/api/agents/:name/heartbeat", post(agent_heartbeat))
         .route("/api/agents/:name/health", get(get_agent_health))
-        .route("/api/agents/:name/capabilities", put(register_tool_capabilities))
+        .route(
+            "/api/agents/:name/capabilities",
+            put(register_tool_capabilities),
+        )
         .route("/api/heartbeat/:agent", post(post_heartbeat))
         .route("/api/heartbeats", get(get_heartbeats))
 }
@@ -37,10 +46,18 @@ fn is_online(agent: &Value) -> bool {
 
 // Derives onlineStatus from live data — never trust the stored string.
 fn online_status(agent: &Value) -> &'static str {
-    if agent.get("decommissioned").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if agent
+        .get("decommissioned")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         return "decommissioned";
     }
-    if is_online(agent) { "online" } else { "offline" }
+    if is_online(agent) {
+        "online"
+    } else {
+        "offline"
+    }
 }
 
 const KNOWN_EXECUTORS: &[&str] = &[
@@ -56,7 +73,8 @@ const KNOWN_EXECUTORS: &[&str] = &[
 ];
 
 fn string_list(value: Option<&Value>) -> Vec<String> {
-    value.and_then(|v| v.as_array())
+    value
+        .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
                 .filter_map(|v| v.as_str().map(str::to_string))
@@ -65,7 +83,10 @@ fn string_list(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn normalize_capabilities_map(raw: Option<&Value>, existing: Option<&Value>) -> serde_json::Map<String, Value> {
+fn normalize_capabilities_map(
+    raw: Option<&Value>,
+    existing: Option<&Value>,
+) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     for source in [existing, raw] {
         match source {
@@ -95,15 +116,21 @@ fn merge_string_lists(primary: Vec<String>, secondary: Vec<String>) -> Vec<Strin
     merged
 }
 
-fn derive_executors(body: &Value, existing: &Value, caps: &serde_json::Map<String, Value>, tool_capabilities: &[String]) -> Vec<Value> {
+fn derive_executors(
+    body: &Value,
+    existing: &Value,
+    caps: &serde_json::Map<String, Value>,
+    tool_capabilities: &[String],
+) -> Vec<Value> {
     if let Some(executors) = body.get("executors").and_then(|v| v.as_array()) {
-        return executors.clone();
+        return executors.iter().map(normalize_executor_entry).collect();
     }
     if let Some(executors) = existing.get("executors").and_then(|v| v.as_array()) {
-        return executors.clone();
+        return executors.iter().map(normalize_executor_entry).collect();
     }
 
-    let mut names: Vec<String> = caps.iter()
+    let mut names: Vec<String> = caps
+        .iter()
         .filter_map(|(name, val)| val.as_bool().filter(|b| *b).map(|_| name.clone()))
         .filter(|name| KNOWN_EXECUTORS.contains(&name.as_str()))
         .collect();
@@ -114,12 +141,28 @@ fn derive_executors(body: &Value, existing: &Value, caps: &serde_json::Map<Strin
     }
     names.sort();
     names.into_iter()
-        .map(|executor| json!({"executor": executor, "ready": true, "auth_state": "unknown"}))
+        .map(|executor| json!({"executor": executor, "type": executor, "ready": true, "auth_state": "unknown"}))
         .collect()
 }
 
+fn normalize_executor_entry(entry: &Value) -> Value {
+    let mut normalized = entry.as_object().cloned().unwrap_or_default();
+    let executor = normalized
+        .get("executor")
+        .and_then(|v| v.as_str())
+        .or_else(|| normalized.get("type").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    if !executor.is_empty() {
+        normalized.insert("executor".into(), json!(executor));
+        normalized.insert("type".into(), json!(executor));
+    }
+    Value::Object(normalized)
+}
+
 fn normalize_capacity(body: &Value, existing: &Value) -> Value {
-    let mut capacity = existing.get("capacity")
+    let mut capacity = existing
+        .get("capacity")
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default();
@@ -135,7 +178,11 @@ fn normalize_capacity(body: &Value, existing: &Value) -> Value {
         "max_sessions",
         "session_spawn_denied_reason",
     ] {
-        if let Some(val) = body.get(key).cloned().or_else(|| existing.get(key).cloned()) {
+        if let Some(val) = body
+            .get(key)
+            .cloned()
+            .or_else(|| existing.get(key).cloned())
+        {
             capacity.insert(key.to_string(), val);
         }
     }
@@ -157,7 +204,8 @@ fn refresh_canonical_agent_shape(agent: &mut Value, body: &Value) {
         ),
     );
     let executors = derive_executors(body, &existing, &caps, &tool_caps);
-    let sessions = body.get("sessions")
+    let sessions = body
+        .get("sessions")
         .and_then(|v| v.as_array())
         .cloned()
         .or_else(|| existing.get("sessions").and_then(|v| v.as_array()).cloned())
@@ -186,15 +234,20 @@ async fn get_agents(
     let online_only = params.get("online").map(|v| v == "true").unwrap_or(false);
     let agents = state.agents.read().await;
     let mut result: Vec<Value> = match agents.as_object() {
-        Some(map) => map.values().filter_map(|a| {
-            if online_only && !is_online(a) { return None; }
-            let mut record = a.clone();
-            if let Some(obj) = record.as_object_mut() {
-                obj.insert("online".into(), json!(is_online(a)));
-                obj.insert("onlineStatus".into(), json!(online_status(a)));
-            }
-            Some(record)
-        }).collect(),
+        Some(map) => map
+            .values()
+            .filter_map(|a| {
+                if online_only && !is_online(a) {
+                    return None;
+                }
+                let mut record = a.clone();
+                if let Some(obj) = record.as_object_mut() {
+                    obj.insert("online".into(), json!(is_online(a)));
+                    obj.insert("onlineStatus".into(), json!(online_status(a)));
+                }
+                Some(record)
+            })
+            .collect(),
         None => vec![],
     };
     result.sort_by(|a, b| {
@@ -214,11 +267,18 @@ async fn get_agent_names(
     let online_only = params.get("online").map(|v| v == "true").unwrap_or(false);
     let agents = state.agents.read().await;
     let names: Vec<&str> = match agents.as_object() {
-        Some(map) => map.iter().filter_map(|(name, a)| {
-            if online_only && !is_online(a) { return None; }
-            if online_status(a) == "decommissioned" { return None; }
-            Some(name.as_str())
-        }).collect(),
+        Some(map) => map
+            .iter()
+            .filter_map(|(name, a)| {
+                if online_only && !is_online(a) {
+                    return None;
+                }
+                if online_status(a) == "decommissioned" {
+                    return None;
+                }
+                Some(name.as_str())
+            })
+            .collect(),
         None => vec![],
     };
     Json(json!({ "ok": true, "names": names }))
@@ -259,7 +319,11 @@ async fn get_agent_by_name(
             }
             Json(json!({ "ok": true, "agent": record })).into_response()
         }
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Agent not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Agent not found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -273,17 +337,34 @@ async fn get_agent_health(
     match agents.as_object().and_then(|m| m.get(&agent_name)) {
         Some(agent) => {
             let telemetry_keys = [
-                "gpu", "gpu_temp_c", "gpu_power_w", "gpu_util_pct",
-                "vram_used_mb", "vram_total_mb",
-                "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
-                "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-                "ollama_status", "ollama_models", "ccc_version",
+                "gpu",
+                "gpu_temp_c",
+                "gpu_power_w",
+                "gpu_util_pct",
+                "vram_used_mb",
+                "vram_total_mb",
+                "unified_vram_used_mb",
+                "unified_vram_free_mb",
+                "unified_vram_total_mb",
+                "ram",
+                "ram_used_mb",
+                "ram_avail_mb",
+                "ram_total_mb",
+                "ollama_status",
+                "ollama_models",
+                "ccc_version",
             ];
             let mut health = serde_json::Map::new();
             health.insert("agent".into(), json!(agent_name));
             health.insert("online".into(), json!(is_online(agent)));
-            health.insert("lastSeen".into(), agent.get("lastSeen").cloned().unwrap_or(json!(null)));
-            health.insert("host".into(), agent.get("host").cloned().unwrap_or(json!(null)));
+            health.insert(
+                "lastSeen".into(),
+                agent.get("lastSeen").cloned().unwrap_or(json!(null)),
+            );
+            health.insert(
+                "host".into(),
+                agent.get("host").cloned().unwrap_or(json!(null)),
+            );
             for key in &telemetry_keys {
                 if let Some(val) = agent.get(*key) {
                     health.insert((*key).to_string(), val.clone());
@@ -291,7 +372,11 @@ async fn get_agent_health(
             }
             Json(json!({ "ok": true, "health": Value::Object(health) })).into_response()
         }
-        None => (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "Agent not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "Agent not found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -307,14 +392,30 @@ async fn agent_heartbeat(
     let agents_map = agents.as_object_mut().unwrap();
 
     let telemetry_keys = [
-        "gpu", "gpu_temp_c", "gpu_power_w", "gpu_util_pct",
-        "vram_used_mb", "vram_total_mb",
-        "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
-        "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-        "ollama_status", "ollama_models", "ccc_version",
-        "ssh_user", "ssh_host", "ssh_port",
-        "tasks_in_flight", "estimated_free_slots",
-        "free_session_slots", "max_sessions", "session_spawn_denied_reason",
+        "gpu",
+        "gpu_temp_c",
+        "gpu_power_w",
+        "gpu_util_pct",
+        "vram_used_mb",
+        "vram_total_mb",
+        "unified_vram_used_mb",
+        "unified_vram_free_mb",
+        "unified_vram_total_mb",
+        "ram",
+        "ram_used_mb",
+        "ram_avail_mb",
+        "ram_total_mb",
+        "ollama_status",
+        "ollama_models",
+        "ccc_version",
+        "ssh_user",
+        "ssh_host",
+        "ssh_port",
+        "tasks_in_flight",
+        "estimated_free_slots",
+        "free_session_slots",
+        "max_sessions",
+        "session_spawn_denied_reason",
     ];
 
     if let Some(agent_obj) = agents_map.get_mut(&agent_name) {
@@ -328,8 +429,16 @@ async fn agent_heartbeat(
         }
         refresh_canonical_agent_shape(agent_obj, &body);
     } else {
-        let host = body.get("host").and_then(|h| h.as_str()).unwrap_or("unknown").to_string();
-        let token = format!("acc-agent-{}-{}",agent_name, uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let host = body
+            .get("host")
+            .and_then(|h| h.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let token = format!(
+            "acc-agent-{}-{}",
+            agent_name,
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        );
         let mut record = json!({
             "name": agent_name,
             "host": host,
@@ -356,18 +465,29 @@ async fn register_agent(
 ) -> impl IntoResponse {
     let name = match body.get("name").and_then(|n| n.as_str()) {
         Some(n) => n.to_string(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "name required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "name required"})),
+            )
+                .into_response()
+        }
     };
 
     let mut agents = state.agents.write().await;
     let agents_map = agents.as_object_mut().unwrap();
 
-    let existing_token = agents_map.get(&name)
+    let existing_token = agents_map
+        .get(&name)
         .and_then(|a| a.get("token"))
         .and_then(|t| t.as_str())
         .map(|s| s.to_string());
     let token = existing_token.unwrap_or_else(|| {
-        format!("acc-agent-{}-{}", name, uuid::Uuid::new_v4().to_string().replace('-', ""))
+        format!(
+            "acc-agent-{}-{}",
+            name,
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        )
     });
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -397,7 +517,11 @@ async fn register_agent(
     drop(agents);
     db_flush_agents(&state).await;
 
-    (StatusCode::CREATED, Json(json!({"ok": true, "token": token, "agent": agent}))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(json!({"ok": true, "token": token, "agent": agent})),
+    )
+        .into_response()
 }
 
 async fn post_agent(
@@ -418,7 +542,11 @@ async fn upsert_agent(
     let now = chrono::Utc::now().to_rfc3339();
 
     if !agents_map.contains_key(&name) {
-        let token = format!("acc-agent-{}-{}",name, uuid::Uuid::new_v4().to_string().replace('-', ""));
+        let token = format!(
+            "acc-agent-{}-{}",
+            name,
+            uuid::Uuid::new_v4().to_string().replace('-', "")
+        );
         let mut record = json!({
             "name": name,
             "host": body.get("host").and_then(|h| h.as_str()).unwrap_or("unknown"),
@@ -433,8 +561,12 @@ async fn upsert_agent(
         agents_map.insert(name.clone(), record);
     } else {
         let agent = agents_map.get_mut(&name).unwrap().as_object_mut().unwrap();
-        if let Some(h) = body.get("host").and_then(|h| h.as_str()) { agent.insert("host".into(), json!(h)); }
-        if let Some(t) = body.get("type").and_then(|t| t.as_str()) { agent.insert("type".into(), json!(t)); }
+        if let Some(h) = body.get("host").and_then(|h| h.as_str()) {
+            agent.insert("host".into(), json!(h));
+        }
+        if let Some(t) = body.get("type").and_then(|t| t.as_str()) {
+            agent.insert("type".into(), json!(t));
+        }
         if let Some(caps) = body.get("capabilities") {
             agent.insert("capabilities".into(), caps.clone());
         }
@@ -442,7 +574,11 @@ async fn upsert_agent(
         refresh_canonical_agent_shape(value, &body);
     }
 
-    let token = agents_map[&name].get("token").and_then(|t| t.as_str()).unwrap_or("").to_string();
+    let token = agents_map[&name]
+        .get("token")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
     let agent = agents_map[&name].clone();
     drop(agents);
     db_flush_agents(&state).await;
@@ -460,21 +596,31 @@ async fn patch_agent(
     let agents_map = agents.as_object_mut().unwrap();
 
     if !agents_map.contains_key(&name) {
-        return (StatusCode::NOT_FOUND, Json(json!({"error": "Agent not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Agent not found"})),
+        )
+            .into_response();
     }
 
     let agent = agents_map.get_mut(&name).unwrap().as_object_mut().unwrap();
     let now = chrono::Utc::now().to_rfc3339();
 
-    if let Some(h) = body.get("host").and_then(|h| h.as_str()) { agent.insert("host".into(), json!(h)); }
-    if let Some(t) = body.get("type").and_then(|t| t.as_str()) { agent.insert("type".into(), json!(t)); }
+    if let Some(h) = body.get("host").and_then(|h| h.as_str()) {
+        agent.insert("host".into(), json!(h));
+    }
+    if let Some(t) = body.get("type").and_then(|t| t.as_str()) {
+        agent.insert("type".into(), json!(t));
+    }
     if let Some(caps) = body.get("capabilities") {
         agent.insert("capabilities".into(), caps.clone());
     }
     if let Some(billing) = body.get("billing").and_then(|b| b.as_object()) {
         let existing_billing = agent.entry("billing").or_insert(json!({}));
         if let Some(eb) = existing_billing.as_object_mut() {
-            for (k, v) in billing { eb.insert(k.clone(), v.clone()); }
+            for (k, v) in billing {
+                eb.insert(k.clone(), v.clone());
+            }
         }
     }
     if let Some(status) = body.get("status").and_then(|s| s.as_str()) {
@@ -504,12 +650,20 @@ async fn delete_agent(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let mut agents = state.agents.write().await;
     let agents_map = agents.as_object_mut().unwrap();
     if agents_map.remove(&name).is_none() {
-        return (StatusCode::NOT_FOUND, Json(json!({"error": "Agent not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Agent not found"})),
+        )
+            .into_response();
     }
     drop(agents);
     db_flush_agents(&state).await;
@@ -527,18 +681,28 @@ async fn register_tool_capabilities(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let caps: Vec<String> = body["capabilities"]
         .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut agents = state.agents.write().await;
-    let agents_map = match agents.as_object_mut()
-        .ok_or(())
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":"agents not object"}))))
-    {
+    let agents_map = match agents.as_object_mut().ok_or(()).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error":"agents not object"})),
+        )
+    }) {
         Ok(m) => m,
         Err(e) => return e.into_response(),
     };
@@ -563,14 +727,30 @@ async fn post_heartbeat(
     // Telemetry fields we pass through from the heartbeat body into the agent record.
     // This lets agents like Natasha surface GPU stats, ollama status, etc. in the dashboard.
     let telemetry_keys = [
-        "gpu", "gpu_temp_c", "gpu_power_w", "gpu_util_pct",
-        "vram_used_mb", "vram_total_mb",
-        "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
-        "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-        "ollama_status", "ollama_models", "ccc_version",
-        "ssh_user", "ssh_host", "ssh_port",
-        "tasks_in_flight", "estimated_free_slots",
-        "free_session_slots", "max_sessions", "session_spawn_denied_reason",
+        "gpu",
+        "gpu_temp_c",
+        "gpu_power_w",
+        "gpu_util_pct",
+        "vram_used_mb",
+        "vram_total_mb",
+        "unified_vram_used_mb",
+        "unified_vram_free_mb",
+        "unified_vram_total_mb",
+        "ram",
+        "ram_used_mb",
+        "ram_avail_mb",
+        "ram_total_mb",
+        "ollama_status",
+        "ollama_models",
+        "ccc_version",
+        "ssh_user",
+        "ssh_host",
+        "ssh_port",
+        "tasks_in_flight",
+        "estimated_free_slots",
+        "free_session_slots",
+        "max_sessions",
+        "session_spawn_denied_reason",
     ];
 
     let mut agents = state.agents.write().await;
@@ -596,19 +776,23 @@ async fn post_heartbeat(
     db_flush_agents(&state).await;
 
     let q = state.queue.read().await;
-    let pending_work: Vec<Value> = q.items.iter()
+    let pending_work: Vec<Value> = q
+        .items
+        .iter()
         .filter(|i| {
             i.get("status").and_then(|s| s.as_str()) == Some("pending")
-            && (i.get("assignee").and_then(|a| a.as_str()) == Some(&agent)
-                || i.get("assignee").and_then(|a| a.as_str()) == Some("all"))
+                && (i.get("assignee").and_then(|a| a.as_str()) == Some(&agent)
+                    || i.get("assignee").and_then(|a| a.as_str()) == Some("all"))
         })
         .take(3)
-        .map(|i| json!({
-            "id": i.get("id"),
-            "title": i.get("title"),
-            "priority": i.get("priority"),
-            "description": i.get("description"),
-        }))
+        .map(|i| {
+            json!({
+                "id": i.get("id"),
+                "title": i.get("title"),
+                "priority": i.get("priority"),
+                "description": i.get("description"),
+            })
+        })
         .collect();
 
     Json(json!({"ok": true, "pendingWork": pending_work})).into_response()

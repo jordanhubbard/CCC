@@ -1,6 +1,6 @@
 # Agent Command Center (ACC)
 
-Distributed AI agent coordination system. Connects a fleet of heterogeneous machines — cloud VMs, Mac laptops, GPU boxes — through a shared work queue, message bus, and hub-and-spoke API that allows all agents to coordinate.
+Distributed AI agent coordination system. Connects a fleet of heterogeneous machines — cloud VMs, Mac laptops, GPU boxes — through a durable task plane, message bus, and hub-and-spoke API that allows all agents to coordinate.
 
 **Hub API + Dashboard:** port 8789 (Rust/Axum) — open `http://your-server:8789/` in a browser
 
@@ -30,8 +30,8 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md)
 
 | Component | Role | Port |
 |-----------|------|------|
-| `acc-server` | Rust/Axum REST API + web dashboard — work queue, agent registry, secrets | 8789 |
-| `ccc-queue-worker` | Claims and executes queue items | — |
+| `acc-server` | Rust/Axum REST API + web dashboard — `/api/tasks`, agent registry, secrets | 8789 |
+| `ccc-queue-worker` | Legacy queue compatibility worker | — |
 | `ccc-bus-listener` | AgentBus SSE receiver | — |
 | `ccc-exec-listen` | Remote exec handler (sandboxed) | — |
 | `hermes gateway` | Channel gateway (Slack, Telegram) — per-agent | — |
@@ -64,18 +64,27 @@ Queue items with `preferred_executor: claude_cli` are dispatched to this session
 
 ---
 
-## Work Queue
+## Durable Work Plane
 
-Each queue item carries a `preferred_executor` field:
+`/api/tasks` is the authoritative durable orchestration plane. Durable coding work, reviews, gap tasks, join gates, and final commit tasks are represented as tasks with `outcome_id` and `workflow_role`.
 
-| Executor | Requires |
-|----------|---------|
-| `claude_cli` | Claude Code in a persistent tmux session (`AGENT_CLAUDE_CLI=true`) |
-| `hermes` | hermes-agent with hermes-driver polling |
-| `inference_key` | Metered LLM call via TokenHub or NVIDIA API |
-| `gpu` | GPU hardware (`AGENT_HAS_GPU=true`) |
+`/api/queue` remains as compatibility ingress for older workers. New workflow semantics must be added to `/api/tasks`, not queue-only fields. `/api/exec` is for operator-issued remote commands, not normal durable scheduling.
 
-Items stay pending until a capable agent is available. See [workqueue/WORKQUEUE_AGENT.md](workqueue/WORKQUEUE_AGENT.md).
+Finalization is single-owner: commit role tasks are claimable only by the persisted `finisher_agent`. See [docs/workflow-runbook.md](docs/workflow-runbook.md).
+
+## Executor Routing
+
+Each task may carry executor and affinity fields:
+
+| Field | Meaning |
+|-------|---------|
+| `preferred_executor` | Soft executor preference, such as `claude_cli`, `codex_cli`, or `hermes` |
+| `required_executors` | Hard executor compatibility filter |
+| `preferred_agent` | Soft agent affinity |
+| `assigned_agent` | Hard assignment once routed or claimed |
+| `assigned_session` | Optional session affinity |
+
+Persistent CLI sessions are advertised through heartbeat `executors`, `sessions`, and capacity fields. API-backed providers remain useful for coordination and light reasoning, but long coding tasks should prefer ready CLI sessions.
 
 ---
 

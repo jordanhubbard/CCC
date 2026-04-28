@@ -179,7 +179,10 @@
               <th class="text-left px-4 py-3 text-gray-500 font-medium">Status</th>
               <th class="text-left px-4 py-3 text-gray-500 font-medium">Priority</th>
               <th class="text-left px-4 py-3 text-gray-500 font-medium">Type</th>
+              <th class="text-left px-4 py-3 text-gray-500 font-medium">Role</th>
+              <th class="text-left px-4 py-3 text-gray-500 font-medium">Outcome</th>
               <th class="text-left px-4 py-3 text-gray-500 font-medium">Assignee</th>
+              <th class="text-left px-4 py-3 text-gray-500 font-medium">Finisher</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
@@ -202,7 +205,10 @@
                     x-text="priorityLabel(t.priority)"></span>
                 </td>
                 <td class="px-4 py-3 text-gray-500 text-xs" x-text="t.task_type || 'work'"></td>
+                <td class="px-4 py-3 text-gray-500 text-xs" x-text="t.workflow_role || t.metadata?.workflow_role || 'work'"></td>
+                <td class="px-4 py-3 text-gray-500 text-xs max-w-[9rem] truncate" x-text="t.outcome_id || t.metadata?.outcome_id || t.id"></td>
                 <td class="px-4 py-3 text-gray-500 text-xs" x-text="t.claimed_by || '—'"></td>
+                <td class="px-4 py-3 text-gray-500 text-xs" x-text="t.finisher_agent || t.metadata?.finisher_agent || '—'"></td>
                 <td class="px-4 py-3 text-right">
                   <div class="flex items-center justify-end gap-2">
                     <button @click="openTaskModal(t)"
@@ -214,7 +220,7 @@
               </tr>
             </template>
             <tr x-show="tasks.length === 0">
-              <td colspan="7" class="px-4 py-8 text-center text-gray-400 text-sm">No tasks found.</td>
+              <td colspan="10" class="px-4 py-8 text-center text-gray-400 text-sm">No tasks found.</td>
             </tr>
           </tbody>
         </table>

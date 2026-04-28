@@ -14,6 +14,7 @@ pub enum AgentOnlineStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentExecutor {
+    #[serde(alias = "type")]
     pub executor: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready: Option<bool>,
@@ -94,7 +95,11 @@ pub struct Agent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 
-    #[serde(default, rename = "registeredAt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "registeredAt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub registered_at: Option<DateTime<Utc>>,
     #[serde(default, rename = "lastSeen", skip_serializing_if = "Option::is_none")]
     pub last_seen: Option<DateTime<Utc>>,
@@ -114,12 +119,20 @@ pub struct Agent {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub online: Option<bool>,
-    #[serde(default, rename = "onlineStatus", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "onlineStatus",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub online_status: Option<AgentOnlineStatus>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decommissioned: Option<bool>,
-    #[serde(default, rename = "decommissionedAt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "decommissionedAt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub decommissioned_at: Option<DateTime<Utc>>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -164,7 +177,10 @@ mod tests {
         assert_eq!(a.executors[0].executor, "claude_cli");
         assert_eq!(a.sessions.len(), 1);
         assert_eq!(a.sessions[0].name, "proj-main");
-        assert_eq!(a.capacity.as_ref().and_then(|c| c.free_session_slots), Some(1));
+        assert_eq!(
+            a.capacity.as_ref().and_then(|c| c.free_session_slots),
+            Some(1)
+        );
         assert!(a.extra.contains_key("gpu_temp_c"));
         assert!(a.extra.contains_key("vram_used_mb"));
     }
