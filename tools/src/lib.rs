@@ -58,7 +58,12 @@ pub fn make_embed_client() -> Result<acc_qdrant::EmbedClient, acc_qdrant::Qdrant
             "No embedding API key found (set NVIDIA_API_KEY or OPENAI_API_KEY)".to_string(),
         ));
     };
-    acc_qdrant::EmbedClient::new(&base_url, &api_key, "text-embedding-3-large")
+    let model = if cfg.embed_model.is_empty() {
+        "text-embedding-3-large".to_string()
+    } else {
+        cfg.embed_model.clone()
+    };
+    acc_qdrant::EmbedClient::new(&base_url, &api_key, &model)
 }
 
 /// Load ~/.acc/.env or ~/.ccc/.env into the process environment (env var takes precedence).

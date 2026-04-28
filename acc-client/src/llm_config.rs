@@ -29,15 +29,24 @@ pub struct LlmConfig {
     /// Env: `NVIDIA_EMBED_URL` → `EMBED_URL`
     pub embed_url: String,
     /// API key for the embedding endpoint (falls back to api_key).
-    /// Env: `NVIDIA_API_KEY` → `OPENAI_API_KEY` → `LLM_KEY`
+    /// Env: `NVIDIA_EMBED_KEY` → `NVIDIA_API_KEY` → `OPENAI_API_KEY` → `LLM_KEY`
     pub embed_key: String,
+    /// Embedding model name.
+    /// Env: `NVIDIA_EMBED_MODEL` → `EMBED_MODEL`
+    /// Empty when unset; callers should fall back to a vendor default.
+    pub embed_model: String,
 }
 
 impl LlmConfig {
     /// Load config using the standard precedence: env var → `~/.acc/.env` → empty.
     pub fn load() -> Self {
         let text = acc_env_text();
-        let embed_key_candidates = &["NVIDIA_API_KEY", "OPENAI_API_KEY", "LLM_KEY"];
+        let embed_key_candidates = &[
+            "NVIDIA_EMBED_KEY",
+            "NVIDIA_API_KEY",
+            "OPENAI_API_KEY",
+            "LLM_KEY",
+        ];
         Self {
             base_url:           resolve(&text, &["OPENAI_BASE_URL", "LLM_URL", "HERMES_BACKEND_URL"]),
             api_key:            resolve(&text, &["OPENAI_API_KEY", "LLM_KEY"]),
@@ -46,6 +55,7 @@ impl LlmConfig {
             model:              resolve(&text, &["OPENAI_MODEL", "HERMES_MODEL"]),
             embed_url:          resolve(&text, &["NVIDIA_EMBED_URL", "EMBED_URL"]),
             embed_key:          resolve(&text, embed_key_candidates),
+            embed_model:        resolve(&text, &["NVIDIA_EMBED_MODEL", "EMBED_MODEL"]),
         }
     }
 
