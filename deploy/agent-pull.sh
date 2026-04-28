@@ -14,16 +14,100 @@ mkdir -p "${ACC_DIR}/logs"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [agent-pull] $*" | tee -a "${LOG_FILE}"; }
 
+# ── DNS / connectivity check + rocky-remote fallback ──────────────────────────
+# On bullwinkle (jordan's home Mac) the NVIDIA-internal 10.x DNS servers are
+# unreachable from home.  Detect the failure early and transparently switch the
+# workspace remote to rocky over Tailscale so git fetch works without any
+# manual intervention.
+#
+# ROCKY_REMOTE: Tailscale address of the rocky hub (set in ~/.acc/.env or here)
+ROCKY_REMOTE="${ROCKY_GIT_REMOTE:-jkh@100.89.199.14:Src/ACC}"
+ROCKY_REMOTE_NAME="rocky"
+
+dns_ok() {
+    # Returns 0 if we can resolve github.com, 1 otherwise.
+    # Uses a 5-second timeout so we don't stall for 30s like cargo does.
+    if command -v nslookup >/dev/null 2>&1; then
+        nslookup -timeout=5 github.com >/dev/null 2>&1
+    elif command -v host >/dev/null 2>&1; then
+        host -W 5 github.com >/dev/null 2>&1
+    elif command -v dig >/dev/null 2>&1; then
+        dig +time=5 +tries=1 github.com >/dev/null 2>&1
+    else
+        # No DNS tools — try a TCP connect to github.com:443 with a short timeout
+        curl -sf --connect-timeout 5 --max-time 5 https://github.com >/dev/null 2>&1
+    fi
+}
+
+ensure_good_remote() {
+    local repo_dir="$1"
+    cd "${repo_dir}"
+
+    if dns_ok; then
+        log "DNS OK — using origin (github.com)"
+        # If we previously switched to rocky, offer to switch back but don't
+        # break anything: leave origin pointing at github for future use.
+        return 0
+    fi
+
+    log "WARNING: DNS resolution for github.com failed — origin fetch will time out"
+
+    # Check whether rocky remote is already set up
+    if git remote get-url "${ROCKY_REMOTE_NAME}" >/dev/null 2>&1; then
+        log "rocky remote already configured ($(git remote get-url ${ROCKY_REMOTE_NAME}))"
+    else
+        log "Adding git remote '${ROCKY_REMOTE_NAME}' → ${ROCKY_REMOTE}"
+        git remote add "${ROCKY_REMOTE_NAME}" "${ROCKY_REMOTE}"
+    fi
+
+    # Verify the rocky remote is still reachable (Tailscale must be up)
+    if git ls-remote --heads "${ROCKY_REMOTE_NAME}" >/dev/null 2>&1; then
+        log "rocky remote reachable — switching fetch to rocky"
+        # Temporarily repoint origin so the rest of this script (which uses
+        # 'origin') transparently fetches from rocky.
+        local original_origin
+        original_origin=$(git remote get-url origin)
+        git remote set-url origin "${ROCKY_REMOTE}"
+        log "origin temporarily → ${ROCKY_REMOTE} (was ${original_origin})"
+        # Stash the original URL so fix-dns-bullwinkle.sh or a future pull can
+        # restore it when DNS is healthy again.
+        git config --local acc.origin-github-url "${original_origin}" 2>/dev/null || true
+    else
+        log "ERROR: rocky remote also unreachable (is Tailscale running? is rocky online?)" >&2
+        log "       Tailscale IP: 100.89.199.14  Remote: ${ROCKY_REMOTE}" >&2
+        log "       Proceeding with cached local state only — no pull will happen." >&2
+        # Don't exit 1 here: the agent should still start with its existing
+        # binary.  The build step in restart-agent.sh will handle the no-network
+        # case separately.
+        return 1
+    fi
+}
+
 log "Starting pull -> ${WORKSPACE}"
 cd "${WORKSPACE}"
-git fetch origin --quiet 2>>"${LOG_FILE}"
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
-# Capture old HEAD before merge so we can detect what changed.
-PREV_HEAD="$(git rev-parse HEAD)"
-git merge --ff-only "origin/${BRANCH}" --quiet 2>>"${LOG_FILE}"
-NEW_HEAD="$(git rev-parse HEAD)"
-log "Pull complete ($(git rev-parse --short HEAD))"
+# Run the DNS check + remote fixup before any network operation.
+ensure_good_remote "${WORKSPACE}" || {
+    log "Skipping git fetch — no usable remote available"
+    # Still run migrations/upgrade against the existing local state.
+    goto_migrations=true
+}
+
+if [[ "${goto_migrations:-false}" != "true" ]]; then
+    git fetch origin --quiet 2>>"${LOG_FILE}"
+    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
+    # Capture old HEAD before merge so we can detect what changed.
+    PREV_HEAD="$(git rev-parse HEAD)"
+    git merge --ff-only "origin/${BRANCH}" --quiet 2>>"${LOG_FILE}"
+    NEW_HEAD="$(git rev-parse HEAD)"
+    log "Pull complete ($(git rev-parse --short HEAD))"
+else
+    BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+    PREV_HEAD="$(git rev-parse HEAD)"
+    NEW_HEAD="${PREV_HEAD}"
+    log "Pull skipped — using local HEAD $(git rev-parse --short HEAD)"
+fi
 
 # ── Sync secondary clone (~/Src/ACC) if it exists ─────────────────────────────
 # Hermes is installed as an editable package from ~/Src/ACC/hermes/ on most
@@ -35,6 +119,8 @@ if [[ -d "${SRC_CLONE}/.git" ]]; then
     log "Syncing secondary clone ${SRC_CLONE}"
     (
         cd "${SRC_CLONE}"
+        # Apply the same DNS-aware remote logic to the secondary clone.
+        ensure_good_remote "${SRC_CLONE}" || { log "Skipping secondary clone fetch"; exit 0; }
         git fetch origin --quiet 2>>"${LOG_FILE}"
         src_branch="$(git rev-parse --abbrev-ref HEAD)"
         git merge --ff-only "origin/${src_branch}" --quiet 2>>"${LOG_FILE}" \

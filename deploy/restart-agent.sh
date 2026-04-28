@@ -4,6 +4,19 @@
 # Verifies daemon manager (launchd/systemd) is configured and up-to-date
 # BEFORE killing acc-agent, so the agent is never left dead due to a missing
 # or stale daemon config.
+#
+# DNS-aware build strategy (bullwinkle / home-network nodes):
+#   If external DNS is broken (can't resolve github.com/crates.io), cargo
+#   fetch will time out and the build will fail.  We detect this early and
+#   apply one of three mitigations in order:
+#
+#   1. Fix DNS via networksetup (macOS) — sets 1.1.1.1 + 8.8.8.8 and retries
+#   2. Use a pre-built binary shipped in the repo at deploy/bin/acc-agent-<arch>
+#   3. Pull source from rocky over Tailscale (jkh@100.89.199.14:Src/ACC) and
+#      build --offline (all crates already fetched on rocky)
+#
+#   The rocky-remote path is documented in ~/.acc/.env as ROCKY_TAILSCALE_IP
+#   and ROCKY_TAILSCALE_USER (defaults: 100.89.199.14 / jkh).
 set -euo pipefail
 
 ACC_DIR="${ACC_DIR:-$HOME/.acc}"
@@ -27,6 +40,54 @@ fi
 
 AGENT_DEST="${ACC_DIR}/bin/acc-agent"
 mkdir -p "$LOG_DIR" "${ACC_DIR}/bin"
+
+# Load .env for ROCKY_TAILSCALE_IP / ROCKY_TAILSCALE_USER overrides
+# shellcheck disable=SC1090
+source "${ACC_DIR}/.env" 2>/dev/null || true
+
+# Rocky Tailscale coordinates (override in ~/.acc/.env if needed)
+ROCKY_IP="${ROCKY_TAILSCALE_IP:-100.89.199.14}"
+ROCKY_USER="${ROCKY_TAILSCALE_USER:-jkh}"
+ROCKY_REPO="${ROCKY_TAILSCALE_REPO:-Src/ACC}"
+
+# ── DNS preflight ─────────────────────────────────────────────────────────────
+#
+# Probe external DNS with a 4-second timeout.  Returns 0 if reachable, 1 if not.
+dns_ok() {
+    # Try resolving github.com via the system resolver.
+    # `getent hosts` works on Linux; `dscacheutil` on macOS.
+    # Fall back to a curl head request with a tight timeout.
+    if command -v getent >/dev/null 2>&1; then
+        getent hosts github.com >/dev/null 2>&1 && return 0
+    fi
+    if command -v dscacheutil >/dev/null 2>&1; then
+        dscacheutil -q host -a name github.com 2>/dev/null | grep -q "ip_address" && return 0
+    fi
+    # Last resort: curl with tight timeout
+    curl -sf --max-time 4 --connect-timeout 4 \
+        -o /dev/null "https://github.com" 2>/dev/null && return 0
+    return 1
+}
+
+# Attempt to repair DNS on macOS by pointing all interfaces at 1.1.1.1 + 8.8.8.8.
+fix_dns_macos() {
+    echo "[restart-agent] Attempting DNS repair via networksetup..."
+    local services
+    services=$(networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | grep -v '^\*') || true
+    while IFS= read -r svc; do
+        [ -z "$svc" ] && continue
+        networksetup -setdnsservers "$svc" 1.1.1.1 8.8.8.8 2>/dev/null && \
+            echo "[restart-agent]   ✓ DNS set on: $svc" || true
+    done <<< "$services"
+    # Flush DNS cache
+    if command -v dscacheutil >/dev/null 2>&1; then
+        dscacheutil -flushcache 2>/dev/null || true
+    fi
+    if command -v killall >/dev/null 2>&1; then
+        killall -HUP mDNSResponder 2>/dev/null || true
+    fi
+    sleep 2
+}
 
 # ── Preflight: ensure daemon manager is configured and current ────────────────
 #
@@ -124,21 +185,141 @@ echo "[restart-agent] Checking daemon manager configuration..."
 ensure_daemon_configured
 
 # ── Build new acc-agent binary ─────────────────────────────────────────────
+#
+# Strategy (in order):
+#   A. DNS is fine  → normal `cargo build --release`
+#   B. DNS broken, macOS → fix via networksetup, retry once
+#   C. Pre-built binary in repo  → copy it directly (no compile needed)
+#   D. Rocky Tailscale reachable → rsync source + cargo build --offline
+#   E. Nothing works             → abort with clear instructions
+
 AGENT_BIN="${WORKSPACE}/target/release/acc-agent"
+BUILD_DONE=false
 
-echo "[restart-agent] Building acc-agent (release) from $WORKSPACE"
-cargo build --release --manifest-path "${WORKSPACE}/Cargo.toml" -p acc-agent
+# ── Detect host arch for pre-built binary lookup ──────────────────────────
+HOST_ARCH="$(uname -m)"   # arm64 or x86_64
+HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"  # darwin or linux
+PREBUILT_BIN="${WORKSPACE}/deploy/bin/acc-agent-${HOST_OS}-${HOST_ARCH}"
 
-if [ ! -x "$AGENT_BIN" ]; then
-    echo "[restart-agent] ERROR: build produced no binary at $AGENT_BIN" >&2
+do_cargo_build() {
+    echo "[restart-agent] Building acc-agent (release) from $WORKSPACE"
+    cargo build --release --manifest-path "${WORKSPACE}/Cargo.toml" -p acc-agent
+    BUILD_DONE=true
+}
+
+# ── Path A: normal build if DNS is healthy ────────────────────────────────
+echo "[restart-agent] Checking external DNS (github.com / crates.io)..."
+if dns_ok; then
+    echo "[restart-agent] DNS OK — proceeding with normal cargo build"
+    do_cargo_build
+fi
+
+# ── Path B: macOS DNS repair + retry ─────────────────────────────────────
+if ! $BUILD_DONE && [[ "$(uname)" == "Darwin" ]]; then
+    echo "[restart-agent] DNS unreachable — attempting macOS DNS repair"
+    fix_dns_macos
+    if dns_ok; then
+        echo "[restart-agent] DNS repaired — retrying cargo build"
+        do_cargo_build
+    else
+        echo "[restart-agent] DNS still unreachable after repair attempt"
+    fi
+fi
+
+# ── Path C: pre-built binary shipped in the repo ─────────────────────────
+if ! $BUILD_DONE && [ -x "${PREBUILT_BIN}" ]; then
+    echo "[restart-agent] Using pre-built binary: ${PREBUILT_BIN}"
+    tmp="${AGENT_DEST}.new.$$"
+    cp "${PREBUILT_BIN}" "$tmp"
+    chmod +x "$tmp"
+    mv "$tmp" "${AGENT_DEST}"
+    echo "[restart-agent] ✓ Pre-built binary installed → ${AGENT_DEST}"
+    # Skip the normal install step below — binary is already at AGENT_DEST
+    BUILD_DONE=true
+    SKIP_INSTALL=true
+fi
+
+# ── Path D: rocky Tailscale rsync + offline build ────────────────────────
+if ! $BUILD_DONE; then
+    echo "[restart-agent] Trying rocky Tailscale source sync (${ROCKY_USER}@${ROCKY_IP}:${ROCKY_REPO})"
+    ROCKY_REACHABLE=false
+    if ssh -o ConnectTimeout=8 -o BatchMode=yes \
+           "${ROCKY_USER}@${ROCKY_IP}" true 2>/dev/null; then
+        ROCKY_REACHABLE=true
+    fi
+
+    if $ROCKY_REACHABLE; then
+        echo "[restart-agent] rocky reachable — rsyncing source tree..."
+        # Sync source (excluding target/ to avoid huge binary blobs)
+        rsync -az --delete \
+            --exclude='target/' \
+            --exclude='.git/' \
+            "${ROCKY_USER}@${ROCKY_IP}:${ROCKY_REPO}/" \
+            "${WORKSPACE}/"
+        echo "[restart-agent] Source synced from rocky"
+
+        # Also sync rocky's pre-fetched cargo registry so --offline works
+        ROCKY_CARGO_REGISTRY="${ROCKY_USER}@${ROCKY_IP}:.cargo/registry"
+        LOCAL_CARGO_REGISTRY="${HOME}/.cargo/registry"
+        mkdir -p "${LOCAL_CARGO_REGISTRY}"
+        echo "[restart-agent] Syncing cargo registry from rocky..."
+        rsync -az \
+            "${ROCKY_CARGO_REGISTRY}/" \
+            "${LOCAL_CARGO_REGISTRY}/" 2>/dev/null || \
+            echo "[restart-agent] WARNING: cargo registry sync failed — build may fail if crates missing"
+
+        echo "[restart-agent] Building acc-agent --offline from synced source"
+        cargo build --release --offline \
+            --manifest-path "${WORKSPACE}/Cargo.toml" -p acc-agent
+        BUILD_DONE=true
+    else
+        echo "[restart-agent] WARNING: rocky not reachable at ${ROCKY_IP}" >&2
+    fi
+fi
+
+# ── Path E: all paths exhausted ──────────────────────────────────────────
+if ! $BUILD_DONE; then
+    cat >&2 <<EOF
+[restart-agent] ERROR: cannot build acc-agent — all paths exhausted.
+
+  DNS is broken and no fallback succeeded. Manual options:
+
+  1. Fix DNS permanently (macOS):
+       bash ${WORKSPACE}/deploy/fix-dns-bullwinkle.sh
+     Then re-run: bash ${WORKSPACE}/deploy/restart-agent.sh
+
+  2. Copy a pre-built binary from jordan's workstation:
+       scp <jordan-mac>:~/Src/ACC/target/release/acc-agent \\
+           ${AGENT_DEST}
+     Then re-run: bash ${WORKSPACE}/deploy/restart-agent.sh
+
+  3. SCP a pre-built binary for this platform (${HOST_OS}-${HOST_ARCH}):
+       scp <source>:<path>/acc-agent ${AGENT_DEST}
+     Then restart manually: pkill -x acc-agent || true
+
+  4. Ensure rocky is reachable on Tailscale:
+       ping ${ROCKY_IP}
+     Then re-run this script (it will rsync source + registry from rocky).
+
+  Rocky git remote: jkh@${ROCKY_IP}:${ROCKY_REPO}
+EOF
     exit 1
 fi
 
-echo "[restart-agent] Installing → $AGENT_DEST"
-tmp="${AGENT_DEST}.new.$$"
-cp "$AGENT_BIN" "$tmp"
-chmod +x "$tmp"
-mv "$tmp" "$AGENT_DEST"
+# ── Install binary (skip if Path C already wrote to AGENT_DEST) ──────────
+SKIP_INSTALL="${SKIP_INSTALL:-false}"
+if ! $SKIP_INSTALL; then
+    if [ ! -x "$AGENT_BIN" ]; then
+        echo "[restart-agent] ERROR: build produced no binary at $AGENT_BIN" >&2
+        exit 1
+    fi
+
+    echo "[restart-agent] Installing → $AGENT_DEST"
+    tmp="${AGENT_DEST}.new.$$"
+    cp "$AGENT_BIN" "$tmp"
+    chmod +x "$tmp"
+    mv "$tmp" "$AGENT_DEST"
+fi
 
 # ── Kill and wait for respawn ──────────────────────────────────────────────
 echo "[restart-agent] Stopping running acc-agent so the daemon manager respawns with the new binary"
