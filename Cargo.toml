@@ -1,5 +1,15 @@
 [workspace]
 resolver = "2"
+# Workspace members (Epic: shared ACC client libraries)
+# ─────────────────────────────────────────────────────
+# acc-model      — shared wire types (no network, no async); used by server +
+#                  both client crates. Single source of truth for BusMsg,
+#                  Task, QueueItem, Agent, MemoryHit, etc.
+# acc-client     — async Rust HTTP client; depends on acc-model. Mirrors the
+#                  Python acc-client package in structure and wire behaviour.
+# acc-cli        — acc binary; drives acc-client for human / script use.
+# acc-server     — hub API; depends on acc-model for the same wire types.
+# agent/acc-agent — fleet node agent; depends on acc-client + acc-model.
 members = [
     "acc-cli",
     "acc-server",
@@ -30,6 +40,9 @@ base64         = "0.22"
 hex            = "0.4"
 bytes          = "1"
 http-body-util = "0.1"
+thiserror      = "1"
+async-stream   = "0.3"
+serial_test    = "3"
 
 # Thin LTO is cheap enough to apply workspace-wide and recovers most of the
 # size win of full LTO. Per-package settings scope size-optimization to

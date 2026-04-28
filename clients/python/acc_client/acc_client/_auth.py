@@ -46,9 +46,18 @@ def resolve_token(explicit: str | None = None) -> str:
 
 
 def resolve_base_url(explicit: str | None = None) -> str:
-    """Return the hub base URL, stripping any trailing slash."""
+    """Return the hub base URL, stripping any trailing slash.
+
+    Precedence (highest first):
+        1. Explicit argument
+        2. ``ACC_HUB_URL`` env  — matches the Rust ``acc-client`` default
+        3. ``ACC_URL`` env
+        4. ``CCC_URL`` env  (legacy)
+        5. Hard-coded default ``http://localhost:8789``
+    """
     url = (
         explicit
+        or os.environ.get("ACC_HUB_URL")
         or os.environ.get("ACC_URL")
         or os.environ.get("CCC_URL")
         or "http://localhost:8789"

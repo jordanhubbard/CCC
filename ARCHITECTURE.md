@@ -137,6 +137,109 @@ State is persisted to disk after every tick. If acc-brain crashes and restarts, 
 
 ---
 
+## Shared Client Libraries
+
+Drift between the three HTTP clients (`acc-cli`, `acc-agent`, hermes
+`acc_shared_memory` plugin) was eliminated by extracting shared libraries.
+
+### Rust
+
+The Cargo workspace at the repo root unifies all five Rust crates:
+
+| Crate | Path | Role |
+|-------|------|------|
+| `acc-model` | `acc-model/` | Shared wire types (tasks, bus, memory, projects, queue, agents) |
+| `acc-client` | `acc-client/` | Async HTTP client; used by `acc-cli` and `acc-agent` |
+| `acc-cli` | `acc-cli/` | Fleet CLI binary |
+| `acc-server` | `acc-server/` | Hub REST API server |
+| `acc-agent` | `agent/acc-agent/` | Agent-side runtime |
+
+**`acc-model`** — Zero-logic, zero-network, zero-async. Pure `serde` structs
+that any crate in the tree can depend on.  The server's internal representation
+diverges from the wire shape in places (e.g. richer status enums, audit fields)
+but those stay in `acc-server`; `acc-model` carries only what crosses the HTTP
+boundary.
+
+**`acc-client`** — Async `reqwest`-based client.  Notable design choices:
+- SSE bus streaming (`BusApi::stream`) returns `impl Stream<Item = Result<BusMsg>>`
+  so callers drive it with `StreamExt::next().await` and own the reconnect policy.
+- Malformed JSON in a single SSE frame is silently skipped; the stream continues.
+- `Client::from_env()` resolves `ACC_HUB_URL` → `ACC_TOKEN` (same precedence as
+  the Python client).
+
+**`acc-agent` — lib+bin crate** — The agent runtime is structured as both a
+library crate (`acc_agent`) and a binary (`acc-agent`) from the same source
+tree.  This is intentional:
+
+| File | Role |
+|------|------|
+| `src/lib.rs` | Re-exports every module as `pub mod`; this is the library root |
+| `src/main.rs` | Binary entry point; imports via `use acc_agent::{…}` — declares no modules itself |
+| `Cargo.toml` `[lib]` | `name = "acc_agent"`, `path = "src/lib.rs"` |
+| `Cargo.toml` `[[bin]]` | `name = "acc-agent"`, `path = "src/main.rs"` |
+
+**Why the split?** Integration tests in `peer_exchange.rs` and `queue.rs` need
+access to `hub_mock` and other internal types.  A pure binary crate can only
+host tests inside itself and cannot be imported by external test harnesses or
+other workspace crates.  Promoting the crate to lib+bin fixes this without any
+change to the compiled binary's behaviour or public CLI surface.
+
+### Python
+
+The Python package lives at `clients/python/acc_client/` and is installable via:
+
+```bash
+pip install -e clients/python/acc_client
+```
+
+It mirrors the Rust `acc-client` shape so callers can reason about both the same
+way.  Key behaviors:
+- `Client.from_env()` resolves `ACC_HUB_URL` / `ACC_URL` / `CCC_URL` for the base
+  URL (same precedence as the Rust client).
+- Token precedence: explicit arg → `ACC_TOKEN` → `CCC_AGENT_TOKEN` → `ACC_AGENT_TOKEN`
+  → `~/.acc/.env`.
+- `client.bus.send("kind", from_="agent")` — the `from_` kwarg is mapped to the
+  wire field `"from"` to avoid shadowing the Python built-in.
+- `client.bus.stream()` — synchronous SSE generator; reconnect at the call site.
+
+The hermes `acc_shared_memory` plugin (`hermes/contrib/plugins/acc_shared_memory/`)
+consumes the Python client directly.
+
+---
+
+## Slack Fleet Reporter
+
+`agent/acc-agent/src/slack.rs` posts compact emoji-led messages to a Slack
+channel on every task claim, completion, and failure.  It is entirely
+opt-in: if `SLACK_BOT_TOKEN` is absent the functions return immediately and
+nothing is posted.
+
+### Required environment variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `SLACK_BOT_TOKEN` | Bot OAuth token (`xoxb-…`). **Required** to enable posting. Without it the reporter is a silent no-op. | — |
+| `SLACK_FLEET_CHANNEL` | Channel ID or name to receive fleet events. | `fleet-activity` |
+
+`ACC_URL` is also read (if present) to build a one-click deep-link to the hub
+dashboard in each message; it is optional.
+
+### How to get a bot token
+
+1. Create a Slack app at <https://api.slack.com/apps> and add the
+   `chat:write` OAuth scope under *Bot Token Scopes*.
+2. Install the app to your workspace; copy the **Bot User OAuth Token**
+   (`xoxb-…`).
+3. Invite the bot to the target channel:
+   `/invite @your-bot-name` inside Slack.
+4. Set `SLACK_BOT_TOKEN=xoxb-…` and (optionally) `SLACK_FLEET_CHANNEL=<id>`
+   in `~/.acc/.env`.
+
+Both variables are included in `deploy/.env.template` under the
+`# ── Messaging ──` section.
+
+---
+
 ## Repo Structure (target)
 
 ```

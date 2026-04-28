@@ -124,15 +124,15 @@ else
   warn "Unknown platform — install cron manually: bash $PULL_SCRIPT"
 fi
 
-# ── Install ops crons (watchdog, nudge, memory snapshot) ──────────────────
+# ── Install ops crons (memory snapshot, accfs health) ─────────────────────
 install_ops_crons() {
   local CRON_FRAGMENT="$WORKSPACE/deploy/crontab-acc.txt"
   if [ ! -f "$CRON_FRAGMENT" ]; then
     warn "Ops cron fragment not found at $CRON_FRAGMENT — skipping"
     return
   fi
-  # Check if already installed (look for a sentinel)
-  if crontab -l 2>/dev/null | grep -q "ccc-api-watchdog.mjs"; then
+  # Check if already installed (look for the memory-commit sentinel)
+  if crontab -l 2>/dev/null | grep -q "memory-git-commit.sh"; then
     warn "Ops crons already installed — skipping"
     return
   fi
@@ -140,7 +140,7 @@ install_ops_crons() {
   local EXPANDED
   EXPANDED=$(sed "s|WORKSPACE|$WORKSPACE|g; s|LOG_DIR|$LOG_DIR|g" "$CRON_FRAGMENT" | grep -v '^#' | grep -v '^$')
   (crontab -l 2>/dev/null; echo "$EXPANDED") | crontab -
-  success "Ops crons installed (watchdog every 10min, nudge daily 9AM, memory-commit daily midnight)"
+  success "Ops crons installed (memory-commit daily midnight, accfs health every 15min)"
 }
 
 info "Installing ops crons..."
@@ -148,6 +148,49 @@ if [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
   install_ops_crons
 else
   warn "Unknown platform — install ops crons manually from deploy/crontab-acc.txt"
+fi
+
+# ── Install nightly nap cron (short-term .md → holographic storage copy) ──
+# Each agent gets a deterministic staggered UTC offset (00:00–04:00 UTC window)
+# computed from its name, so no two fleet agents fire at the same time.
+install_nightly_nap_cron() {
+  local NAP_SCRIPT="$WORKSPACE/scripts/nightly-nap/schedule_nap_cron.py"
+  if [ ! -f "$NAP_SCRIPT" ]; then
+    warn "Nightly nap scheduler not found at $NAP_SCRIPT — skipping"
+    return
+  fi
+
+  local _agent_name="${AGENT_NAME:-}"
+  if [ -z "$_agent_name" ] && [ -f "$ACC_DIR/.env" ]; then
+    _agent_name=$(grep -E '^AGENT_NAME=' "$ACC_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'" | tr -d ' ')
+  fi
+
+  if [ -z "$_agent_name" ]; then
+    warn "AGENT_NAME not set — skipping nightly nap cron (run manually: AGENT_NAME=<name> python3 $NAP_SCRIPT --install)"
+    return
+  fi
+
+  # Check if already installed for this agent
+  if crontab -l 2>/dev/null | grep -q "acc-nightly-nap"; then
+    warn "Nightly nap cron already installed — skipping (run schedule_nap_cron.py --list to verify)"
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    mkdir -p "$HOME/.hermes/logs"
+    AGENT_NAME="$_agent_name" python3 "$NAP_SCRIPT" --install && \
+      success "Nightly nap cron installed for agent '$_agent_name' (short-term .md → holographic storage)" || \
+      warn "Nightly nap cron install failed — run manually: AGENT_NAME=$_agent_name python3 $NAP_SCRIPT --install"
+  else
+    warn "python3 not found — install nightly nap cron manually: AGENT_NAME=$_agent_name python3 $NAP_SCRIPT --install"
+  fi
+}
+
+info "Installing nightly nap cron (short-term .md → holographic storage)..."
+if [[ "$PLATFORM" == "linux" ]] || [[ "$PLATFORM" == "macos" ]]; then
+  install_nightly_nap_cron
+else
+  warn "Unknown platform — install nightly nap cron manually: python3 $WORKSPACE/scripts/nightly-nap/schedule_nap_cron.py --install"
 fi
 
 # ── Install node dependencies ─────────────────────────────────────────────

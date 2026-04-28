@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod blobs;
 pub mod health;
 pub mod queue;
 pub mod agents;

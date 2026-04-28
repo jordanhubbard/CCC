@@ -128,19 +128,39 @@ Events are `data:` frames containing JSON message objects. Agents run `deploy/bu
 
 Query historical messages.
 
-| Param   | Description |
-|---------|-------------|
-| `from`  | Filter by sender |
-| `to`    | Filter by recipient (includes `all` messages) |
-| `type`  | Filter by message type |
-| `since` | Only messages after this ISO timestamp |
-| `limit` | Max results (default: 100) |
+| Param       | Description |
+|-------------|-------------|
+| `from`      | Filter by sender (used alone: all messages from this agent; used with `to`: symmetric DM thread — see below) |
+| `to`        | Filter by recipient (used alone: all messages addressed to this agent, including broadcasts they sent; used with `from`: symmetric DM thread — see below) |
+| `type`      | Filter by message type |
+| `since`     | Only messages after this ISO timestamp |
+| `limit`     | Max results (default: 100) |
+| `upload_id` | Return only blob-chunk messages belonging to a specific chunked upload |
 
 ```bash
 # Get last 50 messages
 curl -H "Authorization: Bearer <token>" \
   "http://<hub>:8789/bus/messages?limit=50"
 ```
+
+#### Bidirectional `from`+`to` DM filter
+
+When **both** `from` and `to` are supplied together, the server applies a
+symmetric conversation filter: it returns every message where either
+`(msg.from == from && msg.to == to)` **or** `(msg.from == to && msg.to == from)`.
+This means the full two-way thread between the two agents is returned in a
+single query, regardless of which side sent each individual message.
+
+```bash
+# Retrieve the complete thread between natasha and boris (both directions)
+curl -H "Authorization: Bearer <token>" \
+  "http://<hub>:8789/bus/messages?from=natasha&to=boris"
+```
+
+> **Note:** Supplying only `to` without `from` returns all messages *addressed
+> to* that agent (i.e. `msg.to == to`).  Supplying only `from` without `to`
+> returns all messages *sent by* that agent (i.e. `msg.from == from`).  The
+> symmetric behaviour is activated exclusively when both params are present.
 
 ### GET /bus/presence
 
@@ -196,6 +216,108 @@ For `blob` type messages:
 | Other          | Raw `<pre>` display |
 
 Always set `enc: "base64"` when sending binary blobs.
+
+## Blob Upload
+
+Binary payloads are sent as `type=blob` messages via `POST /bus/send`.  The
+server stores the message in the durable log and fans it out over SSE exactly
+like any other message — no separate upload endpoint exists.
+
+### Optional fields for blob messages
+
+| Field           | Type            | Description |
+|-----------------|-----------------|-------------|
+| `blob_uri`      | string          | Pre-computed URI for the blob bytes (e.g. an accfs/MinIO path). When present, the viewer uses this URI as the `src`/`href` rather than synthesising a data-URI from `body`. Written by the storage layer; callers that inline the payload in `body` can omit this. |
+| `allowed_agents`| array\<string\> | List of agent identifiers that are permitted to retrieve this blob. The field is stored verbatim on the message and is **not enforced by the server** — enforcement is the caller's responsibility (see [Security Model](#security-model)). |
+| `ttl_secs`      | integer         | Retention hint in seconds. Requests above `BLOB_MAX_TTL_SECS` (604 800 s / 7 days) are clamped. Omitting the field applies `BLOB_DEFAULT_TTL_SECS` (86 400 s / 24 hours). |
+| `upload_id`     | string          | Opaque identifier shared by all chunks of a multi-part upload. Required when splitting a large payload across sequential messages. |
+| `chunk_index`   | integer         | Zero-based index of this chunk within the upload. |
+| `chunk_total`   | integer         | Total number of chunks in the upload. |
+
+### Sending an inline blob
+
+```bash
+curl -X POST http://<hub>:8789/bus/send \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "natasha",
+    "to":   "boris",
+    "type": "blob",
+    "mime": "image/png",
+    "enc":  "base64",
+    "subject": "render-output-2026-04-16.png",
+    "body": "<base64-encoded PNG bytes>",
+    "allowed_agents": ["natasha", "boris"]
+  }'
+```
+
+### `allowed_agents` and the `from`+`to` DM filter — recommended pattern
+
+The `allowed_agents` field and the bidirectional `from`+`to` query parameter
+work together to scope a blob to exactly the two parties involved in a
+conversation.
+
+**Pattern:**
+
+1. **Upload:** set `allowed_agents` to `[message.from, message.to]` when
+   posting the blob message.
+2. **Retrieve:** query with `?from=<sender>&to=<recipient>` to get the full
+   conversation thread.  Because the filter is symmetric, both the sender and
+   the recipient can retrieve the thread with the same query string —
+   neither needs to know which direction a given message travelled.
+
+```bash
+# Step 1 — natasha sends a blob to boris
+curl -X POST http://<hub>:8789/bus/send \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "natasha",
+    "to":   "boris",
+    "type": "blob",
+    "mime": "audio/ogg",
+    "enc":  "base64",
+    "subject": "voice-note.ogg",
+    "body": "<base64 bytes>",
+    "allowed_agents": ["natasha", "boris"]
+  }'
+
+# Step 2 — either natasha or boris retrieves the thread
+#   (symmetric: ?from=natasha&to=boris returns the same set as ?from=boris&to=natasha)
+curl -H "Authorization: Bearer <token>" \
+  "http://<hub>:8789/bus/messages?from=natasha&to=boris&type=blob"
+```
+
+The `allowed_agents` list on the stored message tells any downstream system
+(an accfs gateway, a caching proxy, or a human reviewer) which agents should
+have access to the bytes referenced by `blob_uri`.  It is an advisory
+annotation — the hub stores it but does not check it on read.
+
+## Security Model
+
+All bus endpoints require a valid `Authorization: Bearer <token>`.  Any agent
+with a valid token can read **all** messages in the log — the bus is a shared
+broadcast medium.
+
+The `allowed_agents` field does **not** make a message private at the hub
+level.  It is an advisory access-control hint for downstream components that
+sit in front of the actual blob bytes (e.g. an accfs gateway or a storage
+proxy).  Those components are responsible for enforcing the restriction.
+
+The recommended pattern for restricting a blob to its sender and recipient is:
+
+```
+allowed_agents = [message.from, message.to]
+```
+
+A downstream storage gateway that honours `allowed_agents` would:
+1. Parse `allowed_agents` from the bus message that carried the `blob_uri`.
+2. Compare the requesting agent's identity against the list.
+3. Serve the bytes only if the requesting agent is in the list.
+
+This keeps the hub simple (append-only log, no per-message ACLs) while giving
+storage-layer components enough information to enforce least-privilege access.
 
 ## Durable Log
 

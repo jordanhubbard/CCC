@@ -7,12 +7,14 @@ on:
     branches: [main]
 
 jobs:
-  rust-server:
-    name: acc-server (check + test)
+  # ── Rust workspace ─────────────────────────────────────────────────────────
+  #
+  # All five crates (acc-model, acc-client, acc-cli, acc-server, acc-agent)
+  # share the root Cargo.toml workspace, so a single `--workspace` invocation
+  # covers the entire Rust surface of the repo.
+  rust-workspace:
+    name: Rust workspace (check + test)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: acc-server
 
     steps:
       - uses: actions/checkout@v4
@@ -21,36 +23,47 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: acc-server
+          # Cache is keyed to the workspace root Cargo.lock.
+          workspaces: "."
 
-      - name: cargo check
-        run: cargo check --all-targets
+      - name: cargo check (all targets, all workspace members)
+        run: cargo check --workspace --all-targets
 
-      - name: cargo test
-        run: cargo test
+      - name: cargo test (all workspace members)
+        run: cargo test --workspace
 
-  rust-agent:
-    name: acc-agent (check + test)
+  # ── Python acc-client package ─────────────────────────────────────────────
+  #
+  # Installs the package from clients/python/acc_client in editable mode
+  # (including the [test] extras) and runs pytest.  respx is used for HTTP
+  # mocking so no live server is required.
+  python-acc-client:
+    name: Python acc-client (pytest)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: agent
+
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
         with:
-          workspaces: agent
+          python-version: ${{ matrix.python-version }}
 
-      - name: cargo check
-        run: cargo check --all-targets
+      - name: Install acc-client and test dependencies
+        run: pip install -e "clients/python/acc_client[test]"
 
-      - name: cargo test
-        run: cargo test
+      - name: Run pytest
+        run: |
+          cd clients/python/acc_client
+          python -m pytest -q --tb=short
 
+  # ── Python syntax check ───────────────────────────────────────────────────
+  #
+  # Quick compile-only pass over every .py file in the repo.  This catches
+  # SyntaxErrors in hermes and deploy scripts that are not covered by pytest.
   python-lint:
     name: Python scripts (syntax check)
     runs-on: ubuntu-latest
@@ -66,8 +79,8 @@ jobs:
         run: |
           find . -name '*.py' \
             -not -path './.git/*' \
-            -not -path './agent/*/target/*' \
-            -not -path './acc-server/target/*' \
+            -not -path './target/*' \
+            -not -path './**/target/*' \
             | xargs python3 -m py_compile && echo "All Python files syntax OK"
 
   shell-check:

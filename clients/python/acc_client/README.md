@@ -30,6 +30,11 @@ c.tasks.complete(task_id="task-1", agent="boris", output="done")
 
 # Heartbeat
 c.items.heartbeat(agent="boris", status="ok", note="cycle 42")
+
+# Bus — live SSE stream
+for msg in c.bus.stream():
+    # msg is a plain dict; loop ends when the server closes the connection.
+    print(msg.get("type"), msg.get("from"), msg.get("body"))
 ```
 
 ## Token resolution

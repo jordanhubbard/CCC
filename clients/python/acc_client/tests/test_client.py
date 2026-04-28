@@ -13,6 +13,7 @@ from acc_client import (
     NotFound,
     Unauthorized,
 )
+from acc_client._bus import _extract_sse_data  # canonical location post-refactor
 
 
 @pytest.fixture
@@ -160,6 +161,18 @@ def test_bus_send_uses_type_field_on_wire(client):
 
 
 @respx.mock
+def test_bus_send_maps_from_underscore_to_wire_from(client):
+    """``from_`` kwarg must appear as ``from`` on the wire (not ``from_``)."""
+    route = respx.post("http://hub.test/api/bus/send").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    client.bus.send("ping", from_="boris")
+    body = route.calls.last.request.read()
+    assert b'"from":"boris"' in body
+    assert b'"from_"' not in body
+
+
+@respx.mock
 def test_bus_messages_filters_by_kind(client):
     respx.get("http://hub.test/api/bus/messages", params={"type": "tasks:claimed"}).mock(
         return_value=httpx.Response(
@@ -196,3 +209,201 @@ def test_context_manager_closes_http(monkeypatch):
     monkeypatch.setenv("ACC_TOKEN", "t")
     with Client(base_url="http://hub.test") as c:
         assert c.base_url == "http://hub.test"
+
+
+# ── SSE _extract_sse_data unit tests ──────────────────────────────────────────
+
+
+def test_extract_sse_data_returns_payload():
+    frame = 'data: {"type":"hello"}\n'
+    assert _extract_sse_data(frame) == '{"type":"hello"}'
+
+
+def test_extract_sse_data_strips_optional_leading_space():
+    # "data: " (with space) and "data:" (without) both valid per SSE spec.
+    assert _extract_sse_data("data: abc\n") == "abc"
+    assert _extract_sse_data("data:abc\n") == "abc"
+
+
+def test_extract_sse_data_joins_multiple_data_lines():
+    frame = 'data: {"a":1,\ndata: "b":2}\n'
+    assert _extract_sse_data(frame) == '{"a":1,\n"b":2}'
+
+
+def test_extract_sse_data_ignores_comment_and_meta_lines():
+    frame = ": keepalive\nevent: msg\ndata: hi\n"
+    assert _extract_sse_data(frame) == "hi"
+
+
+def test_extract_sse_data_returns_none_for_keepalive_only():
+    frame = ": keepalive\n"
+    assert _extract_sse_data(frame) is None
+
+
+def test_extract_sse_data_returns_none_for_empty():
+    assert _extract_sse_data("") is None
+
+
+def test_extract_sse_data_ignores_retry_and_id_lines():
+    frame = "id: 42\nretry: 3000\ndata: payload\n"
+    assert _extract_sse_data(frame) == "payload"
+
+
+# ── bus.stream() integration tests ────────────────────────────────────────────
+
+
+@respx.mock
+def test_bus_stream_yields_each_data_frame(client):
+    """Three frames in one body; keep-alive comment frame is silently dropped."""
+    body = (
+        ": keepalive\n\n"
+        'data: {"id":"m-1","type":"first","seq":1}\n\n'
+        'data: {"id":"m-2","type":"second","seq":2}\n\n'
+    )
+    respx.get("http://hub.test/api/bus/stream").mock(
+        return_value=httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    msgs = list(client.bus.stream())
+    assert len(msgs) == 2
+    assert msgs[0]["type"] == "first"
+    assert msgs[0]["id"] == "m-1"
+    assert msgs[1]["type"] == "second"
+    assert msgs[1]["seq"] == 2
+
+
+@respx.mock
+def test_bus_stream_joins_multiline_data_fields(client):
+    """Multiple data: lines in one frame are joined with \\n before JSON decode."""
+    body = 'data: {"type":"multi",\ndata: "id":"m-x"}\n\n'
+    respx.get("http://hub.test/api/bus/stream").mock(
+        return_value=httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    msgs = list(client.bus.stream())
+    assert len(msgs) == 1
+    assert msgs[0]["type"] == "multi"
+    assert msgs[0]["id"] == "m-x"
+
+
+@respx.mock
+def test_bus_stream_skips_malformed_json_frame(client):
+    """A garbled frame is silently skipped; valid frames still yield."""
+    body = (
+        "data: NOT_JSON\n\n"
+        'data: {"type":"good"}\n\n'
+    )
+    respx.get("http://hub.test/api/bus/stream").mock(
+        return_value=httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    msgs = list(client.bus.stream())
+    assert len(msgs) == 1
+    assert msgs[0]["type"] == "good"
+
+
+@respx.mock
+def test_bus_stream_raises_on_non_2xx(client):
+    """A non-2xx status before the stream body raises ApiError immediately."""
+    respx.get("http://hub.test/api/bus/stream").mock(
+        return_value=httpx.Response(401, json={"error": "unauthorized"})
+    )
+    with pytest.raises(Unauthorized):
+        list(client.bus.stream())
+
+
+@respx.mock
+def test_bus_stream_empty_body_yields_nothing(client):
+    """Server that sends no frames (immediate close) yields an empty sequence."""
+    respx.get("http://hub.test/api/bus/stream").mock(
+        return_value=httpx.Response(
+            200,
+            text="",
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    assert list(client.bus.stream()) == []
+
+
+# ── tasks.review_result — summary_hallucination flag ─────────────────────────
+
+
+@respx.mock
+def test_review_result_sends_summary_hallucination_flag(client):
+    """summary_hallucination=True is forwarded to the server as a boolean field."""
+    route = respx.put("http://hub.test/api/tasks/t-1/review-result").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    client.tasks.review_result(
+        "t-1",
+        result="rejected",
+        agent="reviewer",
+        summary_hallucination=True,
+    )
+    body = route.calls.last.request.read()
+    assert b'"summary_hallucination":true' in body
+    assert b'"result":"rejected"' in body
+    assert b'"agent":"reviewer"' in body
+
+
+@respx.mock
+def test_review_result_omits_summary_hallucination_when_none(client):
+    """summary_hallucination must not appear in the body when not set."""
+    route = respx.put("http://hub.test/api/tasks/t-2/review-result").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    client.tasks.review_result("t-2", result="approved")
+    body = route.calls.last.request.read()
+    assert b"summary_hallucination" not in body
+
+
+# ── tasks.vote ────────────────────────────────────────────────────────────────
+
+
+@respx.mock
+def test_vote_approve_sends_refinement(client):
+    """An approve vote must carry a non-empty refinement string."""
+    route = respx.put("http://hub.test/api/tasks/t-3/vote").mock(
+        return_value=httpx.Response(200, json={"ok": True, "approved": True})
+    )
+    result = client.tasks.vote("t-3", agent="alice", vote="approve", refinement="scope A only")
+    assert result.get("approved") is True
+    body = route.calls.last.request.read()
+    assert b'"vote":"approve"' in body
+    assert b'"refinement":"scope A only"' in body
+    assert b'"agent":"alice"' in body
+
+
+@respx.mock
+def test_vote_reject_without_refinement(client):
+    """A reject vote omits the caller's refinement argument but the client still
+    sends the field with a synthetic placeholder so the server never receives a
+    missing ``refinement`` key and returns HTTP 400."""
+    route = respx.put("http://hub.test/api/tasks/t-4/vote").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    client.tasks.vote("t-4", agent="bob", vote="reject")
+    body = route.calls.last.request.read()
+    assert b'"vote":"reject"' in body
+    # The client substitutes "(no refinement provided)" — field must be present.
+    assert b'"refinement"' in body
+    assert b"(no refinement provided)" in body
+
+
+@respx.mock
+def test_vote_empty_response_returns_empty_dict(client):
+    """204 No Content (empty body) must not crash the caller."""
+    respx.put("http://hub.test/api/tasks/t-5/vote").mock(
+        return_value=httpx.Response(204, content=b"")
+    )
+    result = client.tasks.vote("t-5", agent="carol", vote="reject")
+    assert result == {} or result is None  # either is acceptable

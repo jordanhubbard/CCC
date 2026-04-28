@@ -2,8 +2,9 @@
 //! against canned responses that mirror the real server's wire format.
 
 use acc_client::{model::TaskStatus, Client, Error};
+use acc_model;
 use serde_json::json;
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{body_partial_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn sample_task(id: &str, status: &str) -> serde_json::Value {
@@ -145,4 +146,88 @@ async fn complete_with_non_json_body_still_errors_gracefully() {
         }
         other => panic!("expected Api{{500}}, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn review_result_forwards_summary_hallucination_flag() {
+    // Verifies that summary_hallucination=true reaches the server as a boolean
+    // JSON field (not omitted, not stringified).
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/tasks/task-1/review-result"))
+        .and(body_partial_json(json!({
+            "result": "rejected",
+            "agent": "reviewer",
+            "summary_hallucination": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    client
+        .tasks()
+        .review_result("task-1", acc_model::ReviewResult::Rejected, Some("reviewer"), None, Some(true))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn review_result_omits_summary_hallucination_when_none() {
+    // When summary_hallucination is None the field must not appear in the body.
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/tasks/task-2/review-result"))
+        .and(body_partial_json(json!({"result": "approved"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    client
+        .tasks()
+        .review_result("task-2", acc_model::ReviewResult::Approved, None, None, None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn vote_approve_sends_refinement_field() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/tasks/task-3/vote"))
+        .and(body_partial_json(json!({
+            "agent": "alice",
+            "vote": "approve",
+            "refinement": "scope A only"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true, "approved": true})))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    let val = client
+        .tasks()
+        .vote("task-3", "alice", "approve", Some("scope A only"))
+        .await
+        .unwrap();
+    assert_eq!(val.get("approved").and_then(|v| v.as_bool()), Some(true));
+}
+
+#[tokio::test]
+async fn vote_reject_without_refinement() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/tasks/task-4/vote"))
+        .and(body_partial_json(json!({"agent": "bob", "vote": "reject"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    client
+        .tasks()
+        .vote("task-4", "bob", "reject", None)
+        .await
+        .unwrap();
 }

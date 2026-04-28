@@ -1,8 +1,18 @@
 # crontab-acc.txt — CCC ops cron fragment
 # Install with:
-#   WORKSPACE=$HOME/Src/CCC LOG_DIR=$HOME/.ccc/logs
+#   WORKSPACE=$HOME/Src/ACC LOG_DIR=$HOME/.acc/logs
 #   (crontab -l 2>/dev/null; sed "s|WORKSPACE|$WORKSPACE|g; s|LOG_DIR|$LOG_DIR|g" deploy/crontab-acc.txt) | crontab -
 # Or run setup-node.sh — it installs these automatically.
+#
+# NOTE: The nightly-nap cron entry (short-term .md → holographic storage copy)
+# is NOT in this fragment — it uses a staggered per-agent UTC offset computed by
+# schedule_nap_cron.py.  setup-node.sh calls that script during bootstrap.
+# To install or verify it manually on any agent box:
+#   python3 WORKSPACE/scripts/nightly-nap/schedule_nap_cron.py --install
+#   python3 WORKSPACE/scripts/nightly-nap/schedule_nap_cron.py --list
 
 # Memory git snapshot — daily at midnight, commit MEMORY.md to git history
 0 0 * * * bash WORKSPACE/scripts/memory-git-commit.sh >> LOG_DIR/memory-commit.log 2>&1
+
+# CIFS mount health check — every 15 minutes, log to accfs-health.log
+*/15 * * * * bash WORKSPACE/scripts/cifs-mount-health.sh >> LOG_DIR/accfs-health.log 2>&1

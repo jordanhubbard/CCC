@@ -8,7 +8,7 @@
 #   make sync          # git push + broadcast rcc.update to all agents
 
 .PHONY: help deps deps-check env sync \
-        init register build build-cli install-cli test release clean \
+        init register build build-cli install-cli codesign-macos dtrace-write-probe test test-python release clean \
         docker-build docker-up docker-down docker-logs
 
 help: ## Show this help
@@ -122,9 +122,16 @@ register: ## Register this agent with the CCC hub
 
 # ── Build ──────────────────────────────────────────────────────────────────
 
-build: ## Build all Rust binaries (acc-agent, acc-server, acc CLI)
+build: ## Build all Rust binaries (acc-agent, acc-server, acc CLI) and codesign on macOS
 	@cargo build --release -p acc-agent -p acc-server
 	@bash scripts/install-acc.sh --build-only
+	@bash scripts/codesign-macos.sh
+
+codesign-macos: ## Ad-hoc codesign acc-agent with Full Disk Access entitlements (macOS only)
+	@bash scripts/codesign-macos.sh
+
+dtrace-write-probe: ## Trace EPERM write failures on acc-agent (macOS, requires sudo) — CCC-nkp investigation Step 3
+	@sudo bash scripts/dtrace-write-probe.sh
 
 # ── Restart ────────────────────────────────────────────────────────────────
 
@@ -147,6 +154,9 @@ install-cli: ## Build and install acc CLI to $$HOME/.local/bin/acc (installs Rus
 
 test: ## Run all Rust tests
 	@cargo test --workspace
+
+test-python: ## Run the Python acc-client test suite (requires pip install -e "clients/python/acc_client[test]")
+	@cd clients/python/acc_client && python -m pytest -q
 
 # ── Release ────────────────────────────────────────────────────────────────
 
@@ -176,7 +186,5 @@ docker-logs: ## Tail logs from all CCC containers
 # ── Utilities ──────────────────────────────────────────────────────────────
 
 clean: ## Remove build artifacts
-	@cargo clean --manifest-path agent/Cargo.toml
-	@cargo clean --manifest-path acc-server/Cargo.toml
-	@cargo clean --manifest-path acc-cli/Cargo.toml
+	@cargo clean
 	@echo "Cleaned build artifacts."

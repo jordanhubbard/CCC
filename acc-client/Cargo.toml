@@ -3,6 +3,7 @@ name = "acc-client"
 version = "0.1.0"
 edition = "2021"
 description = "HTTP client library for the ACC fleet API"
+readme = "README.md"
 
 [lib]
 name = "acc_client"
@@ -16,8 +17,8 @@ futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-thiserror = "1"
-async-stream = "0.3"
+thiserror.workspace = true
+async-stream.workspace = true
 bytes.workspace = true
 
 [dev-dependencies]

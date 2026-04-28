@@ -1,0 +1,22 @@
+name: acc_shared_memory
+version: 1.0.0
+description: "Stores and retrieves hermes agent memories via the ACC hub (/api/memory/*). Uses the acc_client Python package — a mirror of the Rust acc-client crate. Activate by setting memory.provider: acc_shared_memory in config.yaml and ACC_TOKEN in the environment."
+author: "NousResearch / ACC team"
+hooks: []
+tools:
+  - acc_memory_search
+  - acc_memory_store
+requires:
+  - acc-client
+config:
+  - key: ACC_TOKEN
+    description: ACC hub bearer token
+    secret: true
+    required: true
+    env_var: ACC_TOKEN
+  - key: ACC_HUB_URL
+    description: "ACC hub base URL (default: http://localhost:8789)"
+    secret: false
+    required: false
+    default: "http://localhost:8789"
+    env_var: ACC_HUB_URL

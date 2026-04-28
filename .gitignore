@@ -16,6 +16,9 @@ hermes-data/         # runtime bind-mount (sessions, config, secrets)
 
 # Sensitive / personal
 memory/
+# The hermes memory plugin source lives inside the repo and is tracked;
+# the blanket `memory/` rule above would otherwise exclude it.
+!hermes/plugins/memory/
 MEMORY.md
 USER.md
 BOOTSTRAP.md
@@ -123,9 +126,17 @@ HEARTBEAT.md
 workqueue/WORKQUEUE_AGENT_NATASHA.md
 
 # Rust build artifacts
-target/
+/target/
 **/target/
-agent/target/
+**/*.rlib
+**/*.rmeta
+**/*.rcgu.o
+**/*.d
+**/*.pdb
+
+# Incremental compilation caches (large and not useful to share)
+**/target/debug/incremental/
+**/target/release/incremental/
 __pycache__/
 
 # Dashboard / ClawChat WASM build outputs (source lives on hub, not in this repo)

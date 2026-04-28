@@ -3,6 +3,7 @@ name = "acc-model"
 version = "0.1.0"
 edition = "2021"
 description = "Shared types for the ACC server and client libraries"
+readme = "README.md"
 
 [lib]
 name = "acc_model"

@@ -38,6 +38,16 @@ pub struct HubState {
     pub task_create_status: u16,
     /// HTTP status code for PUT /api/tasks/:id/review-result (default 200)
     pub review_result_status: u16,
+    /// HTTP status code for PUT /api/tasks/:id/vote (default 200)
+    pub task_vote_status: u16,
+    /// Accumulates vote bodies from PUT /api/tasks/:id/vote — inspectable by tests
+    pub recorded_votes: Arc<Mutex<Vec<Value>>>,
+    /// Accumulates task IDs from PUT /api/tasks/:id/unclaim — inspectable by tests
+    pub recorded_unclaims: Arc<Mutex<Vec<String>>>,
+    /// Accumulates request bodies from POST /api/bus/send — inspectable by tests
+    pub recorded_bus_sends: Arc<Mutex<Vec<Value>>>,
+    /// HTTP status code for POST /api/bus/send (default 200)
+    pub bus_send_status: u16,
 }
 
 impl Default for HubState {
@@ -53,6 +63,11 @@ impl Default for HubState {
             created_tasks: Arc::new(Mutex::new(vec![])),
             task_create_status: 201,
             review_result_status: 200,
+            task_vote_status: 200,
+            recorded_votes: Arc::new(Mutex::new(vec![])),
+            recorded_unclaims: Arc::new(Mutex::new(vec![])),
+            recorded_bus_sends: Arc::new(Mutex::new(vec![])),
+            bus_send_status: 200,
         }
     }
 }
@@ -123,12 +138,15 @@ fn build_router(state: S) -> Router {
         .route("/api/tasks",                    get(task_list).post(task_create))
         .route("/api/tasks/:id/claim",          put(task_claim))
         .route("/api/tasks/:id/complete",       put(ok))
-        .route("/api/tasks/:id/unclaim",        put(ok))
+        .route("/api/tasks/:id/unclaim",        put(task_unclaim))
         .route("/api/tasks/:id/review-result",  put(task_review_result))
+        .route("/api/tasks/:id/vote",           put(task_vote))
         // User request routes (first-responder)
         .route("/api/requests/:id/claim",       post(request_claim))
         // Exec result (bus worker)
         .route("/api/exec/:id/result",          post(ok))
+        // Bus send (peer-exchange and other bus producers)
+        .route("/api/bus/send",                 post(bus_send))
         // SSE stream (bus listener)
         .route("/bus/stream",                   get(sse_stream))
         .route("/api/bus/stream",               get(sse_stream))
@@ -190,11 +208,45 @@ async fn task_review_result(State(st): State<S>, Path(_id): Path<String>) -> imp
     (sc, Json(json!({"ok": code == 200}))).into_response()
 }
 
+async fn task_vote(
+    State(st): State<S>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    // Mirror the real server contract: refinement is required for every vote,
+    // regardless of whether the vote is "approve" or "reject".
+    match body.get("refinement").and_then(|v| v.as_str()) {
+        Some(r) if !r.trim().is_empty() => {}
+        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error":"refinement required"}))).into_response(),
+    }
+
+    let (code, recorded_votes) = {
+        let s = st.read().await;
+        (s.task_vote_status, s.recorded_votes.clone())
+    };
+    let sc = StatusCode::from_u16(code).unwrap_or(StatusCode::OK);
+    let mut entry = body.clone();
+    entry["task_id"] = serde_json::Value::String(id.clone());
+    recorded_votes.lock().await.push(entry);
+    let task_stub = json!({"id": id, "task_type": "idea", "status": "open"});
+    (sc, Json(json!({"ok": code == 200, "task": task_stub}))).into_response()
+}
+
 async fn agent_names(State(st): State<S>) -> Json<Value> {
     let names: Vec<Value> = st.read().await.agent_names.iter()
         .map(|n| Value::String(n.clone()))
         .collect();
     Json(json!({"ok": true, "names": names}))
+}
+
+async fn bus_send(State(st): State<S>, Json(body): Json<Value>) -> impl IntoResponse {
+    let (code, recorded_bus_sends) = {
+        let s = st.read().await;
+        (s.bus_send_status, s.recorded_bus_sends.clone())
+    };
+    recorded_bus_sends.lock().await.push(body);
+    let sc = StatusCode::from_u16(code).unwrap_or(StatusCode::OK);
+    (sc, Json(json!({"ok": code == 200}))).into_response()
 }
 
 async fn sse_stream(State(st): State<S>) -> impl IntoResponse {
@@ -209,6 +261,11 @@ async fn task_claim(State(st): State<S>, Path(id): Path<String>) -> impl IntoRes
     (sc, Json(json!({"ok": code == 200, "task": {"id": id, "title": "mock task", "status": "claimed"}}))).into_response()
 }
 
+async fn task_unclaim(State(st): State<S>, Path(id): Path<String>) -> impl IntoResponse {
+    st.read().await.recorded_unclaims.lock().await.push(id.clone());
+    (StatusCode::OK, Json(json!({"ok": true}))).into_response()
+}
+
 async fn request_claim(State(st): State<S>, Path(id): Path<String>) -> impl IntoResponse {
     let code = st.read().await.request_claim_status;
     let sc = StatusCode::from_u16(code).unwrap_or(StatusCode::OK);
@@ -219,4 +276,104 @@ async fn request_claim(State(st): State<S>, Path(id): Path<String>) -> impl Into
         json!({"error": "already_claimed"})
     };
     (sc, Json(body)).into_response()
+}
+
+// ── Integration tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Test 1 — reject vote WITH refinement → HTTP 200 (succeeds)
+    #[tokio::test]
+    async fn test_reject_vote_with_refinement_succeeds() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .put(format!("{}/api/tasks/task-42/vote", mock.url))
+            .json(&json!({
+                "vote": "reject",
+                "refinement": "This needs a clearer acceptance criterion."
+            }))
+            .send()
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status().as_u16(), 200, "reject with refinement must return 200");
+        let body: serde_json::Value = resp.json().await.expect("body must be JSON");
+        assert_eq!(body["ok"], true, "ok field must be true");
+        // Verify the vote was recorded
+        let votes = mock.state.read().await.recorded_votes.lock().await.clone();
+        assert_eq!(votes.len(), 1, "exactly one vote should be recorded");
+        assert_eq!(votes[0]["vote"], "reject");
+        assert_eq!(votes[0]["task_id"], "task-42");
+    }
+
+    /// Test 2 — approve vote WITH refinement → HTTP 200 (succeeds)
+    #[tokio::test]
+    async fn test_approve_vote_with_refinement_succeeds() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .put(format!("{}/api/tasks/task-99/vote", mock.url))
+            .json(&json!({
+                "vote": "approve",
+                "refinement": "Looks good — ship it."
+            }))
+            .send()
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status().as_u16(), 200, "approve with refinement must return 200");
+        let body: serde_json::Value = resp.json().await.expect("body must be JSON");
+        assert_eq!(body["ok"], true, "ok field must be true");
+        // Verify the vote was recorded
+        let votes = mock.state.read().await.recorded_votes.lock().await.clone();
+        assert_eq!(votes.len(), 1, "exactly one vote should be recorded");
+        assert_eq!(votes[0]["vote"], "approve");
+        assert_eq!(votes[0]["task_id"], "task-99");
+    }
+
+    /// Test 3 — reject vote WITHOUT refinement → HTTP 400 (rejected)
+    #[tokio::test]
+    async fn test_reject_vote_without_refinement_returns_400() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .put(format!("{}/api/tasks/task-11/vote", mock.url))
+            .json(&json!({ "vote": "reject" }))
+            .send()
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status().as_u16(), 400, "reject without refinement must return 400");
+        let body: serde_json::Value = resp.json().await.expect("body must be JSON");
+        assert!(
+            body["error"].as_str().map(|e| e.contains("refinement")).unwrap_or(false),
+            "error message should mention refinement"
+        );
+        // No vote should have been recorded
+        let votes = mock.state.read().await.recorded_votes.lock().await.clone();
+        assert!(votes.is_empty(), "no vote should be recorded when refinement is missing");
+    }
+
+    /// Test 4 — approve vote WITHOUT refinement → HTTP 400 (rejected)
+    #[tokio::test]
+    async fn test_approve_vote_without_refinement_returns_400() {
+        let mock = HubMock::new().await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .put(format!("{}/api/tasks/task-22/vote", mock.url))
+            .json(&json!({ "vote": "approve" }))
+            .send()
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status().as_u16(), 400, "approve without refinement must return 400");
+        let body: serde_json::Value = resp.json().await.expect("body must be JSON");
+        assert!(
+            body["error"].as_str().map(|e| e.contains("refinement")).unwrap_or(false),
+            "error message should mention refinement"
+        );
+        // No vote should have been recorded
+        let votes = mock.state.read().await.recorded_votes.lock().await.clone();
+        assert!(votes.is_empty(), "no vote should be recorded when refinement is missing");
+    }
 }

@@ -58,4 +58,19 @@ def test_base_url_strips_trailing_slash():
 def test_base_url_default(monkeypatch):
     monkeypatch.delenv("ACC_URL", raising=False)
     monkeypatch.delenv("CCC_URL", raising=False)
+    monkeypatch.delenv("ACC_HUB_URL", raising=False)
     assert resolve_base_url() == "http://localhost:8789"
+
+
+def test_acc_hub_url_beats_acc_url(monkeypatch):
+    """ACC_HUB_URL has higher precedence than ACC_URL (mirrors Rust acc-client)."""
+    monkeypatch.setenv("ACC_HUB_URL", "http://hub-url")
+    monkeypatch.setenv("ACC_URL", "http://acc-url")
+    assert resolve_base_url() == "http://hub-url"
+
+
+def test_acc_url_beats_ccc_url(monkeypatch):
+    monkeypatch.delenv("ACC_HUB_URL", raising=False)
+    monkeypatch.setenv("ACC_URL", "http://acc-url")
+    monkeypatch.setenv("CCC_URL", "http://ccc-url")
+    assert resolve_base_url() == "http://acc-url"

@@ -155,6 +155,13 @@ pub struct ReviewResultRequest {
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Set to `true` when the reviewer determines that the worker's
+    /// `work_output_summary` describes functions, types, or changes that do
+    /// not exist in the actual diff — i.e. the summary is fabricated.
+    /// The server records this flag in the work task's metadata so that
+    /// upstream analytics can penalise the submitting agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_hallucination: Option<bool>,
 }
 
 #[cfg(test)]

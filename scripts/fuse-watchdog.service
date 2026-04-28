@@ -1,0 +1,20 @@
+[Unit]
+Description=FUSE filesystem watchdog — monitor and recover stale FUSE mounts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=FUSE_CONN_DIR=/sys/fs/fuse/connections
+Environment=FUSE_WAITING_THRESHOLD=16
+Environment=FUSE_POLL_INTERVAL=5
+Environment=DRY_RUN=false
+ExecStart=/bin/bash /usr/local/share/acc/scripts/fuse-watchdog
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fuse-watchdog
+
+[Install]
+WantedBy=multi-user.target

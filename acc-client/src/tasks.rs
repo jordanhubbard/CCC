@@ -106,11 +106,13 @@ impl<'a> TasksApi<'a> {
         result: ReviewResult,
         agent: Option<&str>,
         notes: Option<&str>,
+        summary_hallucination: Option<bool>,
     ) -> Result<()> {
         let body = ReviewResultRequest {
             result,
             agent: agent.map(str::to_string),
             notes: notes.map(str::to_string),
+            summary_hallucination,
         };
         let resp = self
             .client
@@ -120,6 +122,43 @@ impl<'a> TasksApi<'a> {
             .send()
             .await?;
         check_ok(resp).await
+    }
+
+    /// PUT /api/tasks/{id}/vote — cast an idea-review vote (approve or reject).
+    ///
+    /// `vote` must be `"approve"` or `"reject"`.
+    /// ALL votes MUST carry a non-empty `refinement` (the server enforces this
+    /// for both approve and reject; the client passes it through).
+    pub async fn vote(
+        self,
+        id: &str,
+        agent: &str,
+        vote: &str,
+        refinement: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let mut body = serde_json::json!({
+            "agent": agent,
+            "vote":  vote,
+        });
+        if let Some(r) = refinement {
+            body["refinement"] = serde_json::Value::String(r.to_string());
+        }
+        let resp = self
+            .client
+            .http()
+            .put(self.client.url(&format!("/api/tasks/{id}/vote")))
+            .json(&body)
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await?;
+        if !(200..300).contains(&status) {
+            return Err(Error::from_response(status, &bytes));
+        }
+        if bytes.is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        Ok(serde_json::from_slice(&bytes)?)
     }
 
     /// DELETE /api/tasks/{id} — cancel/abort.

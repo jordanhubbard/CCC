@@ -1,3 +1,4 @@
+pub mod blob_store;
 pub mod brain;
 pub mod bus_types;
 pub mod config;
@@ -26,6 +27,7 @@ pub fn build_app(state: Arc<AppState>) -> Router {
         .merge(routes::agents::router())
         .merge(routes::secrets::router())
         .merge(routes::bus::router())
+        .merge(routes::blobs::router(state.fs_root.clone()))
         .merge(routes::projects::router())
         .merge(routes::tasks::router())
         .merge(routes::brain::router())

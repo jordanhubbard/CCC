@@ -6,6 +6,133 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **acc-agent lib+bin split** — `acc-agent` was converted from a pure binary
+  crate to a lib+bin crate to make its modules testable in isolation and
+  consumable by integration-test harnesses without spawning a subprocess:
+  - `agent/acc-agent/src/lib.rs` added — re-exports every module as `pub mod`
+    so downstream test crates (and `[dev-dependencies]` in other workspace
+    members) can import `acc_agent::*` directly
+  - `agent/acc-agent/src/main.rs` rewritten — all module declarations removed;
+    `main.rs` now imports via `use acc_agent::{…}` instead of declaring modules
+    itself
+  - `agent/acc-agent/Cargo.toml` updated — explicit `[lib]` target
+    (`name = "acc_agent"`, `path = "src/lib.rs"`) and `[[bin]]` target
+    (`name = "acc-agent"`, `path = "src/main.rs"`) added so Cargo resolves both
+    outputs from the same source tree
+  - No public API change; the compiled binary (`acc-agent`) behaves identically
+    to before — only the internal crate structure changed
+  - Motivation: integration tests in `peer_exchange.rs` and `queue.rs` reference
+    `hub_mock` and other internal modules; without `lib.rs` those tests could
+    only live inside the binary crate and could not be driven from external test
+    harnesses or other workspace crates
+- **macOS TCC / Full Disk Access entitlements for acc-agent LaunchAgent**
+  (CCC-nkp — bullwinkle ~3h latency root-cause mitigation):
+  - `deploy/launchd/com.acc.agent.plist` — added `NSFileSandboxEnabled =
+    false` key so the launchd-spawned process opts out of App Sandbox, plus
+    an inline comment block explaining the TCC root cause, the codesign
+    workflow, and the manual System Settings fallback
+  - `deploy/launchd/acc-agent.entitlements` (new file) — XML entitlements
+    file with `com.apple.security.app-sandbox = false` and
+    `com.apple.security.files.all = true` (Full Disk Access); sign with
+    `codesign --force --deep --sign - --entitlements
+    deploy/launchd/acc-agent.entitlements ~/.acc/bin/acc-agent` after each
+    binary update to grant FDA at the binary level without requiring a human
+    to re-click System Settings → Privacy & Security → Full Disk Access
+    (the manual step that was missing when bullwinkle hit the ~184-min CCC-c41
+    EPERM retry storm)
+  - `docs/macos-agent-latency-investigation.md` — status updated to reflect
+    plist entitlements applied; "Already Applied" mitigations table extended
+    with the two new entries; "Actionable (Pending)" table revised; Next Steps
+    item 3 marked done; Open Question 2 answered
+- **macOS agent latency investigation** (`docs/macos-agent-latency-investigation.md`):
+  bullwinkle (CCC-c41) took ~184 minutes for a one-line README append that
+  rocky completes in 2–5 minutes; investigation document enumerates four
+  ranked hypotheses (TCC-blocked `str_replace_editor`, bash subprocess TCC,
+  LLM workaround discovery, slow API round-trips), prescribes concrete
+  investigation steps (DTrace probe, TCC database check, turn-by-turn log
+  tailing), and lists actionable mitigations including FDA grant, entitlement
+  plist update, and macOS-native workspace path fallback.
+- **SDK per-turn tracing and tool-error accounting** (`agent/acc-agent/src/sdk.rs`):
+  every turn now emits `[sdk] turn N api=Xms tools=[name=OK/ERR(ms:snippet)]
+  errors_so_far=N` via `eprintln!`; `total_tool_errors` is tracked across the
+  run and logged at completion; error output is truncated to 140 chars so
+  EPERM retry storms (the suspected root cause of the c41 slowdown) are
+  immediately visible at a glance in the agent log without flooding it
+  (CCC-nkp).
+- **Peer test-exchange protocol** — cross-agent test-challenge/submit handshake
+  for fleet health verification:
+  - **Agent side** (`agent/acc-agent/src/peer_exchange.rs`):
+    - `agent.test_challenge` bus message — initiator sends a `TestSuite`
+      (ordered `TestCase` list with shell command, expected exit-code, and
+      optional stdout-substring check) to a target agent
+    - `agent.test_submit` bus message — target returns one `TestReport` per
+      test case (pass/fail, actual exit-code, captured stdout/stderr)
+    - `PeerExchangeCoordinator` — owns the in-memory rate-limit table
+      (one challenge per agent pair per hour, symmetric pair key); delegates
+      to injected `TestGenerator` / `TestRunner` traits for flexibility
+    - `AgentAction` — post-tally decision: `LogPassSummary` when failure rate
+      ≤ threshold (default 30 %, overridable via `ACC_TEST_FAILURE_THRESHOLD`)
+      or `GoOfflineAndFix` with failed test IDs when the threshold is exceeded
+    - 17 unit tests covering pair-key symmetry, rate-limit guard, initiation
+      errors (`EmptySuite`, `NoPeerAvailable`, `RateLimited`), execution
+      delegation, `AgentAction` boundary conditions, and `Arc`-sharing
+  - **Server side** (`acc-server/src/routes/peer_exchange.rs`):
+    - `POST /api/peer-exchange/initiate` — agent A opens a session; returns a
+      single-use `exchange_id`, a server-generated nonce, and an expiry
+      timestamp (sessions expire after 600 s)
+    - `POST /api/peer-exchange/execute` — agent B completes the exchange by
+      echoing the nonce; returns the initiator's `public_payload`; second call
+      returns 409 Conflict (sessions are single-use)
+    - `GET /api/peer-exchange/rate-limit/:agent_a/:agent_b` — exposes current
+      failure-count and `rate_limited` flag for the directed pair so agents
+      can implement cooperative back-off before attempting a challenge
+    - Per-directed-pair failure-rate tracking with a 5-failure/300 s sliding
+      window; exceeding the threshold returns 429 with `retry_after_secs`
+    - All three endpoints require bearer-token auth; missing/invalid token
+      returns 401
+    - 9 integration tests covering success paths, nonce mismatch (403),
+      already-completed (409), unknown session (404), fresh pair rate-limit
+      (200, `failure_count: 0`), rate-limit escalation (429), and
+      unauthenticated access (401 on all three endpoints)
+- **Slack fleet reporter** (`agent/acc-agent/src/slack.rs`) — lightweight
+  best-effort progress feed posted via the Slack Bot API (`chat.postMessage`):
+  - `notify_claimed` — posts `:inbox_tray: *<agent>* claimed: <title>` when an
+    agent successfully claims a task
+  - `notify_completed` — posts `:white_check_mark: *<agent>* completed: <title>`
+    after `complete_task` returns
+  - Fire-and-forget (8 s timeout); errors are `tracing::warn`-logged and swallowed
+    so the critical claim path is never blocked
+  - Configuration (all optional — missing → silent no-op):
+    - `SLACK_BOT_TOKEN` (`xoxb-…`) — required to post; absent → no-op
+    - `SLACK_FLEET_CHANNEL` — channel ID/name (default `fleet-activity`)
+    - `ACC_URL` — hub base URL used to build per-task deep-links
+  - Module declared in `agent/acc-agent/src/lib.rs` (crate is now lib+bin;
+    see the *acc-agent lib+bin split* entry below for context)
+  - 12 unit tests cover `trunc`, `task_link`, `bot_token`, `channel`, and
+    async no-op guards
+- **Epic: shared ACC client libraries (Rust + Python)** — eliminates HTTP-client
+  drift between `acc-cli`, `acc-agent`, and the hermes `acc_shared_memory` plugin:
+  - `acc-model` crate — canonical wire types shared by server and all clients:
+    `Task`, `TaskStatus`, `TaskType`, `ReviewResult`, `BusMsg`, `BusSendRequest`,
+    `Agent`, `Project`, `QueueItem`, `MemorySearchRequest`, `MemoryHit`, etc.
+  - `acc-client` crate — async Rust HTTP client with typed sub-APIs for tasks,
+    projects, agents, queue, items, bus (incl. SSE stream), and memory; used by
+    both `acc-cli` and `acc-agent`
+  - Python `acc-client` package at `clients/python/acc_client/` — synchronous
+    `httpx`-based client mirroring the Rust crate shape; used by the hermes
+    `acc_shared_memory` plugin
+  - SSE bus streaming included in v1 in both Rust (`acc_client::bus::BusApi::stream`)
+    and Python (`Client.bus.stream()`)
+  - Cargo workspace at repo root unifies `acc-cli`, `acc-server`, `agent/acc-agent`,
+    `acc-model`, and `acc-client` under a single `Cargo.toml`
+  - `thiserror` and `async-stream` promoted to workspace-level dependencies
+  - Python `_auth.py`: `ACC_HUB_URL` env var added at highest precedence (matching
+    the Rust `Client::from_env()` behavior); `CCC_AGENT_TOKEN` legacy fallback
+    retained
+  - Python `bus.send()`: `from_` kwarg now correctly remapped to `"from"` on the
+    wire (prevents spurious `from_` key in JSON body)
+  - `acc-model/README.md` and `acc-client/README.md` added
+- external contributor test issue — verified two-way sync pipeline end-to-end: GitHub issue dispatched to coding agent, changes committed and synced back through Beads
 - probe suite: Probe 8 — GitHub ↔ Beads two-way sync tests (#12, ACC-4fi)
   - `test_sync_state_endpoint_reachable` — verifies `/api/github-sync/state` is live
   - `test_github_issues_endpoint_readable` — hub-proxied `/api/issues` returns data
