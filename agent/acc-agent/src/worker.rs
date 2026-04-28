@@ -13,8 +13,12 @@
 #[allow(dead_code)]
 pub trait Worker: Send + Sync {
     fn name(&self) -> &'static str;
-    fn capabilities(&self) -> Vec<String> { vec![] }
-    fn enabled(&self) -> bool { true }
+    fn capabilities(&self) -> Vec<String> {
+        vec![]
+    }
+    fn enabled(&self) -> bool {
+        true
+    }
 }
 
 // ── Concrete worker types ─────────────────────────────────────────────────────
@@ -28,56 +32,76 @@ pub struct GatewayOfterraWorker;
 pub struct ProxyWorker;
 
 impl Worker for BusWorker {
-    fn name(&self) -> &'static str { "bus" }
+    fn name(&self) -> &'static str {
+        "bus"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["bus".into(), "event-relay".into()]
     }
 }
 
 impl Worker for QueueWorker {
-    fn name(&self) -> &'static str { "queue" }
+    fn name(&self) -> &'static str {
+        "queue"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["queue".into(), "task-dispatch".into()]
     }
 }
 
 impl Worker for TasksWorker {
-    fn name(&self) -> &'static str { "tasks" }
+    fn name(&self) -> &'static str {
+        "tasks"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["tasks".into(), "bash".into(), "git".into()]
     }
 }
 
 impl Worker for HermesWorker {
-    fn name(&self) -> &'static str { "hermes" }
+    fn name(&self) -> &'static str {
+        "hermes"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["hermes".into(), "llm".into()]
     }
 }
 
 impl Worker for GatewayWorker {
-    fn name(&self) -> &'static str { "gateway" }
+    fn name(&self) -> &'static str {
+        "gateway"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["slack".into(), "telegram".into(), "chat".into()]
     }
     fn enabled(&self) -> bool {
-        std::env::var("SLACK_APP_TOKEN").map(|t| t.starts_with("xapp-")).unwrap_or(false)
-            || std::env::var("TELEGRAM_BOT_TOKEN").map(|t| !t.is_empty()).unwrap_or(false)
+        std::env::var("SLACK_APP_TOKEN")
+            .map(|t| t.starts_with("xapp-"))
+            .unwrap_or(false)
+            || std::env::var("TELEGRAM_BOT_TOKEN")
+                .map(|t| !t.is_empty())
+                .unwrap_or(false)
     }
 }
 
 impl Worker for GatewayOfterraWorker {
-    fn name(&self) -> &'static str { "gateway-ofterra" }
+    fn name(&self) -> &'static str {
+        "gateway-ofterra"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["slack-ofterra".into(), "chat-ofterra".into()]
     }
     fn enabled(&self) -> bool {
-        std::env::var("SLACK_APP_TOKEN_OFTERRA").map(|t| t.starts_with("xapp-")).unwrap_or(false)
+        std::env::var("SLACK_APP_TOKEN_OFTERRA")
+            .map(|t| t.starts_with("xapp-"))
+            .unwrap_or(false)
     }
 }
 
 impl Worker for ProxyWorker {
-    fn name(&self) -> &'static str { "proxy" }
+    fn name(&self) -> &'static str {
+        "proxy"
+    }
     fn capabilities(&self) -> Vec<String> {
         vec!["nvidia-proxy".into(), "llm-proxy".into()]
     }
@@ -119,7 +143,11 @@ mod tests {
         let workers = all_workers();
         let mut names = std::collections::HashSet::new();
         for w in &workers {
-            assert!(names.insert(w.name()), "duplicate worker name: {}", w.name());
+            assert!(
+                names.insert(w.name()),
+                "duplicate worker name: {}",
+                w.name()
+            );
         }
     }
 
@@ -127,6 +155,10 @@ mod tests {
     fn enabled_capabilities_deduplicates() {
         let caps = enabled_capabilities();
         let unique: std::collections::HashSet<_> = caps.iter().collect();
-        assert_eq!(caps.len(), unique.len(), "capabilities must be deduplicated");
+        assert_eq!(
+            caps.len(),
+            unique.len(),
+            "capabilities must be deduplicated"
+        );
     }
 }

@@ -10,7 +10,11 @@ pub struct ConversationHistory {
 
 impl ConversationHistory {
     pub fn new() -> Self {
-        Self { messages: Vec::new(), input_tokens: 0, output_tokens: 0 }
+        Self {
+            messages: Vec::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+        }
     }
 
     pub fn push_user_text(&mut self, text: &str) {
@@ -146,8 +150,12 @@ mod tests {
     fn push_sequence_builds_correct_alternation() {
         let mut h = ConversationHistory::new();
         h.push_user_text("do something");
-        h.push_assistant_content(vec![json!({"type":"tool_use","id":"t1","name":"bash","input":{"command":"echo hi"}})]);
-        h.push_tool_results(vec![json!({"type":"tool_result","tool_use_id":"t1","content":"hi\n"})]);
+        h.push_assistant_content(vec![
+            json!({"type":"tool_use","id":"t1","name":"bash","input":{"command":"echo hi"}}),
+        ]);
+        h.push_tool_results(vec![
+            json!({"type":"tool_result","tool_use_id":"t1","content":"hi\n"}),
+        ]);
         h.push_assistant_content(vec![json!({"type":"text","text":"done"})]);
         assert_eq!(h.messages.len(), 4);
         assert_eq!(h.messages[0]["role"], "user");

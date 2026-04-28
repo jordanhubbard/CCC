@@ -16,34 +16,34 @@ async fn test_list_providers_no_auth_required() {
 #[tokio::test]
 async fn test_list_providers_returns_providers_array() {
     let ts = helpers::TestServer::new().await;
-    let body = helpers::body_json(
-        helpers::call(&ts.app, helpers::get("/api/providers")).await,
-    ).await;
-    assert!(body["providers"].is_array(), "response must have providers array");
+    let body =
+        helpers::body_json(helpers::call(&ts.app, helpers::get("/api/providers")).await).await;
+    assert!(
+        body["providers"].is_array(),
+        "response must have providers array"
+    );
     assert!(!body["providers"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn test_list_providers_each_has_required_fields() {
     let ts = helpers::TestServer::new().await;
-    let body = helpers::body_json(
-        helpers::call(&ts.app, helpers::get("/api/providers")).await,
-    ).await;
+    let body =
+        helpers::body_json(helpers::call(&ts.app, helpers::get("/api/providers")).await).await;
     for p in body["providers"].as_array().unwrap() {
-        assert!(p["id"].is_string(),      "provider must have id");
-        assert!(p["kind"].is_string(),    "provider must have kind");
-        assert!(p["label"].is_string(),   "provider must have label");
-        assert!(p["status"].is_string(),  "provider must have status");
-        assert!(p["enabled"].is_boolean(),"provider must have enabled flag");
+        assert!(p["id"].is_string(), "provider must have id");
+        assert!(p["kind"].is_string(), "provider must have kind");
+        assert!(p["label"].is_string(), "provider must have label");
+        assert!(p["status"].is_string(), "provider must have status");
+        assert!(p["enabled"].is_boolean(), "provider must have enabled flag");
     }
 }
 
 #[tokio::test]
 async fn test_list_providers_returns_infrastructure() {
     let ts = helpers::TestServer::new().await;
-    let body = helpers::body_json(
-        helpers::call(&ts.app, helpers::get("/api/providers")).await,
-    ).await;
+    let body =
+        helpers::body_json(helpers::call(&ts.app, helpers::get("/api/providers")).await).await;
     let providers = body["providers"].as_array().unwrap();
     assert!(
         providers.iter().any(|p| p["id"] == "qdrant"),
@@ -59,9 +59,8 @@ async fn test_list_providers_returns_infrastructure() {
 async fn test_supervisor_disabled_when_none() {
     // TestServer sets supervisor = None → supervisor provider shows status:"disabled", enabled:false.
     let ts = helpers::TestServer::new().await;
-    let body = helpers::body_json(
-        helpers::call(&ts.app, helpers::get("/api/providers")).await,
-    ).await;
+    let body =
+        helpers::body_json(helpers::call(&ts.app, helpers::get("/api/providers")).await).await;
     let supervisor = body["providers"]
         .as_array()
         .unwrap()
@@ -80,7 +79,11 @@ async fn test_list_models_no_auth_required() {
     let ts = helpers::TestServer::new().await;
     // Any non-4xx response is acceptable; tokenhub is offline so we expect 503.
     let resp = helpers::call(&ts.app, helpers::get("/api/providers/models")).await;
-    assert_ne!(resp.status().as_u16() / 100, 4, "should not be a 4xx — auth is not required");
+    assert_ne!(
+        resp.status().as_u16() / 100,
+        4,
+        "should not be a 4xx — auth is not required"
+    );
 }
 
 #[tokio::test]

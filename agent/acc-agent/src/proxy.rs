@@ -25,7 +25,12 @@ use http_body_util::BodyExt;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-const STRIP_HEADERS: &[&str] = &["anthropic-beta", "host", "content-length", "transfer-encoding"];
+const STRIP_HEADERS: &[&str] = &[
+    "anthropic-beta",
+    "host",
+    "content-length",
+    "transfer-encoding",
+];
 
 #[derive(Clone)]
 struct ProxyState {
@@ -34,9 +39,7 @@ struct ProxyState {
 }
 
 pub async fn run(args: &[String]) {
-    crate::config::load_env_file(
-        &crate::config::acc_dir().join(".env"),
-    );
+    crate::config::load_env_file(&crate::config::acc_dir().join(".env"));
 
     let mut port: u16 = 9099;
     let mut upstream = std::env::var("NVIDIA_API_BASE")
@@ -63,7 +66,10 @@ pub async fn run(args: &[String]) {
     }
 
     // ACC_PROXY_PORT env var overrides CLI default (set in .env for port conflicts)
-    if let Some(env_port) = std::env::var("ACC_PROXY_PORT").ok().and_then(|v| v.parse().ok()) {
+    if let Some(env_port) = std::env::var("ACC_PROXY_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
         port = env_port;
     }
 
@@ -74,7 +80,10 @@ pub async fn run(args: &[String]) {
         .build()
         .expect("failed to build proxy client");
 
-    let state = ProxyState { client, upstream: upstream.clone() };
+    let state = ProxyState {
+        client,
+        upstream: upstream.clone(),
+    };
 
     let app = Router::new()
         .route("/", any(proxy_handler))
@@ -161,9 +170,19 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request) -> Respons
 
     let mut resp = Response::builder().status(status);
     for (name, value) in resp_headers.iter() {
-        const HOP: &[&str] = &["connection", "keep-alive", "transfer-encoding", "te",
-                                "trailer", "upgrade", "proxy-authorization", "proxy-authenticate"];
-        if HOP.contains(&name.as_str()) { continue; }
+        const HOP: &[&str] = &[
+            "connection",
+            "keep-alive",
+            "transfer-encoding",
+            "te",
+            "trailer",
+            "upgrade",
+            "proxy-authorization",
+            "proxy-authenticate",
+        ];
+        if HOP.contains(&name.as_str()) {
+            continue;
+        }
         resp = resp.header(name.as_str(), value.as_bytes());
     }
 
@@ -201,7 +220,9 @@ fn sanitize_body(body: Bytes) -> Bytes {
     // Step 2: inject synthetic tool_results for any orphaned tool_use blocks
     let injected = inject_missing_tool_results(messages);
     if injected > 0 {
-        eprintln!("[proxy] injected {injected} synthetic tool_result(s) for orphaned tool_use blocks");
+        eprintln!(
+            "[proxy] injected {injected} synthetic tool_result(s) for orphaned tool_use blocks"
+        );
     }
 
     if normalized == 0 && injected == 0 {
@@ -244,9 +265,17 @@ fn normalize_openai_tool_calls(messages: &mut Vec<Value>) -> usize {
         }
 
         for tc in &tool_calls {
-            let id   = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let name = tc.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
-            let args = tc.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}");
+            let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let name = tc
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            let args = tc
+                .get("function")
+                .and_then(|f| f.get("arguments"))
+                .and_then(|a| a.as_str())
+                .unwrap_or("{}");
             let input: Value = serde_json::from_str(args).unwrap_or(json!({}));
             content_blocks.push(json!({
                 "type":  "tool_use",
@@ -334,7 +363,12 @@ fn collect_tool_use_ids(msg: &Value) -> Vec<String> {
     content
         .iter()
         .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
-        .filter_map(|block| block.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
+        .filter_map(|block| {
+            block
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(|s| s.to_string())
+        })
         .collect()
 }
 
@@ -403,17 +437,15 @@ mod tests {
 
     #[test]
     fn test_normalize_preserves_text_content() {
-        let mut msgs = vec![
-            json!({
-                "role": "assistant",
-                "content": "I'll run that for you.",
-                "tool_calls": [{
-                    "id": "tu_1",
-                    "type": "function",
-                    "function": {"name": "bash", "arguments": "{}"}
-                }]
-            }),
-        ];
+        let mut msgs = vec![json!({
+            "role": "assistant",
+            "content": "I'll run that for you.",
+            "tool_calls": [{
+                "id": "tu_1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": "{}"}
+            }]
+        })];
         normalize_openai_tool_calls(&mut msgs);
         let content = msgs[0]["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
@@ -423,11 +455,9 @@ mod tests {
 
     #[test]
     fn test_normalize_skips_native_anthropic() {
-        let mut msgs = vec![
-            json!({"role": "assistant", "content": [
-                {"type": "tool_use", "id": "tu_1", "name": "bash", "input": {}}
-            ]}),
-        ];
+        let mut msgs = vec![json!({"role": "assistant", "content": [
+            {"type": "tool_use", "id": "tu_1", "name": "bash", "input": {}}
+        ]})];
         assert_eq!(normalize_openai_tool_calls(&mut msgs), 0);
     }
 

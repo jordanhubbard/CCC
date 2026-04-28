@@ -101,7 +101,8 @@ async fn bus_send(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({"error":"unknown_media_type","mime":mime_str,
                             "known_types":crate::bus_types::MediaType::all_known()})),
-            ).into_response();
+            )
+                .into_response();
         }
         if mime.is_binary() {
             let enc = body.get("enc").and_then(|v| v.as_str()).unwrap_or("");
@@ -109,7 +110,8 @@ async fn bus_send(
                 return (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     Json(json!({"error":"binary_type_requires_base64_enc","mime":mime_str})),
-                ).into_response();
+                )
+                    .into_response();
             }
         }
     }
@@ -120,7 +122,8 @@ async fn bus_send(
     let mut msg = body;
     if let Some(obj) = msg.as_object_mut() {
         // Assign stable id if not provided by the sender
-        obj.entry("id").or_insert_with(|| json!(format!("msg-{}", seq)));
+        obj.entry("id")
+            .or_insert_with(|| json!(format!("msg-{}", seq)));
         obj.insert("seq".into(), json!(seq));
         obj.insert("ts".into(), json!(now));
     }
@@ -141,7 +144,11 @@ async fn bus_messages(
     Query(q): Query<BusQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let limit = q.limit.unwrap_or(500).min(2000);
     let msgs = load_bus_messages(&state.bus_log_path, limit, &q).await;
@@ -154,12 +161,13 @@ async fn bus_messages(
 
 // ── GET /bus/presence ─────────────────────────────────────────────────────────
 
-async fn bus_presence(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn bus_presence(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let agents = state.agents.read().await;
     let now = chrono::Utc::now();
@@ -167,17 +175,21 @@ async fn bus_presence(
     let mut presence = serde_json::Map::new();
     if let Some(obj) = agents.as_object() {
         for (name, agent) in obj {
-            let last_seen_str = agent.get("last_seen")
+            let last_seen_str = agent
+                .get("last_seen")
                 .or_else(|| agent.get("lastSeen"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let online = chrono::DateTime::parse_from_rfc3339(last_seen_str)
                 .map(|dt| (now - dt.with_timezone(&chrono::Utc)).num_seconds() < 600)
                 .unwrap_or(false);
-            presence.insert(name.clone(), json!({
-                "status": if online { "online" } else { "offline" },
-                "last_seen": last_seen_str,
-            }));
+            presence.insert(
+                name.clone(),
+                json!({
+                    "status": if online { "online" } else { "offline" },
+                    "last_seen": last_seen_str,
+                }),
+            );
         }
     }
     Json(Value::Object(presence)).into_response()
@@ -193,7 +205,9 @@ async fn bus_presence(
 /// msg-id collisions with existing log entries every restart and made
 /// "newest seq" a meaningless ordering signal.
 pub fn initial_bus_seq(path: &str) -> u64 {
-    let Ok(content) = std::fs::read_to_string(path) else { return 0 };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return 0;
+    };
     for line in content.lines().rev() {
         if let Ok(v) = serde_json::from_str::<Value>(line) {
             if let Some(seq) = v.get("seq").and_then(|s| s.as_u64()) {
@@ -223,7 +237,9 @@ async fn load_bus_messages(path: &str, limit: usize, q: &BusQuery) -> Vec<String
         .filter(|l| !l.trim().is_empty())
         .rev()
         .filter(|line| {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                return false;
+            };
 
             if let Some(subj) = &q.subject {
                 if v.get("subject").and_then(|s| s.as_str()) != Some(subj.as_str()) {

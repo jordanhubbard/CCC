@@ -41,12 +41,16 @@ async fn valid_token_allows_access() {
     // Use a write-gated endpoint with valid token
     let resp = helpers::call(
         &srv.app,
-        helpers::post_json("/api/queue", &json!({
-            "title": "auth-test-item",
-            "description": "testing auth grants access",
-            "_skip_dedup": true,
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/queue",
+            &json!({
+                "title": "auth-test-item",
+                "description": "testing auth grants access",
+                "_skip_dedup": true,
+            }),
+        ),
+    )
+    .await;
     // POST /api/queue returns 201 CREATED
     assert_eq!(resp.status(), StatusCode::CREATED);
 }

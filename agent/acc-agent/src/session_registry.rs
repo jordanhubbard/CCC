@@ -53,7 +53,10 @@ impl SessionRegistry {
     async fn refresh_if_stale(&self, cfg: &Config) {
         let stale = {
             let state = self.state.read().await;
-            state.last_refresh.map(|t| t.elapsed() > Duration::from_secs(30)).unwrap_or(true)
+            state
+                .last_refresh
+                .map(|t| t.elapsed() > Duration::from_secs(30))
+                .unwrap_or(true)
         };
         if stale {
             self.refresh(cfg).await;
@@ -172,7 +175,12 @@ fn available_memory_mb() -> Option<u64> {
         let mut free_pages = 0u64;
         for line in stdout.lines() {
             if line.starts_with("Pages free:") || line.starts_with("Pages speculative:") {
-                let value = line.split(':').nth(1)?.trim().trim_end_matches('.').replace('.', "");
+                let value = line
+                    .split(':')
+                    .nth(1)?
+                    .trim()
+                    .trim_end_matches('.')
+                    .replace('.', "");
                 free_pages += value.parse::<u64>().ok()?;
             }
         }
@@ -211,7 +219,14 @@ mod tests {
             ssh_host: "host".into(),
             ssh_port: 22,
         };
-        let capacity = build_capacity(&cfg, &[session("a", "busy"), session("b", "dead"), session("c", "idle")]);
+        let capacity = build_capacity(
+            &cfg,
+            &[
+                session("a", "busy"),
+                session("b", "dead"),
+                session("c", "idle"),
+            ],
+        );
         assert_eq!(capacity.max_sessions, Some(3));
         assert_eq!(capacity.free_session_slots, Some(1));
         std::env::remove_var("ACC_MAX_CLI_SESSIONS");

@@ -16,12 +16,12 @@ use serde_json::Value;
 #[derive(Debug, Deserialize, Clone)]
 pub struct ParamDef {
     #[serde(rename = "type")]
-    pub param_type: String,        // "string" | "integer" | "boolean" | "enum"
+    pub param_type: String, // "string" | "integer" | "boolean" | "enum"
     pub min: Option<i64>,
     pub max: Option<i64>,
     pub max_len: Option<usize>,
-    pub pattern: Option<String>,   // prefix:<p> | suffix:<s> | contains:<c> | literal
-    pub values: Option<Vec<String>>,  // for enum
+    pub pattern: Option<String>, // prefix:<p> | suffix:<s> | contains:<c> | literal
+    pub values: Option<Vec<String>>, // for enum
     pub default: Option<Value>,
 }
 
@@ -98,7 +98,9 @@ pub async fn execute(
     for (pname, pdef) in &cmd.params {
         let raw_val = params.get(pname).or(pdef.default.as_ref());
         match validate_param(pname, pdef, raw_val) {
-            Ok(s) => { resolved.insert(pname.clone(), s); }
+            Ok(s) => {
+                resolved.insert(pname.clone(), s);
+            }
             Err(e) => return (format!("param error: {e}"), 1),
         }
     }
@@ -143,7 +145,9 @@ fn validate_param(name: &str, def: &ParamDef, val: Option<&Value>) -> Result<Str
 
     match def.param_type.as_str() {
         "string" => {
-            let s = val.as_str().ok_or_else(|| format!("'{name}' must be a string"))?;
+            let s = val
+                .as_str()
+                .ok_or_else(|| format!("'{name}' must be a string"))?;
             if let Some(max_len) = def.max_len {
                 if s.len() > max_len {
                     return Err(format!("'{name}' length {} exceeds max {max_len}", s.len()));
@@ -157,17 +161,31 @@ fn validate_param(name: &str, def: &ParamDef, val: Option<&Value>) -> Result<Str
             Ok(s.to_string())
         }
         "integer" => {
-            let n = val.as_i64().ok_or_else(|| format!("'{name}' must be an integer"))?;
-            if let Some(min) = def.min { if n < min { return Err(format!("'{name}' is {n}, min is {min}")); } }
-            if let Some(max) = def.max { if n > max { return Err(format!("'{name}' is {n}, max is {max}")); } }
+            let n = val
+                .as_i64()
+                .ok_or_else(|| format!("'{name}' must be an integer"))?;
+            if let Some(min) = def.min {
+                if n < min {
+                    return Err(format!("'{name}' is {n}, min is {min}"));
+                }
+            }
+            if let Some(max) = def.max {
+                if n > max {
+                    return Err(format!("'{name}' is {n}, max is {max}"));
+                }
+            }
             Ok(n.to_string())
         }
         "boolean" => {
-            let b = val.as_bool().ok_or_else(|| format!("'{name}' must be a boolean"))?;
+            let b = val
+                .as_bool()
+                .ok_or_else(|| format!("'{name}' must be a boolean"))?;
             Ok(b.to_string())
         }
         "enum" => {
-            let s = val.as_str().ok_or_else(|| format!("'{name}' must be a string"))?;
+            let s = val
+                .as_str()
+                .ok_or_else(|| format!("'{name}' must be a string"))?;
             let allowed = def.values.as_deref().unwrap_or(&[]);
             if !allowed.iter().any(|v| v == s) {
                 return Err(format!("'{name}' must be one of: {}", allowed.join(", ")));
@@ -193,7 +211,11 @@ fn pattern_match(s: &str, pattern: &str) -> bool {
 }
 
 fn platform_name() -> &'static str {
-    if cfg!(target_os = "linux") { "linux" } else { "macos" }
+    if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "macos"
+    }
 }
 
 #[cfg(test)]
@@ -212,25 +234,31 @@ mod tests {
 
     #[test]
     fn test_registry_find() {
-        let reg = make_registry(vec![
-            CommandDef {
-                name: "ping".into(),
-                description: None,
-                program: "echo".into(),
-                args: vec!["pong".into()],
-                params: HashMap::new(),
-                platforms: None,
-                timeout_secs: None,
-                working_dir: None,
-            },
-        ]);
+        let reg = make_registry(vec![CommandDef {
+            name: "ping".into(),
+            description: None,
+            program: "echo".into(),
+            args: vec!["pong".into()],
+            params: HashMap::new(),
+            platforms: None,
+            timeout_secs: None,
+            working_dir: None,
+        }]);
         assert!(reg.find("ping").is_some());
         assert!(reg.find("missing").is_none());
     }
 
     #[test]
     fn test_validate_integer_bounds() {
-        let def = ParamDef { param_type: "integer".into(), min: Some(1), max: Some(100), max_len: None, pattern: None, values: None, default: None };
+        let def = ParamDef {
+            param_type: "integer".into(),
+            min: Some(1),
+            max: Some(100),
+            max_len: None,
+            pattern: None,
+            values: None,
+            default: None,
+        };
         assert!(validate_param("n", &def, Some(&json!(50))).is_ok());
         assert!(validate_param("n", &def, Some(&json!(0))).is_err());
         assert!(validate_param("n", &def, Some(&json!(101))).is_err());
@@ -238,14 +266,30 @@ mod tests {
 
     #[test]
     fn test_validate_enum() {
-        let def = ParamDef { param_type: "enum".into(), min: None, max: None, max_len: None, pattern: None, values: Some(vec!["a".into(), "b".into()]), default: None };
+        let def = ParamDef {
+            param_type: "enum".into(),
+            min: None,
+            max: None,
+            max_len: None,
+            pattern: None,
+            values: Some(vec!["a".into(), "b".into()]),
+            default: None,
+        };
         assert!(validate_param("x", &def, Some(&json!("a"))).is_ok());
         assert!(validate_param("x", &def, Some(&json!("c"))).is_err());
     }
 
     #[test]
     fn test_validate_string_pattern() {
-        let def = ParamDef { param_type: "string".into(), min: None, max: None, max_len: None, pattern: Some("prefix:acc-".into()), values: None, default: None };
+        let def = ParamDef {
+            param_type: "string".into(),
+            min: None,
+            max: None,
+            max_len: None,
+            pattern: Some("prefix:acc-".into()),
+            values: None,
+            default: None,
+        };
         assert!(validate_param("svc", &def, Some(&json!("acc-server"))).is_ok());
         assert!(validate_param("svc", &def, Some(&json!("other"))).is_err());
     }
@@ -270,12 +314,18 @@ mod tests {
     #[tokio::test]
     async fn test_execute_param_substitution() {
         let mut params = HashMap::new();
-        params.insert("n".into(), ParamDef {
-            param_type: "integer".into(),
-            min: Some(1), max: Some(10),
-            max_len: None, pattern: None, values: None,
-            default: Some(json!(3)),
-        });
+        params.insert(
+            "n".into(),
+            ParamDef {
+                param_type: "integer".into(),
+                min: Some(1),
+                max: Some(10),
+                max_len: None,
+                pattern: None,
+                values: None,
+                default: Some(json!(3)),
+            },
+        );
         let cmd = CommandDef {
             name: "repeat".into(),
             description: None,

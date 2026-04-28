@@ -1,7 +1,7 @@
 mod helpers;
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::json;
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -54,7 +54,8 @@ async fn test_brain_request_requires_messages_field() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/brain/request", &json!({})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -63,10 +64,14 @@ async fn test_brain_request_accepted_and_queued() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        helpers::post_json("/api/brain/request", &json!({
-            "messages": [{"role": "user", "content": "hello"}]
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/brain/request",
+            &json!({
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -79,16 +84,24 @@ async fn test_brain_request_increments_queue_depth() {
     let ts = helpers::TestServer::new().await;
     helpers::call(
         &ts.app,
-        helpers::post_json("/api/brain/request", &json!({
-            "messages": [{"role": "user", "content": "task 1"}]
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/brain/request",
+            &json!({
+                "messages": [{"role": "user", "content": "task 1"}]
+            }),
+        ),
+    )
+    .await;
     helpers::call(
         &ts.app,
-        helpers::post_json("/api/brain/request", &json!({
-            "messages": [{"role": "user", "content": "task 2"}]
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/brain/request",
+            &json!({
+                "messages": [{"role": "user", "content": "task 2"}]
+            }),
+        ),
+    )
+    .await;
 
     let status_req = Request::builder()
         .method("GET")
@@ -104,12 +117,16 @@ async fn test_brain_request_with_priority() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        helpers::post_json("/api/brain/request", &json!({
-            "messages": [{"role": "user", "content": "urgent"}],
-            "priority": "high",
-            "maxTokens": 512,
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/brain/request",
+            &json!({
+                "messages": [{"role": "user", "content": "urgent"}],
+                "priority": "high",
+                "maxTokens": 512,
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     let body = helpers::body_json(resp).await;
     assert!(body["requestId"].is_string());
@@ -121,9 +138,11 @@ async fn test_brain_request_ids_are_unique() {
     let msg = json!({"messages": [{"role": "user", "content": "x"}]});
     let r1 = helpers::body_json(
         helpers::call(&ts.app, helpers::post_json("/api/brain/request", &msg)).await,
-    ).await;
+    )
+    .await;
     let r2 = helpers::body_json(
         helpers::call(&ts.app, helpers::post_json("/api/brain/request", &msg)).await,
-    ).await;
+    )
+    .await;
     assert_ne!(r1["requestId"], r2["requestId"]);
 }

@@ -1,19 +1,33 @@
 mod helpers;
-use helpers::{make_state, TestServer, body_json, call, get, post_json};
 use acc_server::build_app;
+use helpers::{body_json, call, get, make_state, post_json, TestServer};
 use serde_json::json;
 
 async fn server_with_agents() -> TestServer {
     let srv = TestServer::new().await;
     // Register two agents
-    call(&srv.app, post_json("/api/agents/register", &json!({
-        "name": "boris", "host": "boris-host.local",
-        "capabilities": ["gpu", "inference"], "token": "tok-boris"
-    }))).await;
-    call(&srv.app, post_json("/api/agents/register", &json!({
-        "name": "ollama", "host": "ollama-server.hrd.nvidia.com",
-        "capabilities": ["ollama", "general"], "token": "tok-ollama"
-    }))).await;
+    call(
+        &srv.app,
+        post_json(
+            "/api/agents/register",
+            &json!({
+                "name": "boris", "host": "boris-host.local",
+                "capabilities": ["gpu", "inference"], "token": "tok-boris"
+            }),
+        ),
+    )
+    .await;
+    call(
+        &srv.app,
+        post_json(
+            "/api/agents/register",
+            &json!({
+                "name": "ollama", "host": "ollama-server.hrd.nvidia.com",
+                "capabilities": ["ollama", "general"], "token": "tok-ollama"
+            }),
+        ),
+    )
+    .await;
     srv
 }
 
@@ -41,12 +55,15 @@ async fn test_post_soul_data_stores_and_retrieves() {
     let srv = server_with_agents().await;
 
     // Agent uploads its host data
-    let upload = post_json("/api/agents/boris/soul/data", &json!({
-        "agent": "boris",
-        "tar_gz_hex": "deadbeef",
-        "exported_at": "2026-04-21T00:00:00Z",
-        "size_bytes": 4
-    }));
+    let upload = post_json(
+        "/api/agents/boris/soul/data",
+        &json!({
+            "agent": "boris",
+            "tar_gz_hex": "deadbeef",
+            "exported_at": "2026-04-21T00:00:00Z",
+            "size_bytes": 4
+        }),
+    );
     let resp = call(&srv.app, upload).await;
     assert_eq!(resp.status(), 200);
 
@@ -61,11 +78,18 @@ async fn test_post_soul_data_stores_and_retrieves() {
 async fn test_move_agent_merges_identity_onto_target() {
     let srv = server_with_agents().await;
 
-    let resp = call(&srv.app, post_json("/api/agents/move", &json!({
-        "source": "boris",
-        "target": "ollama",
-        "decommission_source": true
-    }))).await;
+    let resp = call(
+        &srv.app,
+        post_json(
+            "/api/agents/move",
+            &json!({
+                "source": "boris",
+                "target": "ollama",
+                "decommission_source": true
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), 200);
     let body = body_json(resp).await;
     assert_eq!(body["ok"], json!(true));
@@ -76,30 +100,46 @@ async fn test_move_agent_merges_identity_onto_target() {
     let agents_resp = call(&srv.app, get("/api/agents")).await;
     let agents_body = body_json(agents_resp).await;
     let agents = agents_body["agents"].as_array().unwrap();
-    let names: Vec<&str> = agents.iter()
-        .filter_map(|a| a["name"].as_str())
-        .collect();
+    let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
     assert!(names.contains(&"boris"), "boris should exist");
     assert!(!names.contains(&"ollama"), "ollama should be gone");
 
     let boris = agents.iter().find(|a| a["name"] == "boris").unwrap();
-    assert_eq!(boris["host"], json!("ollama-server.hrd.nvidia.com"), "should have ollama's host");
+    assert_eq!(
+        boris["host"],
+        json!("ollama-server.hrd.nvidia.com"),
+        "should have ollama's host"
+    );
 }
 
 #[tokio::test]
 async fn test_move_agent_unknown_source_returns_404() {
     let srv = server_with_agents().await;
-    let resp = call(&srv.app, post_json("/api/agents/move", &json!({
-        "source": "nobody", "target": "ollama"
-    }))).await;
+    let resp = call(
+        &srv.app,
+        post_json(
+            "/api/agents/move",
+            &json!({
+                "source": "nobody", "target": "ollama"
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), 404);
 }
 
 #[tokio::test]
 async fn test_move_agent_same_source_target_returns_400() {
     let srv = server_with_agents().await;
-    let resp = call(&srv.app, post_json("/api/agents/move", &json!({
-        "source": "boris", "target": "boris"
-    }))).await;
+    let resp = call(
+        &srv.app,
+        post_json(
+            "/api/agents/move",
+            &json!({
+                "source": "boris", "target": "boris"
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), 400);
 }

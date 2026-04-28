@@ -1,36 +1,36 @@
-pub mod auth;
-pub mod health;
-pub mod vault;
-pub mod queue;
-pub mod agents;
-pub mod secrets;
-pub mod bus;
-pub mod projects;
-pub mod tasks;
-pub mod brain;
-pub mod services;
-pub mod lessons;
-pub mod exec;
-pub mod geek;
-pub mod ui;
-pub mod setup;
-pub mod providers;
 pub mod acp;
-pub mod memory;
-pub mod issues;
-pub mod fs;
-pub mod supervisor;
+pub mod agents;
+pub mod auth;
+pub mod blobs;
+pub mod brain;
+pub mod bus;
+pub mod chat_sessions;
 pub mod conversations;
+pub mod exec;
+pub mod fs;
+pub mod geek;
+pub mod github;
+pub mod health;
+pub mod issues;
+pub mod lessons;
+pub mod logs;
+pub mod memory;
 pub mod metrics;
 pub mod models;
-pub mod requests;
-pub mod soul;
-pub mod blobs;
-pub mod watchdog;
-pub mod github;
-pub mod logs;
 pub mod panes;
-pub mod chat_sessions;
+pub mod projects;
+pub mod providers;
+pub mod queue;
+pub mod requests;
+pub mod secrets;
+pub mod services;
+pub mod setup;
+pub mod soul;
+pub mod supervisor;
+pub mod tasks;
+pub mod ui;
+pub mod vault;
+pub mod watchdog;
 
 use axum::{
     http::StatusCode,
@@ -45,5 +45,8 @@ pub fn not_found() -> impl IntoResponse {
 
 #[allow(dead_code)]
 pub fn unauthorized() -> impl IntoResponse {
-    (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"})))
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({"error": "Unauthorized"})),
+    )
 }

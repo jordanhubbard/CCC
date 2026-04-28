@@ -59,7 +59,8 @@ async fn get_bootstrap(
                 std::env::var("ACC_PORT").unwrap_or_else(|_| "8789".to_string())
             ),
             "llm_url": acc_client::llm_config::LlmConfig::load().base_url,
-        })).into_response();
+        }))
+        .into_response();
     }
 
     (

@@ -39,7 +39,16 @@ impl SessionStore {
     }
 
     fn key_to_path(&self, key: &str) -> PathBuf {
-        let safe: String = key.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
+        let safe: String = key
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
         self.base_dir.join(format!("{safe}.json"))
     }
 
@@ -53,7 +62,9 @@ impl SessionStore {
                     return ConversationHistory::from_turns(&messages);
                 }
                 Err(e) => {
-                    tracing::warn!("[session] hub load failed for {key}: {e} — falling back to file");
+                    tracing::warn!(
+                        "[session] hub load failed for {key}: {e} — falling back to file"
+                    );
                 }
             }
         }
@@ -78,7 +89,8 @@ impl SessionStore {
         }
         // Write to hub (authoritative).
         if let Some(client) = &self.hub {
-            if let Err(e) = client.sessions()
+            if let Err(e) = client
+                .sessions()
                 .put(key, &self.agent_name, &self.workspace, &messages)
                 .await
             {

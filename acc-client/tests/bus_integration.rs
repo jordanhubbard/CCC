@@ -15,7 +15,9 @@ async fn bus_send_uses_type_field_on_wire() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/bus/send"))
-        .and(body_partial_json(json!({"type": "hello", "from": "tester"})))
+        .and(body_partial_json(
+            json!({"type": "hello", "from": "tester"}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
         .mount(&server)
         .await;

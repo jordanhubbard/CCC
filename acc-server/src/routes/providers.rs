@@ -51,14 +51,17 @@ async fn list_providers(State(state): State<Arc<AppState>>) -> Json<Value> {
     ];
 
     if !llm_url.is_empty() {
-        providers.insert(0, json!({
-            "id":      "llm",
-            "kind":    "llm",
-            "label":   "LLM (OpenAI-compatible)",
-            "url":     llm_url,
-            "status":  "configured",
-            "enabled": true,
-        }));
+        providers.insert(
+            0,
+            json!({
+                "id":      "llm",
+                "kind":    "llm",
+                "label":   "LLM (OpenAI-compatible)",
+                "url":     llm_url,
+                "status":  "configured",
+                "enabled": true,
+            }),
+        );
     }
 
     Json(json!({ "providers": providers }))
@@ -74,7 +77,8 @@ async fn list_models() -> impl IntoResponse {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({"error": "OPENAI_BASE_URL not configured", "data": []})),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let client = reqwest::Client::builder()
@@ -82,11 +86,7 @@ async fn list_models() -> impl IntoResponse {
         .build()
         .unwrap_or_default();
 
-    match client
-        .get(&format!("{}/v1/models", llm_url))
-        .send()
-        .await
-    {
+    match client.get(&format!("{}/v1/models", llm_url)).send().await {
         Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
             Ok(body) => Json(body).into_response(),
             Err(_) => (
@@ -98,7 +98,11 @@ async fn list_models() -> impl IntoResponse {
         Ok(resp) => {
             let status =
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            (status, Json(json!({"error": "LLM provider returned error"}))).into_response()
+            (
+                status,
+                Json(json!({"error": "LLM provider returned error"})),
+            )
+                .into_response()
         }
         Err(_) => (
             StatusCode::SERVICE_UNAVAILABLE,

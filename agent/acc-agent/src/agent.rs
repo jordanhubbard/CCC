@@ -43,7 +43,10 @@ fn cmd_init(args: &[String]) {
     let by = flags.get("by").cloned();
 
     if path.exists() {
-        eprintln!("{} already exists — use 'upgrade' to update it", path.display());
+        eprintln!(
+            "{} already exists — use 'upgrade' to update it",
+            path.display()
+        );
         std::process::exit(1);
     }
 

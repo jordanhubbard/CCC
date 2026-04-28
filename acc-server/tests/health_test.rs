@@ -20,5 +20,8 @@ async fn status_returns_uptime() {
     let resp = helpers::call(&srv.app, helpers::get("/api/status")).await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
-    assert!(body.get("uptime_secs").is_some(), "expected uptime_secs field");
+    assert!(
+        body.get("uptime_secs").is_some(),
+        "expected uptime_secs field"
+    );
 }

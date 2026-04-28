@@ -4,7 +4,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Parser)]
-#[command(name = "github-sync", about = "Two-way GitHub ↔ beads ↔ fleet task sync")]
+#[command(
+    name = "github-sync",
+    about = "Two-way GitHub ↔ beads ↔ fleet task sync"
+)]
 struct Args {
     /// Run once and exit (default)
     #[arg(long)]
@@ -85,8 +88,7 @@ fn gh_issue_list(repo: &str) -> Vec<Value> {
     match out {
         Ok(o) if o.status.success() => {
             let text = String::from_utf8_lossy(&o.stdout);
-            let mut issues: Vec<Value> =
-                serde_json::from_str(&text).unwrap_or_default();
+            let mut issues: Vec<Value> = serde_json::from_str(&text).unwrap_or_default();
             for issue in &mut issues {
                 issue["repo"] = json!(repo);
             }
@@ -162,9 +164,7 @@ fn bd(args: &[&str], dry_run: bool) -> (i32, String) {
         println!("  [dry-run] bd {}", args.join(" "));
         return (0, String::new());
     }
-    let out = Command::new(bd_bin())
-        .args(args)
-        .output();
+    let out = Command::new(bd_bin()).args(args).output();
     match out {
         Ok(o) => (
             o.status.code().unwrap_or(-1),
@@ -190,7 +190,12 @@ fn list_beads_issues() -> Vec<Value> {
 
 // ── ACC fleet API helpers ─────────────────────────────────────────────────
 
-async fn acc_get(client: &reqwest::Client, acc_url: &str, token: &str, path: &str) -> Option<Value> {
+async fn acc_get(
+    client: &reqwest::Client,
+    acc_url: &str,
+    token: &str,
+    path: &str,
+) -> Option<Value> {
     let resp = client
         .get(format!("{acc_url}{path}"))
         .header("Authorization", format!("Bearer {token}"))
@@ -281,7 +286,9 @@ fn append_fleet_task_to_notes(beads_id: &str, task_id: &str, dry_run: bool) {
         };
         if b.get("id").and_then(|v| v.as_str()) == Some(beads_id) {
             let existing = b.get("notes").and_then(|v| v.as_str()).unwrap_or("");
-            let new_notes = format!("{existing} fleet_task_id={task_id}").trim().to_string();
+            let new_notes = format!("{existing} fleet_task_id={task_id}")
+                .trim()
+                .to_string();
             bd(
                 &["update", beads_id, &format!("--notes={new_notes}")],
                 dry_run,
@@ -475,12 +482,7 @@ async fn sync_repo(
         let number = issue.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
         let existing = find_synced(issue, existing_beads);
 
-        if issue
-            .get("state")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            == "CLOSED"
-        {
+        if issue.get("state").and_then(|v| v.as_str()).unwrap_or("") == "CLOSED" {
             if let Some(b) = existing {
                 if b.get("status").and_then(|v| v.as_str()) == Some("open") {
                     let bid = b.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -507,9 +509,8 @@ async fn sync_repo(
             );
             let gk = gh_key(number, repo);
             let full_title = format!("{title} {gk}");
-            let notes = format!(
-                "source=github github_number={number} github_repo={repo} github_url={url}"
-            );
+            let notes =
+                format!("source=github github_number={number} github_repo={repo} github_url={url}");
             let (rc, out) = bd(
                 &[
                     "create",
@@ -540,13 +541,8 @@ async fn sync_repo(
                                         .unwrap_or("");
                                     println!("    → fleet task {task_id}");
                                     fleet_created += 1;
-                                    let new_notes = format!(
-                                        "{notes} fleet_task_id={task_id}"
-                                    );
-                                    bd(
-                                        &["update", &bid, &format!("--notes={new_notes}")],
-                                        dry_run,
-                                    );
+                                    let new_notes = format!("{notes} fleet_task_id={task_id}");
+                                    bd(&["update", &bid, &format!("--notes={new_notes}")], dry_run);
                                 }
                             }
                         }
@@ -612,7 +608,10 @@ fn extract_beads_id(out: &str) -> Option<String> {
         {
             let parts: Vec<&str> = word.splitn(2, '-').collect();
             if parts.len() == 2 && parts[0].len() >= 2 && parts[0].len() <= 6 {
-                return Some(word.trim_end_matches(|c: char| !c.is_alphanumeric()).to_string());
+                return Some(
+                    word.trim_end_matches(|c: char| !c.is_alphanumeric())
+                        .to_string(),
+                );
             }
         }
     }
@@ -714,8 +713,10 @@ async fn main() {
             tokio::time::sleep(std::time::Duration::from_secs(sync_interval())).await;
         }
     } else {
-        let result =
-            run_once(&args.repos, args.dry_run, &client, &acc_url, &token).await;
-        println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+        let result = run_once(&args.repos, args.dry_run, &client, &acc_url, &token).await;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        );
     }
 }

@@ -13,21 +13,21 @@ use aes_gcm::{
 };
 use argon2::{Argon2, Params};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use subtle::ConstantTimeEq;
 use std::{
     collections::HashMap,
     fmt,
     sync::Arc,
     time::{Duration, Instant},
 };
+use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
 // Argon2id parameters — OWASP recommended minimums (same as tokenhub).
-const ARGON2_MEM: u32   = 65536; // 64 MB
-const ARGON2_TIME: u32  = 3;
+const ARGON2_MEM: u32 = 65536; // 64 MB
+const ARGON2_TIME: u32 = 3;
 const ARGON2_LANES: u32 = 4;
-const SALT_LEN: usize   = 16;
-const KEY_LEN: usize    = 32;
+const SALT_LEN: usize = 16;
+const KEY_LEN: usize = 32;
 
 pub const DEFAULT_AUTO_LOCK: Duration = Duration::from_secs(30 * 60);
 
@@ -45,13 +45,13 @@ pub enum VaultError {
 impl fmt::Display for VaultError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VaultError::Locked           => write!(f, "vault is locked"),
-            VaultError::NotEnabled       => write!(f, "vault is not enabled"),
-            VaultError::NotFound(k)      => write!(f, "key not found: {k}"),
+            VaultError::Locked => write!(f, "vault is locked"),
+            VaultError::NotEnabled => write!(f, "vault is not enabled"),
+            VaultError::NotFound(k) => write!(f, "key not found: {k}"),
             VaultError::PasswordTooShort => write!(f, "password too short (min 8 chars)"),
-            VaultError::WrongPassword    => write!(f, "old password does not match"),
-            VaultError::Crypto(s)        => write!(f, "crypto error: {s}"),
-            VaultError::Decode(s)        => write!(f, "decode error: {s}"),
+            VaultError::WrongPassword => write!(f, "old password does not match"),
+            VaultError::Crypto(s) => write!(f, "crypto error: {s}"),
+            VaultError::Decode(s) => write!(f, "decode error: {s}"),
         }
     }
 }
@@ -59,11 +59,11 @@ impl fmt::Display for VaultError {
 impl std::error::Error for VaultError {}
 
 struct Inner {
-    enabled:       bool,
-    locked:        bool,
-    salt:          Option<Vec<u8>>,
-    key:           Option<Vec<u8>>,        // in-memory only; zeroed on lock
-    values:        HashMap<String, Vec<u8>>, // nonce || ciphertext (or plaintext if disabled)
+    enabled: bool,
+    locked: bool,
+    salt: Option<Vec<u8>>,
+    key: Option<Vec<u8>>,             // in-memory only; zeroed on lock
+    values: HashMap<String, Vec<u8>>, // nonce || ciphertext (or plaintext if disabled)
     last_activity: Instant,
 }
 
@@ -139,7 +139,10 @@ impl Vault {
     pub async fn get(&self, key: &str) -> Result<String, VaultError> {
         let g = self.0.read().await;
         check_unlocked(&g)?;
-        let data = g.values.get(key).ok_or_else(|| VaultError::NotFound(key.to_string()))?;
+        let data = g
+            .values
+            .get(key)
+            .ok_or_else(|| VaultError::NotFound(key.to_string()))?;
         let plain = if g.enabled {
             decrypt(g.key.as_deref().unwrap(), data)?
         } else {
@@ -159,7 +162,9 @@ impl Vault {
     pub async fn keys(&self, prefix: &str) -> Result<Vec<String>, VaultError> {
         let g = self.0.read().await;
         check_unlocked(&g)?;
-        let mut keys: Vec<String> = g.values.keys()
+        let mut keys: Vec<String> = g
+            .values
+            .keys()
             .filter(|k| prefix.is_empty() || k.starts_with(prefix))
             .cloned()
             .collect();
@@ -177,7 +182,9 @@ impl Vault {
     pub async fn export(&self) -> (Option<Vec<u8>>, HashMap<String, String>) {
         let g = self.0.read().await;
         let salt = g.salt.clone();
-        let exported = g.values.iter()
+        let exported = g
+            .values
+            .iter()
             .map(|(k, v)| (k.clone(), B64.encode(v)))
             .collect();
         (salt, exported)
@@ -188,7 +195,8 @@ impl Vault {
     pub async fn import(&self, data: HashMap<String, String>) -> Result<(), VaultError> {
         let mut g = self.0.write().await;
         for (k, b64) in data {
-            let decoded = B64.decode(&b64)
+            let decoded = B64
+                .decode(&b64)
                 .map_err(|e| VaultError::Decode(format!("{k}: {e}")))?;
             g.values.insert(k, decoded);
         }
@@ -202,15 +210,21 @@ impl Vault {
 
     /// Re-encrypt all values under a new password (new random salt).
     pub async fn rotate_password(&self, old_pw: &[u8], new_pw: &[u8]) -> Result<(), VaultError> {
-        if new_pw.len() < 8 { return Err(VaultError::PasswordTooShort); }
+        if new_pw.len() < 8 {
+            return Err(VaultError::PasswordTooShort);
+        }
         let mut g = self.0.write().await;
-        if !g.enabled { return Err(VaultError::NotEnabled); }
-        if g.locked   { return Err(VaultError::Locked); }
+        if !g.enabled {
+            return Err(VaultError::NotEnabled);
+        }
+        if g.locked {
+            return Err(VaultError::Locked);
+        }
 
         // Verify old password against current key.
-        let salt     = g.salt.as_deref().unwrap_or(&[]);
+        let salt = g.salt.as_deref().unwrap_or(&[]);
         let expected = derive_key(old_pw, salt)?;
-        let current  = g.key.as_deref().unwrap_or(&[]);
+        let current = g.key.as_deref().unwrap_or(&[]);
         if expected.ct_eq(current).unwrap_u8() != 1 {
             return Err(VaultError::WrongPassword);
         }
@@ -223,7 +237,7 @@ impl Vault {
 
         // Derive new key from new salt.
         let new_salt = gen_salt();
-        let new_key  = derive_key(new_pw, &new_salt)?;
+        let new_key = derive_key(new_pw, &new_salt)?;
 
         // Re-encrypt under new key.
         let mut new_values = HashMap::with_capacity(plaintexts.len());
@@ -232,7 +246,7 @@ impl Vault {
         }
 
         g.salt = Some(new_salt);
-        g.key  = Some(new_key);
+        g.key = Some(new_key);
         g.values = new_values;
         g.last_activity = Instant::now();
         Ok(())
@@ -242,7 +256,9 @@ impl Vault {
     /// Returns true if the vault was just locked.
     pub async fn check_auto_lock(&self, timeout: Duration) -> bool {
         let mut g = self.0.write().await;
-        if !g.enabled || g.locked { return false; }
+        if !g.enabled || g.locked {
+            return false;
+        }
         if g.last_activity.elapsed() > timeout {
             zero_key(&mut g.key);
             g.locked = true;
@@ -266,7 +282,8 @@ fn derive_key(password: &[u8], salt: &[u8]) -> Result<Vec<u8>, VaultError> {
         .map_err(|e| VaultError::Crypto(e.to_string()))?;
     let argon = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     let mut key = vec![0u8; KEY_LEN];
-    argon.hash_password_into(password, salt, &mut key)
+    argon
+        .hash_password_into(password, salt, &mut key)
         .map_err(|e| VaultError::Crypto(e.to_string()))?;
     Ok(key)
 }
@@ -275,7 +292,8 @@ fn encrypt(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, VaultError> {
     let k = Key::<Aes256Gcm>::from_slice(key);
     let cipher = Aes256Gcm::new(k);
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-    let ciphertext = cipher.encrypt(&nonce, plaintext)
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext)
         .map_err(|e| VaultError::Crypto(e.to_string()))?;
     let mut out = Vec::with_capacity(nonce.len() + ciphertext.len());
     out.extend_from_slice(&nonce);
@@ -291,19 +309,26 @@ fn decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, VaultError> {
     let k = Key::<Aes256Gcm>::from_slice(key);
     let cipher = Aes256Gcm::new(k);
     let nonce = Nonce::from_slice(&data[..NONCE_LEN]);
-    cipher.decrypt(nonce, &data[NONCE_LEN..])
+    cipher
+        .decrypt(nonce, &data[NONCE_LEN..])
         .map_err(|_| VaultError::Crypto("decryption failed (wrong password?)".into()))
 }
 
 fn check_unlocked(g: &Inner) -> Result<(), VaultError> {
-    if !g.enabled { return Ok(()); }
-    if g.locked   { return Err(VaultError::Locked); }
+    if !g.enabled {
+        return Ok(());
+    }
+    if g.locked {
+        return Err(VaultError::Locked);
+    }
     Ok(())
 }
 
 fn zero_key(key: &mut Option<Vec<u8>>) {
     if let Some(k) = key.as_mut() {
-        for b in k.iter_mut() { *b = 0; }
+        for b in k.iter_mut() {
+            *b = 0;
+        }
     }
     *key = None;
 }
@@ -313,7 +338,9 @@ fn zero_key(key: &mut Option<Vec<u8>>) {
 /// Spawn a background task that checks auto-lock every minute.
 /// Stops when the vault is dropped (Arc refcount reaches zero).
 pub fn spawn_auto_lock(vault: Vault, timeout: Duration) {
-    if timeout.is_zero() { return; }
+    if timeout.is_zero() {
+        return;
+    }
     tokio::spawn(async move {
         let interval = std::cmp::min(timeout / 2, Duration::from_secs(60));
         let mut ticker = tokio::time::interval(interval.max(Duration::from_millis(100)));
@@ -386,7 +413,9 @@ mod tests {
     async fn rotate_password() {
         let v = unlocked().await;
         v.set("k", "secret").await.unwrap();
-        v.rotate_password(PW, b"new-password-also-strong!!").await.unwrap();
+        v.rotate_password(PW, b"new-password-also-strong!!")
+            .await
+            .unwrap();
         assert_eq!(v.get("k").await.unwrap(), "secret");
     }
 
@@ -394,7 +423,8 @@ mod tests {
     async fn wrong_old_password_fails_rotate() {
         let v = unlocked().await;
         assert!(matches!(
-            v.rotate_password(b"wrong-password!!", b"new-password-ok!!").await,
+            v.rotate_password(b"wrong-password!!", b"new-password-ok!!")
+                .await,
             Err(VaultError::WrongPassword)
         ));
     }

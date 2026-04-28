@@ -18,7 +18,10 @@ use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/sessions/:key", get(get_session).put(put_session).delete(delete_session))
+        .route(
+            "/api/sessions/:key",
+            get(get_session).put(put_session).delete(delete_session),
+        )
         .route("/api/sessions", get(list_sessions))
 }
 
@@ -29,10 +32,18 @@ async fn get_session(
     let conn = state.fleet_db.lock().await;
     match crate::db::get_session(&conn, &key) {
         Ok(Some(messages)) => Json(json!({"key": key, "messages": messages})).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "session not found"}))).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "session not found"})),
+        )
+            .into_response(),
         Err(e) => {
             tracing::warn!("get_session error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
         }
     }
 }
@@ -56,7 +67,11 @@ async fn put_session(
         Ok(()) => Json(json!({"ok": true, "key": key})).into_response(),
         Err(e) => {
             tracing::warn!("put_session error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
         }
     }
 }
@@ -70,14 +85,16 @@ async fn delete_session(
         Ok(()) => Json(json!({"ok": true, "key": key})).into_response(),
         Err(e) => {
             tracing::warn!("delete_session error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
         }
     }
 }
 
-async fn list_sessions(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let conn = state.fleet_db.lock().await;
     let result: Result<Vec<Value>, rusqlite::Error> = (|| {
         let mut stmt = conn.prepare_cached(
@@ -98,6 +115,10 @@ async fn list_sessions(
             let count = sessions.len();
             Json(json!({"sessions": sessions, "count": count})).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }

@@ -27,13 +27,14 @@ pub async fn list_panes() -> Result<Vec<PaneInfo>, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout
-        .lines()
-        .filter_map(parse_pane_line)
-        .collect())
+    Ok(stdout.lines().filter_map(parse_pane_line).collect())
 }
 
-pub async fn new_session(session_name: &str, cwd: Option<&std::path::Path>, command: &str) -> Result<(), String> {
+pub async fn new_session(
+    session_name: &str,
+    cwd: Option<&std::path::Path>,
+    command: &str,
+) -> Result<(), String> {
     let mut cmd = Command::new("tmux");
     cmd.args(["new-session", "-d", "-s", session_name]);
     if let Some(dir) = cwd {
@@ -119,7 +120,11 @@ pub async fn send_keys(target: &str, text: &str, press_enter: bool) -> Result<()
 }
 
 #[allow(dead_code)]
-pub async fn wait_for_quiet(pane_id: &str, quiet_for_secs: u64, timeout_secs: u64) -> Result<bool, String> {
+pub async fn wait_for_quiet(
+    pane_id: &str,
+    quiet_for_secs: u64,
+    timeout_secs: u64,
+) -> Result<bool, String> {
     let start = std::time::Instant::now();
     loop {
         let panes = list_panes().await?;

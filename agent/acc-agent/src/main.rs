@@ -2,11 +2,11 @@ mod agent;
 mod bus;
 mod cli_sanity;
 mod cli_tmux_adapter;
-#[cfg(test)]
-mod hub_mock;
 mod config;
 mod exec_registry;
 mod hermes;
+#[cfg(test)]
+mod hub_mock;
 mod json;
 mod log_init;
 mod migrate;
@@ -14,9 +14,9 @@ mod peers;
 mod proxy;
 mod queue;
 mod sdk;
+mod services;
 mod session_discovery;
 mod session_registry;
-mod services;
 mod supervise;
 mod tasks;
 mod tmux;

@@ -64,10 +64,7 @@ async fn ws_handler(
             .and_then(|v| v.as_str())
             .unwrap_or("root")
             .to_string();
-        let port = agent
-            .get("ssh_port")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(22) as u16;
+        let port = agent.get("ssh_port").and_then(|v| v.as_u64()).unwrap_or(22) as u16;
         (host, user, port)
     };
 
@@ -75,9 +72,7 @@ async fn ws_handler(
         return (StatusCode::BAD_REQUEST, "Agent has no ssh_host configured").into_response();
     }
 
-    ws.on_upgrade(move |socket| {
-        handle_pane(socket, agent_name, ssh_host, ssh_user, ssh_port)
-    })
+    ws.on_upgrade(move |socket| handle_pane(socket, agent_name, ssh_host, ssh_user, ssh_port))
 }
 
 /// Check a raw bearer token string against static agent tokens and user token hashes.
@@ -196,8 +191,8 @@ async fn handle_pane(
             }
         }
         // Signal disconnection to the WS side
-        let _ = out_tx2
-            .blocking_send(json!({"type": "status", "state": "disconnected"}).to_string());
+        let _ =
+            out_tx2.blocking_send(json!({"type": "status", "state": "disconnected"}).to_string());
     });
 
     // Thread 2: pty_rx → PTY writer + resize (master stays in this thread)
@@ -225,7 +220,9 @@ async fn handle_pane(
     // Notify client we're connected
     let _ = ws_sink
         .send(Message::Text(
-            json!({"type": "status", "state": "connected"}).to_string().into(),
+            json!({"type": "status", "state": "connected"})
+                .to_string()
+                .into(),
         ))
         .await;
 
@@ -257,10 +254,8 @@ async fn handle_pane(
                         }
                     }
                     Some("resize") => {
-                        let cols =
-                            v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
-                        let rows =
-                            v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
+                        let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(80) as u16;
+                        let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(24) as u16;
                         let _ = pty_tx.try_send(PtyCmd::Resize(cols, rows));
                     }
                     _ => {}

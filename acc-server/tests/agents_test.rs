@@ -1,8 +1,8 @@
 //! Agent registry routes — heartbeat, register, upsert, patch, delete, health, heartbeats.
 mod helpers;
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::json;
 
 // ── GET /api/agents ───────────────────────────────────────────────────────────
@@ -24,13 +24,20 @@ async fn register_agent_creates_with_token() {
     let srv = helpers::TestServer::new().await;
     let resp = helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/register", &json!({"name": "hermes", "host": "puck"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/register",
+            &json!({"name": "hermes", "host": "puck"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
     let token = body["token"].as_str().unwrap();
-    assert!(token.starts_with("acc-agent-hermes-"), "token must start with acc-agent-{{name}}-");
+    assert!(
+        token.starts_with("acc-agent-hermes-"),
+        "token must start with acc-agent-{{name}}-"
+    );
     assert_eq!(body["agent"]["name"], "hermes");
     assert!(body["agent"]["executors"].is_array());
     assert!(body["agent"]["sessions"].is_array());
@@ -42,7 +49,8 @@ async fn register_agent_requires_name() {
     let resp = helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/register", &json!({"host": "somewhere"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -50,16 +58,29 @@ async fn register_agent_requires_name() {
 async fn register_agent_idempotent_preserves_token() {
     let srv = helpers::TestServer::new().await;
     let first = helpers::body_json(
-        helpers::call(&srv.app, helpers::post_json("/api/agents/register", &json!({"name": "boris"}))).await,
-    ).await;
+        helpers::call(
+            &srv.app,
+            helpers::post_json("/api/agents/register", &json!({"name": "boris"})),
+        )
+        .await,
+    )
+    .await;
     let token1 = first["token"].as_str().unwrap().to_string();
 
     let second = helpers::body_json(
-        helpers::call(&srv.app, helpers::post_json("/api/agents/register", &json!({"name": "boris"}))).await,
-    ).await;
+        helpers::call(
+            &srv.app,
+            helpers::post_json("/api/agents/register", &json!({"name": "boris"})),
+        )
+        .await,
+    )
+    .await;
     let token2 = second["token"].as_str().unwrap().to_string();
 
-    assert_eq!(token1, token2, "re-registering same agent should preserve its token");
+    assert_eq!(
+        token1, token2,
+        "re-registering same agent should preserve its token"
+    );
 }
 
 // ── POST /api/agents (alias for register) ────────────────────────────────────
@@ -70,7 +91,8 @@ async fn post_agents_registers_agent() {
     let resp = helpers::call(
         &srv.app,
         helpers::post_json("/api/agents", &json!({"name": "natasha", "host": "sparky"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -83,11 +105,15 @@ async fn heartbeat_registers_agent() {
     let srv = helpers::TestServer::new().await;
     let resp = helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/test-node/heartbeat", &json!({
-            "status": "online",
-            "capabilities": {"claude_cli": true, "hermes": false}
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/agents/test-node/heartbeat",
+            &json!({
+                "status": "online",
+                "capabilities": {"claude_cli": true, "hermes": false}
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK, "heartbeat should succeed");
 
     let resp = helpers::call(&srv.app, helpers::get("/api/agents/test-node")).await;
@@ -124,11 +150,14 @@ async fn heartbeat_sets_last_seen() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/rocky/heartbeat", &json!({"status": "online"})),
-    ).await;
-    let body = helpers::body_json(
-        helpers::call(&srv.app, helpers::get("/api/agents/rocky")).await,
-    ).await;
-    assert!(body["agent"]["lastSeen"].is_string(), "lastSeen must be set after heartbeat");
+    )
+    .await;
+    let body =
+        helpers::body_json(helpers::call(&srv.app, helpers::get("/api/agents/rocky")).await).await;
+    assert!(
+        body["agent"]["lastSeen"].is_string(),
+        "lastSeen must be set after heartbeat"
+    );
 }
 
 // ── POST /api/heartbeat/:agent (alternate path) ───────────────────────────────
@@ -140,12 +169,14 @@ async fn alternate_heartbeat_returns_ok_and_pending_work() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/register", &json!({"name": "bullwinkle"})),
-    ).await;
+    )
+    .await;
 
     let resp = helpers::call(
         &srv.app,
         helpers::post_json("/api/heartbeat/bullwinkle", &json!({})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -158,23 +189,29 @@ async fn alternate_heartbeat_updates_capacity_and_sessions() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/register", &json!({"name": "heartbeat-node"})),
-    ).await;
+    )
+    .await;
 
     let resp = helpers::call(
         &srv.app,
-        helpers::post_json("/api/heartbeat/heartbeat-node", &json!({
-            "tasks_in_flight": 1,
-            "estimated_free_slots": 2,
-            "free_session_slots": 1,
-            "executors": [{"executor": "claude_cli", "ready": true, "auth_state": "ready"}],
-            "sessions": [{"name": "proj-a", "executor": "claude_cli", "state": "busy"}]
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/heartbeat/heartbeat-node",
+            &json!({
+                "tasks_in_flight": 1,
+                "estimated_free_slots": 2,
+                "free_session_slots": 1,
+                "executors": [{"executor": "claude_cli", "ready": true, "auth_state": "ready"}],
+                "sessions": [{"name": "proj-a", "executor": "claude_cli", "state": "busy"}]
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
 
     let body = helpers::body_json(
         helpers::call(&srv.app, helpers::get("/api/agents/heartbeat-node")).await,
-    ).await;
+    )
+    .await;
     assert_eq!(body["agent"]["capacity"]["tasks_in_flight"], 1);
     assert_eq!(body["agent"]["capacity"]["free_session_slots"], 1);
     assert_eq!(body["agent"]["sessions"][0]["name"], "proj-a");
@@ -187,7 +224,8 @@ async fn alternate_heartbeat_unknown_agent_still_returns_ok() {
     let resp = helpers::call(
         &srv.app,
         helpers::post_json("/api/heartbeat/nobody", &json!({})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
@@ -197,12 +235,19 @@ async fn alternate_heartbeat_unknown_agent_still_returns_ok() {
 async fn heartbeats_returns_map() {
     let srv = helpers::TestServer::new().await;
     // Register two agents then check the heartbeats map.
-    helpers::call(&srv.app, helpers::post_json("/api/agents/a1/heartbeat", &json!({}))).await;
-    helpers::call(&srv.app, helpers::post_json("/api/agents/a2/heartbeat", &json!({}))).await;
+    helpers::call(
+        &srv.app,
+        helpers::post_json("/api/agents/a1/heartbeat", &json!({})),
+    )
+    .await;
+    helpers::call(
+        &srv.app,
+        helpers::post_json("/api/agents/a2/heartbeat", &json!({})),
+    )
+    .await;
 
-    let body = helpers::body_json(
-        helpers::call(&srv.app, helpers::get("/api/heartbeats")).await,
-    ).await;
+    let body =
+        helpers::body_json(helpers::call(&srv.app, helpers::get("/api/heartbeats")).await).await;
     assert!(body.is_object(), "heartbeats must return a JSON object");
     assert!(body.get("a1").is_some(), "a1 must appear in heartbeats");
     assert!(body.get("a2").is_some(), "a2 must appear in heartbeats");
@@ -223,10 +268,11 @@ async fn get_agent_has_online_field() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/peabody/heartbeat", &json!({})),
-    ).await;
-    let body = helpers::body_json(
-        helpers::call(&srv.app, helpers::get("/api/agents/peabody")).await,
-    ).await;
+    )
+    .await;
+    let body =
+        helpers::body_json(helpers::call(&srv.app, helpers::get("/api/agents/peabody")).await)
+            .await;
     assert!(body["agent"]["online"].is_boolean());
     assert!(body["agent"]["onlineStatus"].is_string());
 }
@@ -237,15 +283,23 @@ async fn get_agent_has_online_field() {
 async fn get_agent_health_after_heartbeat() {
     let srv = helpers::TestServer::new().await;
     // First heartbeat creates the agent record (telemetry not stored on initial creation).
-    helpers::call(&srv.app, helpers::post_json("/api/agents/sherman/heartbeat", &json!({}))).await;
+    helpers::call(
+        &srv.app,
+        helpers::post_json("/api/agents/sherman/heartbeat", &json!({})),
+    )
+    .await;
     // Second heartbeat merges telemetry into the existing record.
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/sherman/heartbeat", &json!({
-            "gpu": "RTX 4090",
-            "gpu_temp_c": 72.0,
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/agents/sherman/heartbeat",
+            &json!({
+                "gpu": "RTX 4090",
+                "gpu_temp_c": 72.0,
+            }),
+        ),
+    )
+    .await;
     let resp = helpers::call(&srv.app, helpers::get("/api/agents/sherman/health")).await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
@@ -269,8 +323,12 @@ async fn upsert_agent_creates_when_absent() {
     let srv = helpers::TestServer::new().await;
     let resp = helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/snidely", &json!({"host": "l40-sweden", "type": "gpu"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/snidely",
+            &json!({"host": "l40-sweden", "type": "gpu"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -283,11 +341,13 @@ async fn upsert_agent_updates_when_present() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/dudley", &json!({"host": "old-host"})),
-    ).await;
+    )
+    .await;
     let resp = helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/dudley", &json!({"host": "new-host"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["agent"]["host"], "new-host");
@@ -300,12 +360,17 @@ async fn patch_agent_updates_field() {
     let srv = helpers::TestServer::new().await;
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/register", &json!({"name": "patch-target", "host": "old"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/register",
+            &json!({"name": "patch-target", "host": "old"}),
+        ),
+    )
+    .await;
     let resp = helpers::call(
         &srv.app,
         helpers::patch_json("/api/agents/patch-target", &json!({"host": "updated-host"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -318,7 +383,8 @@ async fn patch_agent_not_found() {
     let resp = helpers::call(
         &srv.app,
         helpers::patch_json("/api/agents/nobody", &json!({"host": "x"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -328,11 +394,13 @@ async fn patch_agent_decommission() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/register", &json!({"name": "retired"})),
-    ).await;
+    )
+    .await;
     let resp = helpers::call(
         &srv.app,
         helpers::patch_json("/api/agents/retired", &json!({"status": "decommissioned"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["agent"]["decommissioned"], true);
@@ -344,9 +412,14 @@ async fn patch_agent_decommission() {
 async fn delete_agent_requires_auth() {
     let srv = helpers::TestServer::new().await;
     let req = Request::builder()
-        .method("DELETE").uri("/api/agents/anyone")
-        .body(Body::empty()).unwrap();
-    assert_eq!(helpers::call(&srv.app, req).await.status(), StatusCode::UNAUTHORIZED);
+        .method("DELETE")
+        .uri("/api/agents/anyone")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        helpers::call(&srv.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
@@ -355,10 +428,11 @@ async fn delete_agent_removes_registration() {
     helpers::call(
         &srv.app,
         helpers::post_json("/api/agents/register", &json!({"name": "deleteme"})),
-    ).await;
-    let del = helpers::body_json(
-        helpers::call(&srv.app, helpers::delete("/api/agents/deleteme")).await,
-    ).await;
+    )
+    .await;
+    let del =
+        helpers::body_json(helpers::call(&srv.app, helpers::delete("/api/agents/deleteme")).await)
+            .await;
     assert_eq!(del["ok"], true);
     assert_eq!(del["deleted"], true);
 
@@ -380,19 +454,27 @@ async fn exec_resolves_capability_to_agent() {
     let srv = helpers::TestServer::new().await;
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/hermes-node/heartbeat", &json!({
-            "status": "online",
-            "capabilities": {"hermes": true, "gpu": false}
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/agents/hermes-node/heartbeat",
+            &json!({
+                "status": "online",
+                "capabilities": {"hermes": true, "gpu": false}
+            }),
+        ),
+    )
+    .await;
 
     let resp = helpers::call(
         &srv.app,
-        helpers::post_json("/api/exec", &json!({
-            "command": "ping",
-            "targets": ["hermes"],
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/exec",
+            &json!({
+                "command": "ping",
+                "targets": ["hermes"],
+            }),
+        ),
+    )
+    .await;
 
     let status = resp.status();
     assert!(
@@ -405,7 +487,8 @@ async fn exec_resolves_capability_to_agent() {
         if let Some(targets) = body["targets"].as_array() {
             assert!(
                 targets.iter().any(|t| t == "hermes-node"),
-                "capability 'hermes' should resolve to 'hermes-node'; got targets={:?}", targets
+                "capability 'hermes' should resolve to 'hermes-node'; got targets={:?}",
+                targets
             );
         }
     }
@@ -419,8 +502,12 @@ async fn agents_online_filter_returns_only_online() {
     // Register sets lastSeen=now, so a freshly registered agent is online
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/register", &json!({"name": "live-bot", "host": "puck"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/register",
+            &json!({"name": "live-bot", "host": "puck"}),
+        ),
+    )
+    .await;
 
     let resp = helpers::call(&srv.app, helpers::get("/api/agents?online=true")).await;
     let body = helpers::body_json(resp).await;
@@ -428,7 +515,9 @@ async fn agents_online_filter_returns_only_online() {
     let agents = body["agents"].as_array().unwrap();
     assert!(!agents.is_empty());
     // Every agent returned must have online=true
-    assert!(agents.iter().all(|a| a["online"].as_bool().unwrap_or(false)));
+    assert!(agents
+        .iter()
+        .all(|a| a["online"].as_bool().unwrap_or(false)));
 }
 
 // ── GET /api/agents/names ─────────────────────────────────────────────────────
@@ -448,17 +537,29 @@ async fn agent_names_lists_registered_agents() {
     let srv = helpers::TestServer::new().await;
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/register", &json!({"name": "natasha", "host": "puck"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/register",
+            &json!({"name": "natasha", "host": "puck"}),
+        ),
+    )
+    .await;
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/register", &json!({"name": "boris", "host": "rocky"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/register",
+            &json!({"name": "boris", "host": "rocky"}),
+        ),
+    )
+    .await;
 
     let resp = helpers::call(&srv.app, helpers::get("/api/agents/names")).await;
     let body = helpers::body_json(resp).await;
-    let names: Vec<&str> = body["names"].as_array().unwrap()
-        .iter().filter_map(|v| v.as_str()).collect();
+    let names: Vec<&str> = body["names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
     assert!(names.contains(&"natasha"));
     assert!(names.contains(&"boris"));
 }
@@ -468,17 +569,26 @@ async fn agent_names_excludes_decommissioned() {
     let srv = helpers::TestServer::new().await;
     helpers::call(
         &srv.app,
-        helpers::post_json("/api/agents/register", &json!({"name": "retired", "host": "old"})),
-    ).await;
+        helpers::post_json(
+            "/api/agents/register",
+            &json!({"name": "retired", "host": "old"}),
+        ),
+    )
+    .await;
     // Decommission it
     helpers::call(
         &srv.app,
         helpers::patch_json("/api/agents/retired", &json!({"status": "decommissioned"})),
-    ).await;
+    )
+    .await;
 
     let resp = helpers::call(&srv.app, helpers::get("/api/agents/names")).await;
     let body = helpers::body_json(resp).await;
-    let names: Vec<&str> = body["names"].as_array().unwrap()
-        .iter().filter_map(|v| v.as_str()).collect();
+    let names: Vec<&str> = body["names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
     assert!(!names.contains(&"retired"));
 }

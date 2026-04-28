@@ -8,18 +8,19 @@ mod gateway;
 mod provider;
 mod tool;
 
+use crate::config::Config;
+use acc_client::Client;
 use agent::HermesAgent;
 use provider::make_provider;
 use tool::ToolRegistry;
-use acc_client::Client;
-use crate::config::Config;
 
 pub async fn run(args: &[String]) {
     // Gateway mode: long-running Slack/Telegram bot.
     if args.iter().any(|a| a == "--gateway") {
         // Optional --workspace <name> selects which set of env vars to use.
         // e.g. --workspace ofterra → reads SLACK_APP_TOKEN_OFTERRA, SLACK_BOT_TOKEN_OFTERRA
-        let workspace = args.windows(2)
+        let workspace = args
+            .windows(2)
             .find(|w| w[0] == "--workspace")
             .map(|w| w[1].to_uppercase());
         gateway::run(workspace.as_deref()).await;
@@ -37,7 +38,10 @@ async fn native_run(args: &[String]) {
         }
     };
 
-    eprintln!("[hermes-rust v{}] agent={} hub={}", VERSION, cfg.agent_name, cfg.acc_url);
+    eprintln!(
+        "[hermes-rust v{}] agent={} hub={}",
+        VERSION, cfg.agent_name, cfg.acc_url
+    );
 
     let mut item_id: Option<String> = None;
     let mut task_id: Option<String> = None;
@@ -48,9 +52,18 @@ async fn native_run(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--item" => { i += 1; item_id = args.get(i).cloned(); }
-            "--task" => { i += 1; task_id = args.get(i).cloned(); }
-            "--query" => { i += 1; query = args.get(i).cloned(); }
+            "--item" => {
+                i += 1;
+                item_id = args.get(i).cloned();
+            }
+            "--task" => {
+                i += 1;
+                task_id = args.get(i).cloned();
+            }
+            "--query" => {
+                i += 1;
+                query = args.get(i).cloned();
+            }
             "--poll" => poll = true,
             "--poll-queue" => poll_queue_legacy = true,
             _ => {}
@@ -62,8 +75,16 @@ async fn native_run(args: &[String]) {
     let tools = ToolRegistry::default_tools();
 
     let llm_cfg = acc_client::llm_config::LlmConfig::load();
-    let model = if llm_cfg.model.is_empty() { "claude-opus-4-7".to_string() } else { llm_cfg.model.clone() };
-    let api_key = if !llm_cfg.anthropic_key.is_empty() { llm_cfg.anthropic_key } else { llm_cfg.api_key };
+    let model = if llm_cfg.model.is_empty() {
+        "claude-opus-4-7".to_string()
+    } else {
+        llm_cfg.model.clone()
+    };
+    let api_key = if !llm_cfg.anthropic_key.is_empty() {
+        llm_cfg.anthropic_key
+    } else {
+        llm_cfg.api_key
+    };
     let provider = make_provider(api_key, model);
 
     let hermes = HermesAgent::new(cfg, client, provider, tools);

@@ -7,12 +7,7 @@ use serde_json::{json, Value};
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /// Upload a single-chunk blob and return (status, body).
-async fn upload_single(
-    srv: &TestServer,
-    mime: &str,
-    data: &[u8],
-    binary: bool,
-) -> (u16, Value) {
+async fn upload_single(srv: &TestServer, mime: &str, data: &[u8], binary: bool) -> (u16, Value) {
     let body = json!({
         "mime_type":    mime,
         "enc":          if binary { "base64" } else { "none" },
@@ -165,7 +160,10 @@ async fn test_07_binary_mime_without_base64_returns_422() {
     let resp = call(&srv.app, post_json("/api/bus/blobs/upload", &body)).await;
     assert_eq!(resp.status().as_u16(), 422);
     let j = body_json(resp).await;
-    assert_eq!(j["error"].as_str().unwrap(), "binary_type_requires_base64_enc");
+    assert_eq!(
+        j["error"].as_str().unwrap(),
+        "binary_type_requires_base64_enc"
+    );
 }
 
 // ── 8: invalid base64 data returns 422 ───────────────────────────────────────
@@ -242,7 +240,11 @@ async fn test_12_delete_removes_blob() {
     assert_eq!(del.status().as_u16(), 200);
 
     let meta = call(&srv.app, get(&format!("/api/bus/blobs/{}", blob_id))).await;
-    assert_eq!(meta.status().as_u16(), 404, "meta should be 404 after delete");
+    assert_eq!(
+        meta.status().as_u16(),
+        404,
+        "meta should be 404 after delete"
+    );
 
     let (dl_status, _) = download(&srv, &blob_id).await;
     assert_eq!(dl_status, 404, "download should be 404 after delete");
@@ -344,7 +346,10 @@ async fn test_17_access_control_allows_listed_agent() {
 
     let ok = call(
         &srv.app,
-        get(&format!("/api/bus/blobs/{}/download?agent=natasha", blob_id)),
+        get(&format!(
+            "/api/bus/blobs/{}/download?agent=natasha",
+            blob_id
+        )),
     )
     .await;
     assert_eq!(ok.status().as_u16(), 200);
@@ -393,15 +398,13 @@ async fn test_19_blob_ready_event_fired_on_single_chunk_completion() {
     let msgs_resp = call(&srv.app, get("/api/bus/messages")).await;
     assert_eq!(msgs_resp.status().as_u16(), 200);
     let msgs = body_json(msgs_resp).await;
-    let found = msgs
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|m| {
-            m["type"].as_str() == Some("bus.blob_ready")
-                && m["blob_id"].as_str() == Some(&blob_id)
-        });
-    assert!(found, "bus.blob_ready must appear in bus messages after upload");
+    let found = msgs.as_array().unwrap().iter().any(|m| {
+        m["type"].as_str() == Some("bus.blob_ready") && m["blob_id"].as_str() == Some(&blob_id)
+    });
+    assert!(
+        found,
+        "bus.blob_ready must appear in bus messages after upload"
+    );
 }
 
 // ── 20: upload endpoint requires authentication ───────────────────────────────
@@ -441,18 +444,29 @@ async fn test_21_two_chunk_text_upload_assembles_correctly() {
 
     let (s0, j0) = upload_chunk(&srv, blob_id, "text/plain", part0, false, 0, 2).await;
     assert_eq!(s0, 200, "chunk 0: {j0}");
-    assert_eq!(j0["complete"], json!(false), "blob must not be complete after chunk 0");
+    assert_eq!(
+        j0["complete"],
+        json!(false),
+        "blob must not be complete after chunk 0"
+    );
     assert_eq!(j0["chunks_received"], json!(1));
 
     let (s1, j1) = upload_chunk(&srv, blob_id, "text/plain", part1, false, 1, 2).await;
     assert_eq!(s1, 200, "chunk 1: {j1}");
-    assert_eq!(j1["complete"], json!(true), "blob must be complete after chunk 1");
+    assert_eq!(
+        j1["complete"],
+        json!(true),
+        "blob must be complete after chunk 1"
+    );
     assert_eq!(j1["chunks_received"], json!(2));
 
     let (dl_status, dl) = download(&srv, blob_id).await;
     assert_eq!(dl_status, 200, "download: {dl}");
     let returned = b64_decode(dl["data"].as_str().unwrap()).unwrap();
-    assert_eq!(returned, full, "assembled data must equal concatenation of chunks");
+    assert_eq!(
+        returned, full,
+        "assembled data must equal concatenation of chunks"
+    );
 }
 
 // ── 22: three-chunk binary upload assembles correctly ────────────────────────
@@ -464,12 +478,21 @@ async fn test_22_three_chunk_binary_upload_assembles_correctly() {
     let full: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();
 
     for (i, part) in parts.iter().enumerate() {
-        let (s, j) = upload_chunk(&srv, blob_id, "application/octet-stream", part, true,
-                                  i as u64, 3).await;
+        let (s, j) = upload_chunk(
+            &srv,
+            blob_id,
+            "application/octet-stream",
+            part,
+            true,
+            i as u64,
+            3,
+        )
+        .await;
         assert_eq!(s, 200, "chunk {i}: {j}");
         let expected_complete = i == 2;
         assert_eq!(
-            j["complete"], json!(expected_complete),
+            j["complete"],
+            json!(expected_complete),
             "complete flag wrong after chunk {i}"
         );
     }
@@ -531,7 +554,11 @@ async fn test_25_meta_reflects_partial_state_mid_upload() {
     let resp = call(&srv.app, get(&format!("/api/bus/blobs/{}", blob_id))).await;
     assert_eq!(resp.status().as_u16(), 200);
     let meta = body_json(resp).await;
-    assert_eq!(meta["complete"], json!(false), "must not be complete with 2/3 chunks");
+    assert_eq!(
+        meta["complete"],
+        json!(false),
+        "must not be complete with 2/3 chunks"
+    );
     assert_eq!(meta["total_chunks"], json!(3));
     assert_eq!(meta["chunks_received"], json!(2));
 }
@@ -551,7 +578,10 @@ async fn test_26_blob_ready_event_fires_only_after_final_chunk() {
     let early_fire = msgs_mid.as_array().unwrap().iter().any(|m| {
         m["type"].as_str() == Some("bus.blob_ready") && m["blob_id"].as_str() == Some(blob_id)
     });
-    assert!(!early_fire, "bus.blob_ready must not fire before the final chunk");
+    assert!(
+        !early_fire,
+        "bus.blob_ready must not fire before the final chunk"
+    );
 
     // Send final chunk
     upload_chunk(&srv, blob_id, "text/plain", b"beta", false, 1, 2).await;
@@ -562,7 +592,10 @@ async fn test_26_blob_ready_event_fires_only_after_final_chunk() {
     let fired = msgs_done.as_array().unwrap().iter().any(|m| {
         m["type"].as_str() == Some("bus.blob_ready") && m["blob_id"].as_str() == Some(blob_id)
     });
-    assert!(fired, "bus.blob_ready must appear in bus messages after the final chunk");
+    assert!(
+        fired,
+        "bus.blob_ready must appear in bus messages after the final chunk"
+    );
 }
 
 // ── 27: size_bytes reflects cumulative chunk sizes ────────────────────────────
@@ -599,8 +632,13 @@ async fn test_28_large_multi_chunk_upload_round_trips_correctly() {
 
     for (i, chunk) in chunks.iter().enumerate() {
         let (s, j) = upload_chunk(
-            &srv, blob_id, "application/octet-stream",
-            chunk, true, i as u64, total,
+            &srv,
+            blob_id,
+            "application/octet-stream",
+            chunk,
+            true,
+            i as u64,
+            total,
         )
         .await;
         assert_eq!(s, 200, "chunk {i}: {j}");
@@ -609,7 +647,10 @@ async fn test_28_large_multi_chunk_upload_round_trips_correctly() {
     let (dl_status, dl) = download(&srv, blob_id).await;
     assert_eq!(dl_status, 200, "download: {dl}");
     let returned = b64_decode(dl["data"].as_str().unwrap()).unwrap();
-    assert_eq!(returned, full, "round-tripped data must match original across all 8 chunks");
+    assert_eq!(
+        returned, full,
+        "round-tripped data must match original across all 8 chunks"
+    );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -630,7 +671,11 @@ async fn test_29_completed_multi_chunk_blob_can_be_deleted() {
     assert_eq!(del.status().as_u16(), 200);
 
     let meta = call(&srv.app, get(&format!("/api/bus/blobs/{}", blob_id))).await;
-    assert_eq!(meta.status().as_u16(), 404, "meta should be 404 after delete");
+    assert_eq!(
+        meta.status().as_u16(),
+        404,
+        "meta should be 404 after delete"
+    );
 
     let (dl_status, _) = download(&srv, blob_id).await;
     assert_eq!(dl_status, 404, "download should be 404 after delete");
@@ -691,7 +736,10 @@ async fn test_31_multi_chunk_blob_ttl_expiry() {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     let (status, dl) = download(&srv, blob_id).await;
-    assert_eq!(status, 410, "expected 410 Gone for expired multi-chunk blob, got {status}: {dl}");
+    assert_eq!(
+        status, 410,
+        "expected 410 Gone for expired multi-chunk blob, got {status}: {dl}"
+    );
     assert_eq!(dl["error"].as_str().unwrap(), "blob_expired");
 }
 
@@ -755,7 +803,10 @@ async fn test_33_access_control_on_completed_multi_chunk_blob() {
     // Correct agent → 200
     let ok = call(
         &srv.app,
-        get(&format!("/api/bus/blobs/{}/download?agent=natasha", blob_id)),
+        get(&format!(
+            "/api/bus/blobs/{}/download?agent=natasha",
+            blob_id
+        )),
     )
     .await;
     assert_eq!(ok.status().as_u16(), 200);
@@ -782,11 +833,15 @@ async fn test_34_multi_chunk_blob_multiple_allowed_agents() {
     for agent in &["natasha", "boris"] {
         let resp = call(
             &srv.app,
-            get(&format!("/api/bus/blobs/{}/download?agent={}", blob_id, agent)),
+            get(&format!(
+                "/api/bus/blobs/{}/download?agent={}",
+                blob_id, agent
+            )),
         )
         .await;
         assert_eq!(
-            resp.status().as_u16(), 200,
+            resp.status().as_u16(),
+            200,
             "agent {agent} should be allowed"
         );
     }
@@ -796,7 +851,11 @@ async fn test_34_multi_chunk_blob_multiple_allowed_agents() {
         get(&format!("/api/bus/blobs/{}/download?agent=eve", blob_id)),
     )
     .await;
-    assert_eq!(denied.status().as_u16(), 403, "unlisted agent must be denied");
+    assert_eq!(
+        denied.status().as_u16(),
+        403,
+        "unlisted agent must be denied"
+    );
 }
 
 // ── 35: upload of chunk requires authentication ───────────────────────────────
@@ -864,8 +923,7 @@ async fn test_37_blob_ready_event_contains_mime_type_and_size() {
         .unwrap()
         .iter()
         .find(|m| {
-            m["type"].as_str() == Some("bus.blob_ready")
-                && m["blob_id"].as_str() == Some(blob_id)
+            m["type"].as_str() == Some("bus.blob_ready") && m["blob_id"].as_str() == Some(blob_id)
         })
         .cloned()
         .expect("bus.blob_ready event must be present");

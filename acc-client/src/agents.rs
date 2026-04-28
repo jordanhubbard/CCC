@@ -11,7 +11,10 @@ pub struct AgentsApi<'a> {
 
 impl<'a> AgentsApi<'a> {
     pub fn list(self) -> ListAgentsBuilder<'a> {
-        ListAgentsBuilder { client: self.client, online: None }
+        ListAgentsBuilder {
+            client: self.client,
+            online: None,
+        }
     }
 
     /// GET /api/agents/names?online=...

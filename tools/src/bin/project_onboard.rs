@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Parser)]
-#[command(name = "project-onboard", about = "Bootstrap a new project into the ACC fleet")]
+#[command(
+    name = "project-onboard",
+    about = "Bootstrap a new project into the ACC fleet"
+)]
 struct Args {
     /// GitHub repo (owner/repo or full URL)
     #[arg(long)]
@@ -515,9 +518,11 @@ async fn onboard(
     if shared.exists() {
         std::fs::create_dir_all(&accfs_dir).map_err(|e| e.to_string())?;
         let json_str = serde_json::to_string_pretty(&project).map_err(|e| e.to_string())?;
-        std::fs::write(accfs_dir.join("project.json"), json_str)
-            .map_err(|e| e.to_string())?;
-        log(&format!("Project record saved: {}/project.json", accfs_dir.display()));
+        std::fs::write(accfs_dir.join("project.json"), json_str).map_err(|e| e.to_string())?;
+        log(&format!(
+            "Project record saved: {}/project.json",
+            accfs_dir.display()
+        ));
     }
 
     // Broadcast project.arrived

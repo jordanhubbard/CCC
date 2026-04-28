@@ -166,23 +166,14 @@ impl QdrantClient {
             .map_err(QdrantError::Http)?;
         let resp = Self::check_status(resp).await?;
         let raw: Value = resp.json().await.map_err(QdrantError::Http)?;
-        let hits: Vec<QdrantSearchHit> = serde_json::from_value(
-            raw["result"]
-                .clone(),
-        )
-        .map_err(|e| QdrantError::Parse(format!("search result: {e}")))?;
+        let hits: Vec<QdrantSearchHit> = serde_json::from_value(raw["result"].clone())
+            .map_err(|e| QdrantError::Parse(format!("search result: {e}")))?;
 
-        hits.into_iter()
-            .map(SearchResult::try_from)
-            .collect()
+        hits.into_iter().map(SearchResult::try_from).collect()
     }
 
     /// Delete points by their string IDs.
-    pub async fn delete_points(
-        &self,
-        collection: &str,
-        ids: &[String],
-    ) -> Result<(), QdrantError> {
+    pub async fn delete_points(&self, collection: &str, ids: &[String]) -> Result<(), QdrantError> {
         debug!("deleting {} points from '{collection}'", ids.len());
         let body = json!({ "points": ids });
         let resp = self

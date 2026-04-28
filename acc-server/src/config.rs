@@ -56,7 +56,9 @@ pub struct SupervisedProcess {
     pub restart_delay_ms: u64,
 }
 
-fn default_restart_delay_ms() -> u64 { 1000 }
+fn default_restart_delay_ms() -> u64 {
+    1000
+}
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 #[serde(default)]
@@ -225,8 +227,7 @@ pub fn load() -> ResolvedConfig {
 
     let db_path = evar("ACC_DB_PATH");
 
-    let auth_db_path = evar("AUTH_DB_PATH")
-        .unwrap_or_else(|| format!("{}/.acc/auth.db", home));
+    let auth_db_path = evar("AUTH_DB_PATH").unwrap_or_else(|| format!("{}/.acc/auth.db", home));
 
     // LLM providers: merge JSON config with LLM_PROVIDERS env var.
     // JSON config provides the baseline; env var entries are appended then the whole
@@ -238,14 +239,30 @@ pub fn load() -> ResolvedConfig {
         if !raw.is_empty() {
             for (i, part) in raw.split(',').enumerate() {
                 let fields: Vec<&str> = part.trim().splitn(6, '|').collect();
-                if fields.len() < 4 { continue; }
+                if fields.len() < 4 {
+                    continue;
+                }
                 llm_providers.push(LlmProviderEntry {
                     provider_type: fields[0].to_string(),
-                    url: if fields[1].is_empty() { None } else { Some(fields[1].to_string()) },
-                    api_key: if fields[2].is_empty() { None } else { Some(fields[2].to_string()) },
+                    url: if fields[1].is_empty() {
+                        None
+                    } else {
+                        Some(fields[1].to_string())
+                    },
+                    api_key: if fields[2].is_empty() {
+                        None
+                    } else {
+                        Some(fields[2].to_string())
+                    },
                     model: fields[3].to_string(),
-                    label: fields.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                    priority: fields.get(5).and_then(|s| s.parse().ok()).unwrap_or(i as u8),
+                    label: fields
+                        .get(4)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string()),
+                    priority: fields
+                        .get(5)
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(i as u8),
                 });
             }
         }

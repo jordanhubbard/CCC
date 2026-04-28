@@ -16,9 +16,9 @@
 pub mod agents;
 pub mod auth;
 pub mod bus;
-pub mod llm_config;
 pub mod error;
 pub mod items;
+pub mod llm_config;
 pub mod memory;
 pub mod projects;
 pub mod queue;
@@ -46,8 +46,8 @@ impl Client {
     /// Construct a client with an explicit base URL and bearer token.
     pub fn new(base_url: impl Into<String>, token: &str) -> Result<Self> {
         let mut headers = HeaderMap::new();
-        let auth = HeaderValue::from_str(&format!("Bearer {token}"))
-            .map_err(|_| Error::InvalidToken)?;
+        let auth =
+            HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| Error::InvalidToken)?;
         headers.insert(AUTHORIZATION, auth);
         let http = reqwest::Client::builder()
             .default_headers(headers)

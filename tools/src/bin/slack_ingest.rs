@@ -15,8 +15,14 @@ struct Channel {
 }
 
 const CHANNELS: &[Channel] = &[
-    Channel { name: "rockyandfriends", id: "C0AMNRSN9EZ" },
-    Channel { name: "project-ccc", id: "C0ANY3AGW4Q" },
+    Channel {
+        name: "rockyandfriends",
+        id: "C0AMNRSN9EZ",
+    },
+    Channel {
+        name: "project-ccc",
+        id: "C0ANY3AGW4Q",
+    },
 ];
 
 #[tokio::main]
@@ -29,11 +35,11 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let qdrant_url = std::env::var("QDRANT_URL")
-        .unwrap_or_else(|_| "http://localhost:6333".to_string());
+    let qdrant_url =
+        std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
     let qdrant_key = acc_tools::resolve_qdrant_api_key();
-    let qdrant = acc_qdrant::QdrantClient::new(&qdrant_url, qdrant_key.as_deref())
-        .expect("qdrant client");
+    let qdrant =
+        acc_qdrant::QdrantClient::new(&qdrant_url, qdrant_key.as_deref()).expect("qdrant client");
 
     // Ensure collection exists
     if let Err(e) = qdrant
@@ -92,9 +98,7 @@ async fn main() {
         let points: Vec<Value> = chunks
             .iter()
             .zip(vectors.iter())
-            .map(|((id, _text, payload), vec)| {
-                json!({"id": id, "vector": vec, "payload": payload})
-            })
+            .map(|((id, _text, payload), vec)| json!({"id": id, "vector": vec, "payload": payload}))
             .collect();
 
         if let Err(e) = qdrant.upsert_points_raw(COLLECTION, points).await {

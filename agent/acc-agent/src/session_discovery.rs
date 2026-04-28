@@ -27,20 +27,26 @@ pub async fn discover(cfg: &Config) -> DiscoverySnapshot {
         .map(|executor| build_executor_status(cfg, executor, &sessions))
         .collect();
 
-    DiscoverySnapshot { executors, sessions }
+    DiscoverySnapshot {
+        executors,
+        sessions,
+    }
 }
 
 pub fn supported_executors() -> Vec<&'static str> {
-    vec!["claude_cli", "codex_cli", "cursor_cli", "opencode", "inference_key"]
+    vec![
+        "claude_cli",
+        "codex_cli",
+        "cursor_cli",
+        "opencode",
+        "inference_key",
+    ]
 }
 
 pub fn infer_executor(pane: &PaneInfo) -> Option<&'static str> {
     let haystack = format!(
         "{} {} {} {}",
-        pane.session_name,
-        pane.pane_title,
-        pane.current_command,
-        pane.start_command
+        pane.session_name, pane.pane_title, pane.current_command, pane.start_command
     )
     .to_ascii_lowercase();
 
@@ -58,9 +64,13 @@ pub fn infer_executor(pane: &PaneInfo) -> Option<&'static str> {
 }
 
 async fn classify_session(cfg: &Config, pane: &PaneInfo, executor: &str) -> AgentSession {
-    let capture = tmux::capture_pane(&pane.pane_id, 20).await.unwrap_or_default();
+    let capture = tmux::capture_pane(&pane.pane_id, 20)
+        .await
+        .unwrap_or_default();
     let auth_state = classify_auth_state(cfg, executor, &capture);
-    let activity_epoch = pane.activity_epoch.unwrap_or_else(|| Utc::now().timestamp());
+    let activity_epoch = pane
+        .activity_epoch
+        .unwrap_or_else(|| Utc::now().timestamp());
     let last_activity = Utc.timestamp_opt(activity_epoch, 0).single();
     let age_secs = Utc::now().timestamp() - activity_epoch;
     let looks_idle = looks_idle_prompt(&capture);
@@ -108,9 +118,15 @@ fn build_executor_status(cfg: &Config, executor: &str, sessions: &[AgentSession]
         "inference_key" => env_inference_ready(),
         _ => false,
     };
-    let auth_state = if executor_sessions.iter().any(|s| s.auth_state.as_deref() == Some("ready")) {
+    let auth_state = if executor_sessions
+        .iter()
+        .any(|s| s.auth_state.as_deref() == Some("ready"))
+    {
         "ready"
-    } else if executor_sessions.iter().any(|s| s.auth_state.as_deref() == Some("unauthenticated")) {
+    } else if executor_sessions
+        .iter()
+        .any(|s| s.auth_state.as_deref() == Some("unauthenticated"))
+    {
         "unauthenticated"
     } else if installed && env_auth_ready(cfg, executor) {
         "ready"
@@ -123,7 +139,10 @@ fn build_executor_status(cfg: &Config, executor: &str, sessions: &[AgentSession]
 
     let mut extra = BTreeMap::new();
     extra.insert("type".into(), serde_json::json!(executor));
-    extra.insert("session_count".into(), serde_json::json!(executor_sessions.len()));
+    extra.insert(
+        "session_count".into(),
+        serde_json::json!(executor_sessions.len()),
+    );
 
     AgentExecutor {
         executor: executor.to_string(),
@@ -154,15 +173,23 @@ fn env_auth_ready(cfg: &Config, executor: &str) -> bool {
     let home = std::env::var("HOME").unwrap_or_else(|_| cfg.acc_dir.to_string_lossy().to_string());
     match executor {
         "claude_cli" => {
-            std::env::var("ANTHROPIC_API_KEY").map(|v| !v.is_empty()).unwrap_or(false)
+            std::env::var("ANTHROPIC_API_KEY")
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
                 || PathBuf::from(&home).join(".claude/credentials").exists()
         }
-        "codex_cli" => std::env::var("OPENAI_API_KEY").map(|v| !v.is_empty()).unwrap_or(false),
+        "codex_cli" => std::env::var("OPENAI_API_KEY")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false),
         "cursor_cli" => {
-            std::env::var("CURSOR_SESSION_TOKEN").map(|v| !v.is_empty()).unwrap_or(false)
+            std::env::var("CURSOR_SESSION_TOKEN")
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
                 || PathBuf::from(&home).join(".cursor/session").exists()
         }
-        "opencode" => std::env::var("OPENAI_API_KEY").map(|v| !v.is_empty()).unwrap_or(false),
+        "opencode" => std::env::var("OPENAI_API_KEY")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false),
         "inference_key" => env_inference_ready(),
         _ => false,
     }
@@ -176,7 +203,14 @@ fn env_inference_ready() -> bool {
 
 fn derive_project_binding(session_name: &str, executor: &str) -> Option<String> {
     let mut trimmed = session_name.to_string();
-    for prefix in [executor, executor.trim_end_matches("_cli"), "claude", "codex", "cursor", "opencode"] {
+    for prefix in [
+        executor,
+        executor.trim_end_matches("_cli"),
+        "claude",
+        "codex",
+        "cursor",
+        "opencode",
+    ] {
         let colon = format!("{prefix}:");
         let dash = format!("{prefix}-");
         if let Some(rest) = trimmed.strip_prefix(&colon) {
@@ -197,7 +231,12 @@ fn derive_project_binding(session_name: &str, executor: &str) -> Option<String> 
 }
 
 fn looks_idle_prompt(capture: &str) -> bool {
-    let last = capture.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim();
+    let last = capture
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
     last.ends_with('$')
         || last.ends_with('%')
         || last.ends_with('>')
@@ -219,7 +258,11 @@ fn which_bin(name: &str) -> Option<PathBuf> {
     std::env::var("PATH").ok().and_then(|path_var| {
         path_var.split(':').find_map(|dir| {
             let candidate = PathBuf::from(dir).join(name);
-            if candidate.exists() { Some(candidate) } else { None }
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
         })
     })
 }
@@ -246,15 +289,31 @@ mod tests {
 
     #[test]
     fn infer_executor_from_tmux_metadata() {
-        assert_eq!(infer_executor(&pane("claude:proj", "bash", "claude")), Some("claude_cli"));
-        assert_eq!(infer_executor(&pane("codex-main", "bash", "codex --sandbox danger-full-access --full-auto")), Some("codex_cli"));
+        assert_eq!(
+            infer_executor(&pane("claude:proj", "bash", "claude")),
+            Some("claude_cli")
+        );
+        assert_eq!(
+            infer_executor(&pane(
+                "codex-main",
+                "bash",
+                "codex --sandbox danger-full-access --full-auto"
+            )),
+            Some("codex_cli")
+        );
         assert_eq!(infer_executor(&pane("misc", "zsh", "sleep 5")), None);
     }
 
     #[test]
     fn derive_project_binding_from_session_name() {
-        assert_eq!(derive_project_binding("claude:proj-a", "claude_cli").as_deref(), Some("proj-a"));
-        assert_eq!(derive_project_binding("codex-main", "codex_cli").as_deref(), Some("main"));
+        assert_eq!(
+            derive_project_binding("claude:proj-a", "claude_cli").as_deref(),
+            Some("proj-a")
+        );
+        assert_eq!(
+            derive_project_binding("codex-main", "codex_cli").as_deref(),
+            Some("main")
+        );
         assert_eq!(derive_project_binding("cursor", "cursor_cli"), None);
     }
 

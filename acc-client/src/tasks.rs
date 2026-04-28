@@ -54,7 +54,9 @@ impl<'a> TasksApi<'a> {
     /// Returns [`Error::Conflict`] if another agent has already claimed the
     /// task, or [`Error::Locked`] if the task has unfulfilled dependencies.
     pub async fn claim(self, id: &str, agent: &str) -> Result<Task> {
-        let body = ClaimRequest { agent: agent.to_string() };
+        let body = ClaimRequest {
+            agent: agent.to_string(),
+        };
         let resp = self
             .client
             .http()
@@ -67,7 +69,9 @@ impl<'a> TasksApi<'a> {
 
     /// PUT /api/tasks/{id}/unclaim
     pub async fn unclaim(self, id: &str, agent: Option<&str>) -> Result<()> {
-        let body = UnclaimRequest { agent: agent.map(str::to_string) };
+        let body = UnclaimRequest {
+            agent: agent.map(str::to_string),
+        };
         let resp = self
             .client
             .http()
@@ -79,12 +83,7 @@ impl<'a> TasksApi<'a> {
     }
 
     /// PUT /api/tasks/{id}/complete
-    pub async fn complete(
-        self,
-        id: &str,
-        agent: Option<&str>,
-        output: Option<&str>,
-    ) -> Result<()> {
+    pub async fn complete(self, id: &str, agent: Option<&str>, output: Option<&str>) -> Result<()> {
         let body = CompleteRequest {
             agent: agent.map(str::to_string),
             output: output.map(str::to_string),

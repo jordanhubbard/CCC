@@ -8,8 +8,8 @@
 //!   - vector_health: no auth required; returns 200 or 500 (never 4xx)
 mod helpers;
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::json;
 
 // ── memory/ingest ─────────────────────────────────────────────────────────────
@@ -33,7 +33,8 @@ async fn test_memory_ingest_empty_text_rejected() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/memory/ingest", &json!({"text": ""})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let body = helpers::body_json(resp).await;
     assert!(body["error"].as_str().unwrap().contains("text"));
@@ -110,7 +111,8 @@ async fn test_memory_context_empty_query_rejected() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/memory/context", &json!({"query": ""})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let body = helpers::body_json(resp).await;
     assert!(body["error"].as_str().unwrap().contains("query"));
@@ -144,7 +146,10 @@ async fn test_vector_health_response_has_ok_field() {
         .body(Body::empty())
         .unwrap();
     let body = helpers::body_json(helpers::call(&ts.app, req).await).await;
-    assert!(body["ok"].is_boolean(), "response must have 'ok' boolean, got: {body}");
+    assert!(
+        body["ok"].is_boolean(),
+        "response must have 'ok' boolean, got: {body}"
+    );
 }
 
 // ── vector/search ─────────────────────────────────────────────────────────────
@@ -178,7 +183,7 @@ async fn test_vector_upsert_requires_auth() {
         .uri("/api/vector/upsert")
         .header("Content-Type", "application/json")
         .body(Body::from(
-            json!({"collection": "c", "id": "1", "text": "hello"}).to_string()
+            json!({"collection": "c", "id": "1", "text": "hello"}).to_string(),
         ))
         .unwrap();
     let resp = helpers::call(&ts.app, req).await;
@@ -191,7 +196,8 @@ async fn test_vector_upsert_missing_fields_rejected() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/vector/upsert", &json!({"collection": "c"})),
-    ).await;
+    )
+    .await;
     // Axum's JSON extractor returns 422 when required struct fields (id, text) are absent
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
@@ -201,11 +207,15 @@ async fn test_vector_upsert_empty_text_rejected() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        helpers::post_json("/api/vector/upsert", &json!({
-            "collection": "test",
-            "id": "doc-1",
-            "text": ""
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/vector/upsert",
+            &json!({
+                "collection": "test",
+                "id": "doc-1",
+                "text": ""
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

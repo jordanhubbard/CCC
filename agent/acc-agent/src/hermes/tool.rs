@@ -1,6 +1,6 @@
+use serde_json::{json, Value};
 use std::future::Future;
 use std::pin::Pin;
-use serde_json::{json, Value};
 
 pub type ToolResult = Result<String, String>;
 
@@ -9,10 +9,8 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
-    fn execute<'a>(
-        &'a self,
-        input: Value,
-    ) -> Pin<Box<dyn Future<Output = ToolResult> + Send + 'a>>;
+    fn execute<'a>(&'a self, input: Value)
+        -> Pin<Box<dyn Future<Output = ToolResult> + Send + 'a>>;
 }
 
 pub struct ToolRegistry {
@@ -34,7 +32,10 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
+        self.tools
+            .iter()
+            .find(|t| t.name() == name)
+            .map(|t| t.as_ref())
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -248,15 +249,9 @@ impl Tool for WebFetchTool {
                 "POST" => client.post(&url),
                 m => return Err(format!("unsupported method: {m}")),
             };
-            let resp = req
-                .send()
-                .await
-                .map_err(|e| format!("fetch error: {e}"))?;
+            let resp = req.send().await.map_err(|e| format!("fetch error: {e}"))?;
             let status = resp.status();
-            let text = resp
-                .text()
-                .await
-                .map_err(|e| format!("read error: {e}"))?;
+            let text = resp.text().await.map_err(|e| format!("read error: {e}"))?;
             if status.is_success() {
                 Ok(text)
             } else {
@@ -301,7 +296,9 @@ mod tests {
     #[tokio::test]
     async fn bash_tool_success() {
         let tool = BashTool;
-        let result = tool.execute(serde_json::json!({"command": "echo hello"})).await;
+        let result = tool
+            .execute(serde_json::json!({"command": "echo hello"}))
+            .await;
         assert!(result.is_ok());
         assert!(result.unwrap().contains("hello"));
     }

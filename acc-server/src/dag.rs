@@ -50,12 +50,7 @@ mod tests {
     fn g(pairs: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
         pairs
             .iter()
-            .map(|(k, vs)| {
-                (
-                    k.to_string(),
-                    vs.iter().map(|s| s.to_string()).collect(),
-                )
-            })
+            .map(|(k, vs)| (k.to_string(), vs.iter().map(|s| s.to_string()).collect()))
             .collect()
     }
 
@@ -102,12 +97,7 @@ mod tests {
     #[test]
     fn long_chain_cycle_detected() {
         // Chain: 1→2→3→4→5; making 5 depend on 1 would close the loop
-        let graph = g(&[
-            ("2", &["1"]),
-            ("3", &["2"]),
-            ("4", &["3"]),
-            ("5", &["4"]),
-        ]);
+        let graph = g(&[("2", &["1"]), ("3", &["2"]), ("4", &["3"]), ("5", &["4"])]);
         assert!(would_create_cycle(&graph, "1", &["5".into()]));
     }
 

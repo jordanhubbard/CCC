@@ -97,7 +97,10 @@ mod tests {
     fn parse_dotenv_handles_quotes_and_comments() {
         let text = "# a comment\nACC_TOKEN=\"abc123\"\nACC_AGENT_TOKEN=plain\nOTHER=ignore";
         assert_eq!(parse_dotenv(text, "ACC_TOKEN").as_deref(), Some("abc123"));
-        assert_eq!(parse_dotenv(text, "ACC_AGENT_TOKEN").as_deref(), Some("plain"));
+        assert_eq!(
+            parse_dotenv(text, "ACC_AGENT_TOKEN").as_deref(),
+            Some("plain")
+        );
         assert!(parse_dotenv(text, "MISSING").is_none());
     }
 }

@@ -57,10 +57,7 @@ async fn run() {
 
     // Fetch stale tasks from server
     let stale_data = get_json(&client, &base, "/api/queue/stale", &token).await;
-    let server_stale = stale_data["stale"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let server_stale = stale_data["stale"].as_array().cloned().unwrap_or_default();
     report["server_stale_count"] = json!(server_stale.len());
 
     // Fetch claimed tasks
@@ -72,8 +69,7 @@ async fn run() {
     report["claimed_count"] = json!(claimed.len());
 
     // Fetch full queue
-    let queue_data =
-        get_json(&client, &base, "/api/queue?exclude_completed=true", &token).await;
+    let queue_data = get_json(&client, &base, "/api/queue?exclude_completed=true", &token).await;
     let queue_items: Vec<Value> = queue_data["items"]
         .as_array()
         .cloned()
@@ -152,10 +148,7 @@ async fn run() {
         .count();
 
     report["alerts"] = json!(all_alerts);
-    let alert_count = report["alerts"]
-        .as_array()
-        .map(|a| a.len())
-        .unwrap_or(0);
+    let alert_count = report["alerts"].as_array().map(|a| a.len()).unwrap_or(0);
     report["alert_count"] = json!(alert_count);
     report["alert_summary"] = json!({
         "stale_claims": stale_count,
@@ -384,13 +377,7 @@ async fn get_json(client: &reqwest::Client, base: &str, path: &str, token: &str)
     }
 }
 
-async fn post_json(
-    client: &reqwest::Client,
-    base: &str,
-    path: &str,
-    token: &str,
-    body: &Value,
-) {
+async fn post_json(client: &reqwest::Client, base: &str, path: &str, token: &str, body: &Value) {
     let url = format!("{}{}", base, path);
     let req = client.post(&url).json(body);
     let req = if !token.is_empty() {

@@ -39,7 +39,11 @@ async fn get_setup_status(State(state): State<Arc<AppState>>) -> impl IntoRespon
 
 async fn get_config(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let port: u16 = std::env::var("ACC_PORT")
@@ -70,7 +74,11 @@ async fn put_config(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let obj = match body.as_object() {
@@ -85,11 +93,11 @@ async fn put_config(
     };
 
     let allowed = [
-        ("agent_name",    "AGENT_NAME"),
-        ("public_url",    "ACC_HOST_PUBLIC"),
-        ("llm_url",       "OPENAI_BASE_URL"),
-        ("fs_root",       "ACC_FS_ROOT"),
-        ("log_level",     "RUST_LOG"),
+        ("agent_name", "AGENT_NAME"),
+        ("public_url", "ACC_HOST_PUBLIC"),
+        ("llm_url", "OPENAI_BASE_URL"),
+        ("fs_root", "ACC_FS_ROOT"),
+        ("log_level", "RUST_LOG"),
     ];
 
     let mut applied = Vec::new();
@@ -98,14 +106,18 @@ async fn put_config(
             // Safety: bootstrap-only endpoint called before concurrent request load.
             // This is a known limitation; Phase 2 replaces this with ccc.json writes.
             #[allow(unused_unsafe)]
-            unsafe { std::env::set_var(env_key, val) };
+            unsafe {
+                std::env::set_var(env_key, val)
+            };
             applied.push(*key);
         }
     }
 
     if let Some(v) = obj.get("supervisor_enabled").and_then(|v| v.as_bool()) {
         #[allow(unused_unsafe)]
-        unsafe { std::env::set_var("SUPERVISOR_ENABLED", if v { "true" } else { "false" }) };
+        unsafe {
+            std::env::set_var("SUPERVISOR_ENABLED", if v { "true" } else { "false" })
+        };
         applied.push("supervisor_enabled");
     }
 

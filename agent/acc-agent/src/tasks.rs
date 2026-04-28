@@ -4,19 +4,19 @@
 //! Phase_commit tasks run git to push approved work to a branch.
 //! Multiple agents run this concurrently; the server's SQL atomic claim prevents double-work.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
-use std::collections::HashMap;
-use tokio::process::Command;
-use tokio::sync::Notify;
-use tokio::time::sleep;
-use serde_json::Value;
-use acc_client::Client;
-use acc_model::{CreateTaskRequest, HeartbeatRequest, ReviewResult, TaskStatus, TaskType};
 use crate::config::Config;
 use crate::peers;
 use crate::session_registry;
+use acc_client::Client;
+use acc_model::{CreateTaskRequest, HeartbeatRequest, ReviewResult, TaskStatus, TaskType};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+use tokio::process::Command;
+use tokio::sync::Notify;
+use tokio::time::sleep;
 
 const POLL_IDLE: Duration = Duration::from_secs(30);
 const POLL_BUSY: Duration = Duration::from_secs(5);
@@ -47,11 +47,7 @@ const TASK_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 /// TASK_KEEPALIVE_INTERVAL until the returned sender is dropped or
 /// signaled. Fire-and-forget on the network: if a heartbeat POST
 /// fails, the next interval tries again.
-fn spawn_keepalive(
-    cfg: Config,
-    client: Client,
-    note: String,
-) -> tokio::sync::oneshot::Sender<()> {
+fn spawn_keepalive(cfg: Config, client: Client, note: String) -> tokio::sync::oneshot::Sender<()> {
     let max_slots: u32 = std::env::var("ACC_MAX_TASKS_PER_AGENT")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -123,31 +119,52 @@ fn preferred_agent(task: &Value) -> Option<&str> {
     task.get("preferred_agent")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .or_else(|| task["metadata"]["preferred_agent"].as_str().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            task["metadata"]["preferred_agent"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+        })
 }
 
 pub async fn run(args: &[String]) {
-    let max_concurrent: usize = args.iter()
+    let max_concurrent: usize = args
+        .iter()
         .find(|a| a.starts_with("--max="))
         .and_then(|a| a[6..].parse().ok())
-        .or_else(|| std::env::var("ACC_MAX_TASKS_PER_AGENT").ok().and_then(|v| v.parse().ok()))
+        .or_else(|| {
+            std::env::var("ACC_MAX_TASKS_PER_AGENT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+        })
         .unwrap_or(2);
 
     let cfg = match Config::load() {
         Ok(c) => c,
-        Err(e) => { eprintln!("[tasks] config error: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("[tasks] config error: {e}");
+            std::process::exit(1);
+        }
     };
     if cfg.agent_name.is_empty() {
-        eprintln!("[tasks] AGENT_NAME not set"); std::process::exit(1);
+        eprintln!("[tasks] AGENT_NAME not set");
+        std::process::exit(1);
     }
 
     let _ = std::fs::create_dir_all(cfg.acc_dir.join("logs"));
-    log(&cfg, &format!("starting (agent={}, hub={}, max_concurrent={}, pair_programming={})",
-        cfg.agent_name, cfg.acc_url, max_concurrent, cfg.pair_programming));
+    log(
+        &cfg,
+        &format!(
+            "starting (agent={}, hub={}, max_concurrent={}, pair_programming={})",
+            cfg.agent_name, cfg.acc_url, max_concurrent, cfg.pair_programming
+        ),
+    );
 
     let client = match Client::new(&cfg.acc_url, &cfg.acc_token) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[tasks] http client: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("[tasks] http client: {e}");
+            std::process::exit(1);
+        }
     };
 
     // Recovery: unclaim any tasks the server still attributes to this
@@ -196,8 +213,12 @@ pub async fn run(args: &[String]) {
                     Ok(open_tasks) => {
                         for task in &open_tasks {
                             let task_id = task["id"].as_str().unwrap_or("").to_string();
-                            if task_id.is_empty() { continue; }
-                            if in_cooldown(&task_id) { continue; }
+                            if task_id.is_empty() {
+                                continue;
+                            }
+                            if in_cooldown(&task_id) {
+                                continue;
+                            }
 
                             if let Some(preferred) = preferred_agent(task) {
                                 if preferred != cfg.agent_name.as_str()
@@ -210,7 +231,13 @@ pub async fn run(args: &[String]) {
 
                             match claim_task(&cfg, &client, &task_id).await {
                                 Ok(claimed_task) => {
-                                    log(&cfg, &format!("claimed task {task_id}: {}", claimed_task["title"].as_str().unwrap_or("")));
+                                    log(
+                                        &cfg,
+                                        &format!(
+                                            "claimed task {task_id}: {}",
+                                            claimed_task["title"].as_str().unwrap_or("")
+                                        ),
+                                    );
                                     let cfg2 = cfg.clone();
                                     let client2 = client.clone();
                                     let task2 = claimed_task.clone();
@@ -221,7 +248,8 @@ pub async fn run(args: &[String]) {
                                     claimed = true;
                                     break 'work_poll;
                                 }
-                                Err(409) | Err(423) => { /* already claimed or blocked, try next */ }
+                                Err(409) | Err(423) => { /* already claimed or blocked, try next */
+                                }
                                 Err(429) => {
                                     log(&cfg, "at capacity (server side)");
                                     break 'work_poll;
@@ -233,7 +261,9 @@ pub async fn run(args: &[String]) {
                         }
                     }
                 }
-                if claimed { break; }
+                if claimed {
+                    break;
+                }
             }
         }
 
@@ -244,8 +274,12 @@ pub async fn run(args: &[String]) {
             if let Ok(review_tasks) = fetch_open_tasks(&cfg, &client, 10, "review").await {
                 for task in &review_tasks {
                     let task_id = task["id"].as_str().unwrap_or("").to_string();
-                    if task_id.is_empty() { continue; }
-                    if in_cooldown(&task_id) { continue; }
+                    if task_id.is_empty() {
+                        continue;
+                    }
+                    if in_cooldown(&task_id) {
+                        continue;
+                    }
 
                     if let Some(preferred) = preferred_agent(task) {
                         if preferred != cfg.agent_name.as_str()
@@ -268,7 +302,9 @@ pub async fn run(args: &[String]) {
                             break;
                         }
                         Err(409) | Err(423) => {}
-                        Err(e) => { log(&cfg, &format!("review claim error {e} for {task_id}")); }
+                        Err(e) => {
+                            log(&cfg, &format!("review claim error {e} for {task_id}"));
+                        }
                     }
                 }
             }
@@ -279,8 +315,12 @@ pub async fn run(args: &[String]) {
             if let Ok(phase_tasks) = fetch_open_tasks(&cfg, &client, 5, "phase_commit").await {
                 for task in &phase_tasks {
                     let task_id = task["id"].as_str().unwrap_or("").to_string();
-                    if task_id.is_empty() { continue; }
-                    if in_cooldown(&task_id) { continue; }
+                    if task_id.is_empty() {
+                        continue;
+                    }
+                    if in_cooldown(&task_id) {
+                        continue;
+                    }
 
                     match claim_task(&cfg, &client, &task_id).await {
                         Ok(claimed_task) => {
@@ -295,14 +335,19 @@ pub async fn run(args: &[String]) {
                             break;
                         }
                         Err(409) | Err(423) => {}
-                        Err(e) => { log(&cfg, &format!("phase_commit claim error {e} for {task_id}")); }
+                        Err(e) => {
+                            log(&cfg, &format!("phase_commit claim error {e} for {task_id}"));
+                        }
                     }
                 }
             }
         }
 
         if at_work_cap && !claimed {
-            log(&cfg, &format!("at work capacity ({}/{}), waiting", active, max_concurrent));
+            log(
+                &cfg,
+                &format!("at work capacity ({}/{}), waiting", active, max_concurrent),
+            );
         }
 
         if claimed {
@@ -332,7 +377,10 @@ async fn cleanup_stale_claims(cfg: &Config, client: &Client) {
     {
         Ok(v) => v,
         Err(e) => {
-            log(cfg, &format!("startup recovery: failed to list own claims: {e}"));
+            log(
+                cfg,
+                &format!("startup recovery: failed to list own claims: {e}"),
+            );
             return;
         }
     };
@@ -341,7 +389,10 @@ async fn cleanup_stale_claims(cfg: &Config, client: &Client) {
     }
     log(
         cfg,
-        &format!("startup recovery: releasing {} stale claim(s) from previous process", stale.len()),
+        &format!(
+            "startup recovery: releasing {} stale claim(s) from previous process",
+            stale.len()
+        ),
     );
     for t in &stale {
         let _ = client.tasks().unclaim(&t.id, Some(&cfg.agent_name)).await;
@@ -358,7 +409,10 @@ async fn bus_subscriber(cfg: Config, client: Client, nudge: Arc<Notify>) {
         match subscribe_bus(&cfg, &client, &nudge).await {
             Ok(()) => {}
             Err(e) => {
-                log(&cfg, &format!("[bus] disconnected: {e}, reconnecting in 5s"));
+                log(
+                    &cfg,
+                    &format!("[bus] disconnected: {e}, reconnecting in 5s"),
+                );
                 sleep(Duration::from_secs(5)).await;
             }
         }
@@ -388,7 +442,8 @@ async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>) -> Re
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty())
                             .collect();
-                    let satisfied = requires.iter()
+                    let satisfied = requires
+                        .iter()
                         .filter_map(|v| v.as_str())
                         .any(|r| my_caps.contains(r));
                     if !satisfied {
@@ -407,7 +462,12 @@ async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>) -> Re
 
 // ── Fetching / claiming ───────────────────────────────────────────────────────
 
-async fn fetch_open_tasks(_cfg: &Config, client: &Client, limit: usize, task_type: &str) -> Result<Vec<Value>, String> {
+async fn fetch_open_tasks(
+    _cfg: &Config,
+    client: &Client,
+    limit: usize,
+    task_type: &str,
+) -> Result<Vec<Value>, String> {
     let tt = parse_task_type(task_type).unwrap_or(TaskType::Work);
     let tasks = client
         .tasks()
@@ -492,7 +552,9 @@ async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers:
     let result = match tokio::time::timeout(
         WORK_TIMEOUT,
         crate::sdk::run_agent(&prompt, &workspace),
-    ).await {
+    )
+    .await
+    {
         Ok(r) => r,
         Err(_) => Err(format!("timeout after {}m", WORK_TIMEOUT.as_secs() / 60)),
     };
@@ -515,26 +577,37 @@ async fn execute_task(cfg: &Config, client: &Client, task: &Value, online_peers:
     mark_done(task_id);
 }
 
-
 // ── Pair programming: submit for review ──────────────────────────────────────
 
-async fn submit_for_review(cfg: &Config, client: &Client, task: &Value, output: &str, online_peers: &[String]) {
+async fn submit_for_review(
+    cfg: &Config,
+    client: &Client,
+    task: &Value,
+    output: &str,
+    online_peers: &[String],
+) {
     let task_id = task["id"].as_str().unwrap_or("");
     let project_id = task["project_id"].as_str().unwrap_or("");
     let title = task["title"].as_str().unwrap_or("(task)");
     let priority = task["priority"].as_i64().unwrap_or(2);
     let phase = task["phase"].as_str();
-    let outcome_id = task.get("outcome_id")
+    let outcome_id = task
+        .get("outcome_id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .or_else(|| task["metadata"]["outcome_id"].as_str().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            task["metadata"]["outcome_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or(task_id);
 
     // Work is done — complete it first
     complete_task(cfg, client, task_id, output).await;
 
     // Pick reviewer: first online peer that is not me
-    let reviewer = online_peers.iter()
+    let reviewer = online_peers
+        .iter()
         .find(|p| p.as_str() != cfg.agent_name.as_str())
         .map(|s| s.as_str())
         .unwrap_or("");
@@ -562,8 +635,14 @@ async fn submit_for_review(cfg: &Config, client: &Client, task: &Value, output: 
 
     match client.tasks().create(&req).await {
         Ok(review) => {
-            log(cfg, &format!("submitted {task_id} for review → {} (reviewer: {})", review.id,
-                if reviewer.is_empty() { "any" } else { reviewer }));
+            log(
+                cfg,
+                &format!(
+                    "submitted {task_id} for review → {} (reviewer: {})",
+                    review.id,
+                    if reviewer.is_empty() { "any" } else { reviewer }
+                ),
+            );
         }
         Err(e) => log(cfg, &format!("failed to create review task: {e}")),
     }
@@ -575,13 +654,21 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
     let task_id = task["id"].as_str().unwrap_or("unknown");
     let review_of_id = task["review_of"].as_str().unwrap_or("");
     let phase = task["phase"].as_str().unwrap_or("");
-    let outcome_id = task.get("outcome_id")
+    let outcome_id = task
+        .get("outcome_id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .or_else(|| task["metadata"]["outcome_id"].as_str().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            task["metadata"]["outcome_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or(review_of_id);
 
-    log(cfg, &format!("executing review {task_id} (reviewing {review_of_id})"));
+    log(
+        cfg,
+        &format!("executing review {task_id} (reviewing {review_of_id})"),
+    );
 
     // Fetch original task to get project_id
     let project_id = fetch_task_project_id(cfg, client, review_of_id, task).await;
@@ -589,7 +676,9 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
     let workspace = resolve_workspace(cfg, client, &project_id, "").await;
     let _ = std::fs::create_dir_all(&workspace);
 
-    let work_summary = task["metadata"]["work_output_summary"].as_str().unwrap_or("");
+    let work_summary = task["metadata"]["work_output_summary"]
+        .as_str()
+        .unwrap_or("");
     let ctx = serde_json::json!({
         "review_task": task,
         "review_of_id": review_of_id,
@@ -635,7 +724,9 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
     let review_output = match tokio::time::timeout(
         REVIEW_TIMEOUT,
         crate::sdk::run_agent(&review_prompt, &workspace),
-    ).await {
+    )
+    .await
+    {
         Ok(r) => r,
         Err(_) => Err(format!("timeout after {}m", REVIEW_TIMEOUT.as_secs() / 60)),
     };
@@ -645,7 +736,11 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
         Ok(out) => parse_review_output(&out),
         Err(e) => {
             log(cfg, &format!("review subprocess failed: {e}"));
-            ("rejected".to_string(), format!("subprocess failed: {e}"), vec![])
+            (
+                "rejected".to_string(),
+                format!("subprocess failed: {e}"),
+                vec![],
+            )
         }
     };
 
@@ -659,18 +754,41 @@ async fn execute_review_task(cfg: &Config, client: &Client, task: &Value) {
         set_review_result_on_task(cfg, client, review_of_id, &verdict, &reason).await;
     }
 
-    complete_task(cfg, client, task_id, &format!("verdict: {verdict}, reason: {reason}")).await;
+    complete_task(
+        cfg,
+        client,
+        task_id,
+        &format!("verdict: {verdict}, reason: {reason}"),
+    )
+    .await;
     mark_done(task_id);
-    log(cfg, &format!("review {task_id} done: {verdict} ({} gaps filed)", gaps.len()));
+    log(
+        cfg,
+        &format!(
+            "review {task_id} done: {verdict} ({} gaps filed)",
+            gaps.len()
+        ),
+    );
 }
 
-async fn fetch_task_project_id(_cfg: &Config, client: &Client, task_id: &str, fallback_task: &Value) -> String {
+async fn fetch_task_project_id(
+    _cfg: &Config,
+    client: &Client,
+    task_id: &str,
+    fallback_task: &Value,
+) -> String {
     if task_id.is_empty() {
-        return fallback_task["project_id"].as_str().unwrap_or("").to_string();
+        return fallback_task["project_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
     }
     match client.tasks().get(task_id).await {
         Ok(task) => task.project_id,
-        Err(_) => fallback_task["project_id"].as_str().unwrap_or("").to_string(),
+        Err(_) => fallback_task["project_id"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
     }
 }
 
@@ -678,7 +796,11 @@ fn parse_review_output(output: &str) -> (String, String, Vec<Value>) {
     let start = output.find('{').unwrap_or(output.len());
     let end = output.rfind('}').map(|i| i + 1).unwrap_or(output.len());
     if start >= end {
-        return ("rejected".to_string(), "unparseable output".to_string(), vec![]);
+        return (
+            "rejected".to_string(),
+            "unparseable output".to_string(),
+            vec![],
+        );
     }
     match serde_json::from_str::<Value>(&output[start..end]) {
         Ok(v) => {
@@ -687,11 +809,23 @@ fn parse_review_output(output: &str) -> (String, String, Vec<Value>) {
             let gaps = v["gaps"].as_array().cloned().unwrap_or_default();
             (verdict, reason, gaps)
         }
-        Err(_) => ("rejected".to_string(), "unparseable output".to_string(), vec![]),
+        Err(_) => (
+            "rejected".to_string(),
+            "unparseable output".to_string(),
+            vec![],
+        ),
     }
 }
 
-async fn create_gap_task(cfg: &Config, client: &Client, project_id: &str, phase: &str, review_task_id: &str, outcome_id: &str, gap: &Value) {
+async fn create_gap_task(
+    cfg: &Config,
+    client: &Client,
+    project_id: &str,
+    phase: &str,
+    review_task_id: &str,
+    outcome_id: &str,
+    gap: &Value,
+) {
     let title = gap["title"].as_str().unwrap_or("Gap task").to_string();
     let description = gap["description"].as_str().unwrap_or("").to_string();
     let priority = gap["priority"].as_i64().unwrap_or(2);
@@ -715,7 +849,13 @@ async fn create_gap_task(cfg: &Config, client: &Client, project_id: &str, phase:
     }
 }
 
-async fn set_review_result_on_task(cfg: &Config, client: &Client, task_id: &str, verdict: &str, reason: &str) {
+async fn set_review_result_on_task(
+    cfg: &Config,
+    client: &Client,
+    task_id: &str,
+    verdict: &str,
+    reason: &str,
+) {
     let result = match verdict {
         "approved" => ReviewResult::Approved,
         _ => ReviewResult::Rejected,
@@ -733,7 +873,10 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
     let project_id = task["project_id"].as_str().unwrap_or("");
     let phase = task["phase"].as_str().unwrap_or("unknown");
 
-    log(cfg, &format!("executing phase_commit {task_id}: phase={phase}"));
+    log(
+        cfg,
+        &format!("executing phase_commit {task_id}: phase={phase}"),
+    );
 
     let workspace = resolve_workspace(cfg, client, project_id, "").await;
     let branch = format!("phase/{phase}");
@@ -753,8 +896,14 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
             // review — never do non-FF merges automatically.
             let merge_outcome = run_git_merge_to_main(&workspace, &branch).await;
             match &merge_outcome {
-                Ok(s) => log(cfg, &format!("phase_commit {task_id}: merged {branch} → main ({s})")),
-                Err(e) => log(cfg, &format!("phase_commit {task_id}: merge to main skipped/failed: {e}")),
+                Ok(s) => log(
+                    cfg,
+                    &format!("phase_commit {task_id}: merged {branch} → main ({s})"),
+                ),
+                Err(e) => log(
+                    cfg,
+                    &format!("phase_commit {task_id}: merge to main skipped/failed: {e}"),
+                ),
             }
 
             // CCC-tk0: this is the milestone-commit task. Now that the
@@ -766,7 +915,10 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
                 if let Err(e) = client.request_json("POST", &path, None).await {
                     log(cfg, &format!("phase_commit {task_id}: /clean failed: {e} (push succeeded; bit will need manual reset)"));
                 } else {
-                    log(cfg, &format!("phase_commit {task_id}: marked project {project_id} clean"));
+                    log(
+                        cfg,
+                        &format!("phase_commit {task_id}: marked project {project_id} clean"),
+                    );
                 }
             }
             let summary = match merge_outcome {
@@ -784,7 +936,10 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
                 let path = format!("/api/projects/{project_id}/phase-commit-failed");
                 let body = serde_json::json!({"reason": e});
                 if let Err(re) = client.request_json("POST", &path, Some(&body)).await {
-                    log(cfg, &format!("phase_commit {task_id}: failure-report POST failed: {re}"));
+                    log(
+                        cfg,
+                        &format!("phase_commit {task_id}: failure-report POST failed: {re}"),
+                    );
                 }
             }
 
@@ -816,7 +971,9 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
                 "task_id": task_id,
                 "action_required": "Check git remote / SSH credentials and POST /api/projects/PROJ_ID/clean to resume.",
             });
-            let _ = client.request_json("POST", "/api/bus/send", Some(&alert)).await;
+            let _ = client
+                .request_json("POST", "/api/bus/send", Some(&alert))
+                .await;
         }
     }
     mark_done(task_id);
@@ -836,20 +993,35 @@ async fn execute_phase_commit_task(cfg: &Config, client: &Client, task: &Value) 
 async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<String, String> {
     let ws = workspace.to_str().unwrap_or(".");
 
-    let fetch = Command::new("git").args(["-C", ws, "fetch", "origin", "--quiet"])
-        .output().await.map_err(|e| format!("git fetch: {e}"))?;
+    let fetch = Command::new("git")
+        .args(["-C", ws, "fetch", "origin", "--quiet"])
+        .output()
+        .await
+        .map_err(|e| format!("git fetch: {e}"))?;
     if !fetch.status.success() {
-        return Err(format!("fetch: {}", String::from_utf8_lossy(&fetch.stderr).trim()));
+        return Err(format!(
+            "fetch: {}",
+            String::from_utf8_lossy(&fetch.stderr).trim()
+        ));
     }
 
-    let checkout = Command::new("git").args(["-C", ws, "checkout", "main"])
-        .output().await.map_err(|e| format!("git checkout main: {e}"))?;
+    let checkout = Command::new("git")
+        .args(["-C", ws, "checkout", "main"])
+        .output()
+        .await
+        .map_err(|e| format!("git checkout main: {e}"))?;
     if !checkout.status.success() {
-        return Err(format!("checkout main: {}", String::from_utf8_lossy(&checkout.stderr).trim()));
+        return Err(format!(
+            "checkout main: {}",
+            String::from_utf8_lossy(&checkout.stderr).trim()
+        ));
     }
 
-    let pull = Command::new("git").args(["-C", ws, "pull", "--ff-only", "origin", "main", "--quiet"])
-        .output().await.map_err(|e| format!("git pull main: {e}"))?;
+    let pull = Command::new("git")
+        .args(["-C", ws, "pull", "--ff-only", "origin", "main", "--quiet"])
+        .output()
+        .await
+        .map_err(|e| format!("git pull main: {e}"))?;
     if !pull.status.success() {
         let stderr = String::from_utf8_lossy(&pull.stderr).to_string();
         // diverged main is a real possibility if main moved past our last
@@ -857,8 +1029,11 @@ async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<Stri
         return Err(format!("pull --ff-only: {stderr}"));
     }
 
-    let merge = Command::new("git").args(["-C", ws, "merge", "--ff-only", branch, "--quiet"])
-        .output().await.map_err(|e| format!("git merge: {e}"))?;
+    let merge = Command::new("git")
+        .args(["-C", ws, "merge", "--ff-only", branch, "--quiet"])
+        .output()
+        .await
+        .map_err(|e| format!("git merge: {e}"))?;
     if !merge.status.success() {
         let stderr = String::from_utf8_lossy(&merge.stderr).to_string();
         return Err(format!("merge --ff-only {branch}: {stderr}"));
@@ -866,17 +1041,27 @@ async fn run_git_merge_to_main(workspace: &PathBuf, branch: &str) -> Result<Stri
 
     let push = tokio::time::timeout(
         Duration::from_secs(600),
-        Command::new("git").args(["-C", ws, "push", "origin", "main"]).output(),
-    ).await
+        Command::new("git")
+            .args(["-C", ws, "push", "origin", "main"])
+            .output(),
+    )
+    .await
     .map_err(|_| "git push main timed out".to_string())?
     .map_err(|e| format!("git push main: {e}"))?;
     if !push.status.success() {
-        return Err(format!("push main: {}", String::from_utf8_lossy(&push.stderr).trim()));
+        return Err(format!(
+            "push main: {}",
+            String::from_utf8_lossy(&push.stderr).trim()
+        ));
     }
     Ok("fast-forwarded".to_string())
 }
 
-async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &str) -> Result<String, String> {
+async fn run_git_phase_commit(
+    workspace: &PathBuf,
+    branch: &str,
+    commit_msg: &str,
+) -> Result<String, String> {
     let ws = workspace.to_str().unwrap_or(".");
 
     // Fetch latest remote state so we know what origin/<branch> looks like.
@@ -884,19 +1069,25 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
     // problem on push.
     let _ = Command::new("git")
         .args(["-C", ws, "fetch", "origin", "--quiet"])
-        .output().await;
+        .output()
+        .await;
 
     let checkout = Command::new("git")
         .args(["-C", ws, "checkout", "-B", branch])
-        .output().await
+        .output()
+        .await
         .map_err(|e| format!("git checkout: {e}"))?;
     if !checkout.status.success() {
-        return Err(format!("git checkout: {}", flatten_stderr(&checkout.stderr)));
+        return Err(format!(
+            "git checkout: {}",
+            flatten_stderr(&checkout.stderr)
+        ));
     }
 
     let add = Command::new("git")
         .args(["-C", ws, "add", "-A"])
-        .output().await
+        .output()
+        .await
         .map_err(|e| format!("git add: {e}"))?;
     if !add.status.success() {
         return Err(format!("git add: {}", flatten_stderr(&add.stderr)));
@@ -904,7 +1095,8 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
 
     let commit = Command::new("git")
         .args(["-C", ws, "commit", "-m", commit_msg])
-        .output().await
+        .output()
+        .await
         .map_err(|e| format!("git commit: {e}"))?;
     if !commit.status.success() {
         let stderr = String::from_utf8_lossy(&commit.stderr).to_string();
@@ -919,12 +1111,16 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
     // ever), in which case rebase fails and we just proceed to push.
     let _ = Command::new("git")
         .args(["-C", ws, "pull", "--rebase", "origin", branch, "--quiet"])
-        .output().await;
+        .output()
+        .await;
 
     let push = tokio::time::timeout(
         Duration::from_secs(600),
-        Command::new("git").args(["-C", ws, "push", "origin", branch]).output()
-    ).await
+        Command::new("git")
+            .args(["-C", ws, "push", "origin", branch])
+            .output(),
+    )
+    .await
     .map_err(|_| "git push timed out".to_string())?
     .map_err(|e| format!("git push: {e}"))?;
 
@@ -943,7 +1139,9 @@ async fn run_git_phase_commit(workspace: &PathBuf, branch: &str, commit_msg: &st
 fn flatten_stderr(stderr: &[u8]) -> String {
     let s = String::from_utf8_lossy(stderr);
     let lines: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.is_empty() { return String::new(); }
+    if lines.is_empty() {
+        return String::new();
+    }
     for l in &lines {
         let t = l.trim_start();
         if t.starts_with("error:")
@@ -960,7 +1158,12 @@ fn flatten_stderr(stderr: &[u8]) -> String {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-async fn resolve_workspace(cfg: &Config, client: &Client, project_id: &str, task_id: &str) -> PathBuf {
+async fn resolve_workspace(
+    cfg: &Config,
+    client: &Client,
+    project_id: &str,
+    task_id: &str,
+) -> PathBuf {
     let shared = cfg.acc_dir.join("shared");
 
     // AgentFS is mounted at $ACC_DIR/shared (CIFS to the hub's
@@ -976,7 +1179,10 @@ async fn resolve_workspace(cfg: &Config, client: &Client, project_id: &str, task
         "default".to_string()
     } else {
         match client.projects().get(project_id).await {
-            Ok(p) => p.slug.filter(|s| !s.is_empty()).unwrap_or_else(|| project_id.to_string()),
+            Ok(p) => p
+                .slug
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| project_id.to_string()),
             Err(_) => project_id.to_string(),
         }
     };
@@ -1028,7 +1234,11 @@ fn log(cfg: &Config, msg: &str) {
     let line = format!("[{ts}] [tasks] [{}] {msg}", cfg.agent_name);
     eprintln!("{line}");
     let log_path = cfg.log_file("tasks");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         use std::io::Write;
         let _ = writeln!(f, "{line}");
     }
@@ -1078,9 +1288,12 @@ mod tests {
         let mock = HubMock::with_tasks(vec![
             json!({"id": "t-1", "title": "Alpha", "status": "open", "task_type": "work"}),
             json!({"id": "t-2", "title": "Beta",  "status": "open", "task_type": "work"}),
-        ]).await;
+        ])
+        .await;
         let client = test_client(&mock.url);
-        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
+        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work")
+            .await
+            .unwrap();
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0]["id"], "t-1");
     }
@@ -1089,7 +1302,9 @@ mod tests {
     async fn test_fetch_open_tasks_empty_hub() {
         let mock = HubMock::new().await;
         let client = test_client(&mock.url);
-        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
+        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work")
+            .await
+            .unwrap();
         assert!(tasks.is_empty());
     }
 
@@ -1098,9 +1313,12 @@ mod tests {
         let mock = HubMock::with_tasks(vec![
             json!({"id": "open-1",   "status": "open",    "task_type": "work"}),
             json!({"id": "claimed-1","status": "claimed", "task_type": "work"}),
-        ]).await;
+        ])
+        .await;
         let client = test_client(&mock.url);
-        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
+        let tasks = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work")
+            .await
+            .unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["id"], "open-1");
     }
@@ -1111,13 +1329,18 @@ mod tests {
             json!({"id": "w-1", "status": "open", "task_type": "work"}),
             json!({"id": "r-1", "status": "open", "task_type": "review"}),
             json!({"id": "p-1", "status": "open", "task_type": "phase_commit"}),
-        ]).await;
+        ])
+        .await;
         let client = test_client(&mock.url);
-        let work = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work").await.unwrap();
+        let work = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "work")
+            .await
+            .unwrap();
         assert_eq!(work.len(), 1);
         assert_eq!(work[0]["id"], "w-1");
 
-        let review = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "review").await.unwrap();
+        let review = fetch_open_tasks(&test_cfg(&mock.url), &client, 10, "review")
+            .await
+            .unwrap();
         assert_eq!(review.len(), 1);
         assert_eq!(review[0]["id"], "r-1");
     }
@@ -1141,7 +1364,8 @@ mod tests {
                 json!({"id": "o1", "status": "open"}),
             ],
             ..Default::default()
-        }).await;
+        })
+        .await;
         let client = test_client(&mock.url);
         let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
         assert_eq!(count, 2);
@@ -1149,9 +1373,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_count_active_tasks_zero_when_none_claimed() {
-        let mock = HubMock::with_tasks(vec![
-            json!({"id": "o1", "status": "open"}),
-        ]).await;
+        let mock = HubMock::with_tasks(vec![json!({"id": "o1", "status": "open"})]).await;
         let client = test_client(&mock.url);
         let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
         assert_eq!(count, 0);
@@ -1170,7 +1392,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_task_conflict_returns_err_409() {
-        let mock = HubMock::with_state(HubState { task_claim_status: 409, ..Default::default() }).await;
+        let mock = HubMock::with_state(HubState {
+            task_claim_status: 409,
+            ..Default::default()
+        })
+        .await;
         let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-abc").await;
         assert!(matches!(result, Err(409)), "409 → Err(409)");
@@ -1178,7 +1404,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_task_rate_limited_returns_err_429() {
-        let mock = HubMock::with_state(HubState { task_claim_status: 429, ..Default::default() }).await;
+        let mock = HubMock::with_state(HubState {
+            task_claim_status: 429,
+            ..Default::default()
+        })
+        .await;
         let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-def").await;
         assert!(matches!(result, Err(429)), "429 → Err(429)");
@@ -1186,7 +1416,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_claim_task_blocked_returns_err_423() {
-        let mock = HubMock::with_state(HubState { task_claim_status: 423, ..Default::default() }).await;
+        let mock = HubMock::with_state(HubState {
+            task_claim_status: 423,
+            ..Default::default()
+        })
+        .await;
         let client = test_client(&mock.url);
         let result = claim_task(&test_cfg(&mock.url), &client, "task-blocked").await;
         assert!(matches!(result, Err(423)), "423 → Err(423)");
@@ -1279,8 +1513,9 @@ mod tests {
         assert_eq!(created.len(), 1);
         assert_eq!(created[0]["task_type"], "review");
         // No preferred_agent when no peers
-        assert!(created[0]["preferred_agent"].is_null() ||
-                created[0].get("preferred_agent").is_none());
+        assert!(
+            created[0]["preferred_agent"].is_null() || created[0].get("preferred_agent").is_none()
+        );
     }
 
     #[tokio::test]

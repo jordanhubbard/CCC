@@ -1,4 +1,6 @@
-use crate::db::{db_fleet_sync_claim, db_fleet_sync_complete, db_fleet_sync_fail, db_fleet_sync_keepalive};
+use crate::db::{
+    db_fleet_sync_claim, db_fleet_sync_complete, db_fleet_sync_fail, db_fleet_sync_keepalive,
+};
 use crate::state::db_flush_queue;
 use crate::AppState;
 use axum::{
@@ -16,7 +18,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/queue", get(get_queue).post(post_queue))
         .route("/api/queue/stale", get(get_stale))
         .route("/api/queue/claimed", get(get_claimed))
-        .route("/api/item/:id", get(get_item).patch(patch_item).delete(delete_item))
+        .route(
+            "/api/item/:id",
+            get(get_item).patch(patch_item).delete(delete_item),
+        )
         .route("/api/item/:id/claim", post(claim_item))
         .route("/api/item/:id/complete", post(complete_item))
         .route("/api/item/:id/fail", post(fail_item))
@@ -329,8 +334,14 @@ async fn post_queue(
     // fleet task system (DAG dependencies, capability-based routing, etc.).
     // Best-effort: failure here must not fail the queue item creation.
     {
-        let description_str = body.get("description").and_then(|s| s.as_str()).unwrap_or("");
-        let assignee_str = body.get("assignee").and_then(|s| s.as_str()).unwrap_or("all");
+        let description_str = body
+            .get("description")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
+        let assignee_str = body
+            .get("assignee")
+            .and_then(|s| s.as_str())
+            .unwrap_or("all");
         let tags_val = body.get("tags").cloned().unwrap_or(serde_json::json!([]));
         let meta = serde_json::json!({"tags": tags_val, "assignee": assignee_str});
         let conn = state.fleet_db.lock().await;
@@ -345,9 +356,9 @@ async fn post_queue(
         );
     }
 
-    let _ = state.bus_tx.send(
-        serde_json::json!({"type": "work.available", "item_id": final_id}).to_string(),
-    );
+    let _ = state
+        .bus_tx
+        .send(serde_json::json!({"type": "work.available", "item_id": final_id}).to_string());
 
     (StatusCode::CREATED, Json(json!({"ok": true, "item": item}))).into_response()
 }
@@ -359,13 +370,24 @@ async fn patch_item(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     match item_pos {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Item not found"})),
+        )
+            .into_response(),
         Some(pos) => {
             let obj = q.items[pos].as_object_mut().unwrap();
             let valid_priorities = ["critical", "high", "medium", "normal", "low", "idea"];
@@ -376,19 +398,26 @@ async fn patch_item(
                 obj.insert("description".into(), json!(desc));
             }
             if let Some(p) = body.get("priority").and_then(|v| v.as_str()) {
-                if valid_priorities.contains(&p) { obj.insert("priority".into(), json!(p)); }
+                if valid_priorities.contains(&p) {
+                    obj.insert("priority".into(), json!(p));
+                }
             }
             if let Some(assignee) = body.get("assignee").and_then(|v| v.as_str()) {
                 obj.insert("assignee".into(), json!(assignee));
             }
-            if let Some(tags) = body.get("tags") { obj.insert("tags".into(), tags.clone()); }
+            if let Some(tags) = body.get("tags") {
+                obj.insert("tags".into(), tags.clone());
+            }
             if let Some(notes) = body.get("notes").and_then(|v| v.as_str()) {
                 obj.insert("notes".into(), json!(notes));
             }
             let version = obj.get("itemVersion").and_then(|n| n.as_u64()).unwrap_or(0) + 1;
             obj.insert("itemVersion".into(), json!(version));
 
-            let agent = body.get("_author").and_then(|v| v.as_str()).unwrap_or("api");
+            let agent = body
+                .get("_author")
+                .and_then(|v| v.as_str())
+                .unwrap_or("api");
             let entry = json!({"ts": now, "author": agent, "type": "patch", "text": "Item metadata updated"});
             if let Some(j) = obj.get_mut("journal").and_then(|j| j.as_array_mut()) {
                 j.push(entry);
@@ -409,18 +438,31 @@ async fn delete_item(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let mut q = state.queue.write().await;
     let now = chrono::Utc::now().to_rfc3339();
 
     // Check active items first
-    let item_pos = q.items.iter().position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let item_pos = q
+        .items
+        .iter()
+        .position(|i| i.get("id").and_then(|v| v.as_str()) == Some(&id));
     if let Some(pos) = item_pos {
         let mut item = q.items.remove(pos);
         let obj = item.as_object_mut().unwrap();
-        let agent = body.get("_author").and_then(|v| v.as_str()).unwrap_or("api");
-        let reason = body.get("reason").and_then(|v| v.as_str()).unwrap_or("Cancelled via API");
+        let agent = body
+            .get("_author")
+            .and_then(|v| v.as_str())
+            .unwrap_or("api");
+        let reason = body
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Cancelled via API");
         obj.insert("status".into(), json!("cancelled"));
         obj.insert("completedAt".into(), json!(now));
         let version = obj.get("itemVersion").and_then(|n| n.as_u64()).unwrap_or(0) + 1;
@@ -432,10 +474,18 @@ async fn delete_item(
         q.completed.push(item.clone());
         drop(q);
         db_flush_queue(&state).await;
-        return (StatusCode::OK, Json(json!({"ok": true, "item": item, "cancelled": true}))).into_response();
+        return (
+            StatusCode::OK,
+            Json(json!({"ok": true, "item": item, "cancelled": true})),
+        )
+            .into_response();
     }
 
-    (StatusCode::NOT_FOUND, Json(json!({"error": "Item not found or already completed"}))).into_response()
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({"error": "Item not found or already completed"})),
+    )
+        .into_response()
 }
 
 async fn claim_item(
@@ -634,8 +684,11 @@ async fn complete_item(
             db_flush_queue(&state).await;
             {
                 let conn = state.fleet_db.lock().await;
-                let output_str = body.get("resolution").or_else(|| body.get("result"))
-                    .and_then(|v| v.as_str()).unwrap_or("");
+                let output_str = body
+                    .get("resolution")
+                    .or_else(|| body.get("result"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 db_fleet_sync_complete(&conn, &id, &agent, output_str);
             }
             (StatusCode::OK, Json(json!({"ok": true, "item": item}))).into_response()

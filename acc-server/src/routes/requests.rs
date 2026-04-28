@@ -4,6 +4,7 @@
 //! All listening agents race to claim it via POST /api/requests/:id/claim.
 //! The atomic SQL WHERE-clause ensures exactly one agent wins; the rest get 409
 //! and back off to their own queued work.
+use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -15,7 +16,6 @@ use rusqlite::params;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -56,7 +56,11 @@ async fn list_requests(
     Query(q): Query<RequestQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let db = state.fleet_db.lock().await;
     let mut sql = String::from(
@@ -75,10 +79,19 @@ async fn list_requests(
 
     let mut stmt = match db.prepare(&sql) {
         Ok(s) => s,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":e.to_string()}))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error":e.to_string()})),
+            )
+                .into_response()
+        }
     };
     let requests: Vec<Value> = stmt
-        .query_map(rusqlite::params_from_iter(binds.iter().map(|s| s.as_str())), row_to_request)
+        .query_map(
+            rusqlite::params_from_iter(binds.iter().map(|s| s.as_str())),
+            row_to_request,
+        )
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default();
 
@@ -92,7 +105,11 @@ async fn get_request(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let db = state.fleet_db.lock().await;
     match db.query_row(
@@ -114,11 +131,26 @@ async fn create_request(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
-    let text = body.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let channel = body.get("channel").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let metadata = body.get("metadata").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+    let text = body
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let channel = body
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let metadata = body
+        .get("metadata")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "{}".to_string());
     let id = format!("req-{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
 
     let db = state.fleet_db.lock().await;
@@ -132,10 +164,16 @@ async fn create_request(
                 params![id],
                 row_to_request,
             ).unwrap_or(json!({"id": id}));
-            let _ = state.bus_tx.send(json!({"type":"user.request","request_id":id}).to_string());
+            let _ = state
+                .bus_tx
+                .send(json!({"type":"user.request","request_id":id}).to_string());
             (StatusCode::CREATED, Json(json!({"ok":true,"request":req}))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error":e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error":e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
@@ -146,11 +184,21 @@ async fn claim_request(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let agent = match body.get("agent").and_then(|v| v.as_str()) {
         Some(a) if !a.is_empty() => a.to_string(),
-        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error":"agent required"}))).into_response(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"agent required"})),
+            )
+                .into_response()
+        }
     };
 
     let db = state.fleet_db.lock().await;
@@ -163,13 +211,26 @@ async fn claim_request(
     ).unwrap_or(0);
 
     if rows == 0 {
-        let exists: bool = db.query_row(
-            "SELECT COUNT(*) FROM requests WHERE id=?1", params![id], |r| r.get::<_, i64>(0)
-        ).unwrap_or(0) > 0;
+        let exists: bool = db
+            .query_row(
+                "SELECT COUNT(*) FROM requests WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
         return if exists {
-            (StatusCode::CONFLICT, Json(json!({"error":"already_claimed"}))).into_response()
+            (
+                StatusCode::CONFLICT,
+                Json(json!({"error":"already_claimed"})),
+            )
+                .into_response()
         } else {
-            (StatusCode::NOT_FOUND, Json(json!({"error":"Request not found"}))).into_response()
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"Request not found"})),
+            )
+                .into_response()
         };
     }
 
@@ -179,7 +240,9 @@ async fn claim_request(
         row_to_request,
     ).unwrap_or(json!({"id":id}));
 
-    let _ = state.bus_tx.send(json!({"type":"user.request.claimed","request_id":id,"agent":agent}).to_string());
+    let _ = state
+        .bus_tx
+        .send(json!({"type":"user.request.claimed","request_id":id,"agent":agent}).to_string());
     (StatusCode::OK, Json(json!({"ok":true,"request":req}))).into_response()
 }
 
@@ -190,9 +253,17 @@ async fn complete_request(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
-    let agent = body.get("agent").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let agent = body
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let db = state.fleet_db.lock().await;
     let now = chrono::Utc::now().to_rfc3339();
     let rows = db.execute(
@@ -200,29 +271,38 @@ async fn complete_request(
         params![now, agent, id],
     ).unwrap_or(0);
     if rows == 0 {
-        return (StatusCode::NOT_FOUND, Json(json!({"error":"Request not found or already completed"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error":"Request not found or already completed"})),
+        )
+            .into_response();
     }
     let req = db.query_row(
         "SELECT id,body,channel,status,claimed_by,claimed_at,completed_at,completed_by,created_at,updated_at,metadata FROM requests WHERE id=?1",
         params![id],
         row_to_request,
     ).unwrap_or(json!({"id":id}));
-    let _ = state.bus_tx.send(json!({"type":"user.request.completed","request_id":id,"agent":agent}).to_string());
+    let _ = state
+        .bus_tx
+        .send(json!({"type":"user.request.completed","request_id":id,"agent":agent}).to_string());
     Json(json!({"ok":true,"request":req})).into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{TestServer, body_json, call, get, post_json};
-    use axum::http::Request;
+    use crate::testing::{body_json, call, get, post_json, TestServer};
     use axum::body::Body;
+    use axum::http::Request;
 
     fn put_json(path: &str, body: &Value) -> Request<Body> {
         Request::builder()
             .method("PUT")
             .uri(path)
-            .header("Authorization", format!("Bearer {}", crate::testing::TEST_TOKEN))
+            .header(
+                "Authorization",
+                format!("Bearer {}", crate::testing::TEST_TOKEN),
+            )
             .header("Content-Type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
@@ -231,7 +311,14 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_list_request() {
         let srv = TestServer::new().await;
-        let resp = call(&srv.app, post_json("/api/requests", &json!({"body":"help me","channel":"slack"}))).await;
+        let resp = call(
+            &srv.app,
+            post_json(
+                "/api/requests",
+                &json!({"body":"help me","channel":"slack"}),
+            ),
+        )
+        .await;
         assert_eq!(resp.status(), 201);
         let body = body_json(resp).await;
         assert_eq!(body["request"]["status"], "pending");
@@ -252,14 +339,22 @@ mod tests {
     #[tokio::test]
     async fn test_claim_request_success() {
         let srv = TestServer::new().await;
-        let create = call(&srv.app, post_json("/api/requests", &json!({"body":"deploy prod"}))).await;
+        let create = call(
+            &srv.app,
+            post_json("/api/requests", &json!({"body":"deploy prod"})),
+        )
+        .await;
         let body = body_json(create).await;
         let id = body["request"]["id"].as_str().unwrap().to_string();
 
-        let resp = call(&srv.app, post_json(
-            &format!("/api/requests/{id}/claim"),
-            &json!({"agent":"boris"}),
-        )).await;
+        let resp = call(
+            &srv.app,
+            post_json(
+                &format!("/api/requests/{id}/claim"),
+                &json!({"agent":"boris"}),
+            ),
+        )
+        .await;
         assert_eq!(resp.status(), 200);
         let claimed = body_json(resp).await;
         assert_eq!(claimed["request"]["status"], "claimed");
@@ -269,18 +364,33 @@ mod tests {
     #[tokio::test]
     async fn test_claim_request_conflict_on_double_claim() {
         let srv = TestServer::new().await;
-        let create = call(&srv.app, post_json("/api/requests", &json!({"body":"urgent task"}))).await;
+        let create = call(
+            &srv.app,
+            post_json("/api/requests", &json!({"body":"urgent task"})),
+        )
+        .await;
         let body = body_json(create).await;
         let id = body["request"]["id"].as_str().unwrap().to_string();
 
         // First claim wins
-        call(&srv.app, post_json(&format!("/api/requests/{id}/claim"), &json!({"agent":"boris"}))).await;
+        call(
+            &srv.app,
+            post_json(
+                &format!("/api/requests/{id}/claim"),
+                &json!({"agent":"boris"}),
+            ),
+        )
+        .await;
 
         // Second agent gets 409
-        let resp2 = call(&srv.app, post_json(
-            &format!("/api/requests/{id}/claim"),
-            &json!({"agent":"natasha"}),
-        )).await;
+        let resp2 = call(
+            &srv.app,
+            post_json(
+                &format!("/api/requests/{id}/claim"),
+                &json!({"agent":"natasha"}),
+            ),
+        )
+        .await;
         assert_eq!(resp2.status(), 409);
         let body2 = body_json(resp2).await;
         assert_eq!(body2["error"], "already_claimed");
@@ -293,23 +403,42 @@ mod tests {
         let body = body_json(create).await;
         let id = body["request"]["id"].as_str().unwrap().to_string();
 
-        let resp = call(&srv.app, post_json(&format!("/api/requests/{id}/claim"), &json!({}))).await;
+        let resp = call(
+            &srv.app,
+            post_json(&format!("/api/requests/{id}/claim"), &json!({})),
+        )
+        .await;
         assert_eq!(resp.status(), 400);
     }
 
     #[tokio::test]
     async fn test_complete_request() {
         let srv = TestServer::new().await;
-        let create = call(&srv.app, post_json("/api/requests", &json!({"body":"do something"}))).await;
+        let create = call(
+            &srv.app,
+            post_json("/api/requests", &json!({"body":"do something"})),
+        )
+        .await;
         let body = body_json(create).await;
         let id = body["request"]["id"].as_str().unwrap().to_string();
 
-        call(&srv.app, post_json(&format!("/api/requests/{id}/claim"), &json!({"agent":"boris"}))).await;
+        call(
+            &srv.app,
+            post_json(
+                &format!("/api/requests/{id}/claim"),
+                &json!({"agent":"boris"}),
+            ),
+        )
+        .await;
 
-        let resp = call(&srv.app, put_json(
-            &format!("/api/requests/{id}/complete"),
-            &json!({"agent":"boris"}),
-        )).await;
+        let resp = call(
+            &srv.app,
+            put_json(
+                &format!("/api/requests/{id}/complete"),
+                &json!({"agent":"boris"}),
+            ),
+        )
+        .await;
         assert_eq!(resp.status(), 200);
         let done = body_json(resp).await;
         assert_eq!(done["request"]["status"], "completed");
@@ -323,7 +452,14 @@ mod tests {
         let r2 = call(&srv.app, post_json("/api/requests", &json!({"body":"r2"}))).await;
         let b2 = body_json(r2).await;
         let id2 = b2["request"]["id"].as_str().unwrap().to_string();
-        call(&srv.app, post_json(&format!("/api/requests/{id2}/claim"), &json!({"agent":"boris"}))).await;
+        call(
+            &srv.app,
+            post_json(
+                &format!("/api/requests/{id2}/claim"),
+                &json!({"agent":"boris"}),
+            ),
+        )
+        .await;
 
         let resp = call(&srv.app, get("/api/requests?status=pending")).await;
         let list = body_json(resp).await;
@@ -334,7 +470,11 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_claim_only_one_wins() {
         let srv = TestServer::new().await;
-        let create = call(&srv.app, post_json("/api/requests", &json!({"body":"race me"}))).await;
+        let create = call(
+            &srv.app,
+            post_json("/api/requests", &json!({"body":"race me"})),
+        )
+        .await;
         let body = body_json(create).await;
         let id = body["request"]["id"].as_str().unwrap().to_string();
 
@@ -347,10 +487,14 @@ mod tests {
 
         for agent in &agents {
             let app = srv.app.clone();
-            let resp = call(&app, post_json(
-                &format!("/api/requests/{id}/claim"),
-                &json!({"agent": *agent}),
-            )).await;
+            let resp = call(
+                &app,
+                post_json(
+                    &format!("/api/requests/{id}/claim"),
+                    &json!({"agent": *agent}),
+                ),
+            )
+            .await;
             match resp.status().as_u16() {
                 200 => wins += 1,
                 409 => conflicts += 1,

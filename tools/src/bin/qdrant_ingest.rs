@@ -40,8 +40,8 @@ async fn main() {
     println!("=== Qdrant Ingestion for {agent_name} ===");
     println!("  DB: {}", state_db.display());
 
-    let qdrant_url = std::env::var("QDRANT_URL")
-        .unwrap_or_else(|_| "http://localhost:6333".to_string());
+    let qdrant_url =
+        std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
     let qdrant_key = acc_tools::resolve_qdrant_api_key();
     let qdrant = QdrantClient::new(&qdrant_url, qdrant_key.as_deref()).expect("qdrant client");
 
@@ -295,7 +295,11 @@ async fn ingest_sessions(
     if all_chunks.is_empty() {
         return 0;
     }
-    println!("  {} chunks from {} sessions", all_chunks.len(), sessions.len());
+    println!(
+        "  {} chunks from {} sessions",
+        all_chunks.len(),
+        sessions.len()
+    );
 
     let texts: Vec<&str> = all_chunks.iter().map(|(_, t, _)| t.as_str()).collect();
     let embeddings = match embed.embed(&texts).await {
@@ -397,5 +401,8 @@ fn save_state(path: &PathBuf, state: &Value) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    let _ = std::fs::write(path, serde_json::to_string_pretty(state).unwrap_or_default());
+    let _ = std::fs::write(
+        path,
+        serde_json::to_string_pretty(state).unwrap_or_default(),
+    );
 }

@@ -16,13 +16,7 @@
 //!   GET /api/watchdog/status  — current watchdog state (last run, alerts fired)
 //!   GET /api/watchdog/alerts  — recent abandoned-work alerts
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    response::IntoResponse,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse, routing::get, Json, Router};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -34,12 +28,21 @@ use crate::AppState;
 // ── Configuration (env-overridable) ─────────────────────────────────────────
 
 fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
-fn interval_secs() -> u64 { env_u64("WATCHDOG_INTERVAL_SECS", 120) }
-fn offline_threshold_secs() -> u64 { env_u64("WATCHDOG_OFFLINE_THRESHOLD_SECS", 600) }
-fn alert_cooldown_secs() -> u64 { env_u64("WATCHDOG_ALERT_COOLDOWN_SECS", 900) }
+fn interval_secs() -> u64 {
+    env_u64("WATCHDOG_INTERVAL_SECS", 120)
+}
+fn offline_threshold_secs() -> u64 {
+    env_u64("WATCHDOG_OFFLINE_THRESHOLD_SECS", 600)
+}
+fn alert_cooldown_secs() -> u64 {
+    env_u64("WATCHDOG_ALERT_COOLDOWN_SECS", 900)
+}
 
 // ── Shared watchdog state ───────────────────────────────────────────────────
 
@@ -80,12 +83,13 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/watchdog/alerts", get(get_alerts))
 }
 
-async fn get_status(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn get_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let wd = &state.watchdog;
@@ -102,15 +106,17 @@ async fn get_status(
             "offline_threshold_secs": offline_threshold_secs(),
             "alert_cooldown_secs": alert_cooldown_secs(),
         },
-    })).into_response()
+    }))
+    .into_response()
 }
 
-async fn get_alerts(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn get_alerts(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let wd = &state.watchdog;
@@ -119,7 +125,8 @@ async fn get_alerts(
         "ok": true,
         "alerts": inner.recent_alerts,
         "count": inner.recent_alerts.len(),
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // ── Background task ─────────────────────────────────────────────────────────
@@ -134,7 +141,9 @@ pub async fn run_watchdog(state: Arc<AppState>) {
 
     tracing::info!(
         "watchdog: started (interval={}s, offline_threshold={}s, cooldown={}s)",
-        interval, threshold, cooldown
+        interval,
+        threshold,
+        cooldown
     );
 
     // Skip first immediate tick to let the server finish starting
@@ -163,7 +172,12 @@ async fn watchdog_tick(
     for (agent_name, last_seen, offline_secs) in &offline_agents {
         let abandoned = find_abandoned_tasks(state, agent_name).await?;
         if !abandoned.is_empty() {
-            alerts.push((agent_name.clone(), last_seen.clone(), *offline_secs, abandoned));
+            alerts.push((
+                agent_name.clone(),
+                last_seen.clone(),
+                *offline_secs,
+                abandoned,
+            ));
         }
     }
 
@@ -175,7 +189,9 @@ async fn watchdog_tick(
 
     // Expire old cooldowns
     let cooldown_dur = chrono::Duration::seconds(cooldown_secs as i64);
-    inner.cooldowns.retain(|_, ts| now.signed_duration_since(*ts) < cooldown_dur);
+    inner
+        .cooldowns
+        .retain(|_, ts| now.signed_duration_since(*ts) < cooldown_dur);
 
     for (agent_name, last_seen, offline_secs, tasks) in &alerts {
         // Check cooldown
@@ -184,15 +200,18 @@ async fn watchdog_tick(
             continue;
         }
 
-        let task_summaries: Vec<Value> = tasks.iter().map(|t| {
-            json!({
-                "id": t.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                "title": t.get("title").and_then(|v| v.as_str()).unwrap_or("?"),
-                "project_id": t.get("project_id").and_then(|v| v.as_str()).unwrap_or("?"),
-                "status": t.get("status").and_then(|v| v.as_str()).unwrap_or("?"),
-                "claimed_at": t.get("claimed_at").cloned().unwrap_or(json!(null)),
+        let task_summaries: Vec<Value> = tasks
+            .iter()
+            .map(|t| {
+                json!({
+                    "id": t.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                    "title": t.get("title").and_then(|v| v.as_str()).unwrap_or("?"),
+                    "project_id": t.get("project_id").and_then(|v| v.as_str()).unwrap_or("?"),
+                    "status": t.get("status").and_then(|v| v.as_str()).unwrap_or("?"),
+                    "claimed_at": t.get("claimed_at").cloned().unwrap_or(json!(null)),
+                })
             })
-        }).collect();
+            .collect();
 
         let alert = json!({
             "type": "agent.abandoned_work",
@@ -206,7 +225,9 @@ async fn watchdog_tick(
 
         tracing::warn!(
             "watchdog: {} offline {}s with {} abandoned task(s)",
-            agent_name, offline_secs, tasks.len()
+            agent_name,
+            offline_secs,
+            tasks.len()
         );
 
         // Emit bus event
@@ -238,7 +259,11 @@ async fn find_offline_agents(
     if let Some(map) = agents.as_object() {
         for (name, agent) in map {
             // Skip decommissioned agents
-            if agent.get("decommissioned").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if agent
+                .get("decommissioned")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
 
@@ -246,11 +271,7 @@ async fn find_offline_agents(
                 if let Ok(ts) = ts_str.parse::<DateTime<Utc>>() {
                     let age = now.signed_duration_since(ts);
                     if age.num_seconds() > threshold_secs as i64 {
-                        result.push((
-                            name.clone(),
-                            ts_str.to_string(),
-                            age.num_seconds() as u64,
-                        ));
+                        result.push((name.clone(), ts_str.to_string(), age.num_seconds() as u64));
                     }
                 }
             }
@@ -267,23 +288,27 @@ async fn find_abandoned_tasks(
 ) -> Result<Vec<Value>, String> {
     let db = state.fleet_db.lock().await;
 
-    let mut stmt = db.prepare(
-        "SELECT id, project_id, title, status, claimed_by, claimed_at, task_type \
+    let mut stmt = db
+        .prepare(
+            "SELECT id, project_id, title, status, claimed_by, claimed_at, task_type \
          FROM fleet_tasks \
-         WHERE claimed_by = ?1 AND status IN ('claimed', 'in_progress')"
-    ).map_err(|e| format!("prepare: {e}"))?;
+         WHERE claimed_by = ?1 AND status IN ('claimed', 'in_progress')",
+        )
+        .map_err(|e| format!("prepare: {e}"))?;
 
-    let rows = stmt.query_map(rusqlite::params![agent_name], |row| {
-        Ok(json!({
-            "id":               row.get::<_, String>(0)?,
-            "project_id":       row.get::<_, String>(1)?,
-            "title":            row.get::<_, String>(2)?,
-            "status":           row.get::<_, String>(3)?,
-            "claimed_by":       row.get::<_, Option<String>>(4)?,
-            "claimed_at":       row.get::<_, Option<String>>(5)?,
-            "task_type":        row.get::<_, String>(6).unwrap_or_else(|_| "work".to_string()),
-        }))
-    }).map_err(|e| format!("query: {e}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params![agent_name], |row| {
+            Ok(json!({
+                "id":               row.get::<_, String>(0)?,
+                "project_id":       row.get::<_, String>(1)?,
+                "title":            row.get::<_, String>(2)?,
+                "status":           row.get::<_, String>(3)?,
+                "claimed_by":       row.get::<_, Option<String>>(4)?,
+                "claimed_at":       row.get::<_, Option<String>>(5)?,
+                "task_type":        row.get::<_, String>(6).unwrap_or_else(|_| "work".to_string()),
+            }))
+        })
+        .map_err(|e| format!("query: {e}"))?;
 
     let mut tasks = Vec::new();
     for row in rows {

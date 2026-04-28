@@ -54,14 +54,19 @@ struct DynProcess {
 /// Load `supervisor.processes` from `~/.acc/acc.json` if it exists.
 /// Returns None if the file is absent, unreadable, or has no processes array.
 fn load_acc_json_processes() -> Option<Vec<DynProcess>> {
-    let path = std::env::var("HOME").ok()
+    let path = std::env::var("HOME")
+        .ok()
         .map(|h| PathBuf::from(h).join(".acc").join("acc.json"))
         .or_else(|| Some(PathBuf::from("/root/.acc/acc.json")))?;
     let text = std::fs::read_to_string(&path).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     let procs = v.get("supervisor")?.get("processes")?;
     let list: Vec<DynProcess> = serde_json::from_value(procs.clone()).ok()?;
-    if list.is_empty() { None } else { Some(list) }
+    if list.is_empty() {
+        None
+    } else {
+        Some(list)
+    }
 }
 
 fn always(_: &Config) -> bool {
@@ -85,13 +90,48 @@ fn slack_gateway_ofterra_enabled(_: &Config) -> bool {
 }
 
 static CHILDREN: &[ChildSpec] = &[
-    ChildSpec { name: "bus",              args: &["bus"],                                              direct_exe: false, enabled: always                      },
-    ChildSpec { name: "queue",            args: &["queue"],                                            direct_exe: false, enabled: always                      },
-    ChildSpec { name: "tasks",            args: &["tasks"],                                            direct_exe: false, enabled: always                      },
-    ChildSpec { name: "hermes",           args: &["hermes", "--poll"],                                 direct_exe: false, enabled: always                      },
-    ChildSpec { name: "gateway",          args: &["hermes", "--gateway"],                              direct_exe: false, enabled: slack_gateway_enabled        },
-    ChildSpec { name: "gateway-ofterra",  args: &["hermes", "--gateway", "--workspace", "ofterra"],    direct_exe: false, enabled: slack_gateway_ofterra_enabled },
-    ChildSpec { name: "proxy",            args: &["proxy", "--port", "9099"],                          direct_exe: false, enabled: nvidia_enabled               },
+    ChildSpec {
+        name: "bus",
+        args: &["bus"],
+        direct_exe: false,
+        enabled: always,
+    },
+    ChildSpec {
+        name: "queue",
+        args: &["queue"],
+        direct_exe: false,
+        enabled: always,
+    },
+    ChildSpec {
+        name: "tasks",
+        args: &["tasks"],
+        direct_exe: false,
+        enabled: always,
+    },
+    ChildSpec {
+        name: "hermes",
+        args: &["hermes", "--poll"],
+        direct_exe: false,
+        enabled: always,
+    },
+    ChildSpec {
+        name: "gateway",
+        args: &["hermes", "--gateway"],
+        direct_exe: false,
+        enabled: slack_gateway_enabled,
+    },
+    ChildSpec {
+        name: "gateway-ofterra",
+        args: &["hermes", "--gateway", "--workspace", "ofterra"],
+        direct_exe: false,
+        enabled: slack_gateway_ofterra_enabled,
+    },
+    ChildSpec {
+        name: "proxy",
+        args: &["proxy", "--port", "9099"],
+        direct_exe: false,
+        enabled: nvidia_enabled,
+    },
 ];
 
 pub async fn run(args: &[String]) {
@@ -114,7 +154,7 @@ pub async fn run(args: &[String]) {
     // by a migration (declaring "# Restarts: acc-bus-listener") is buffered by the
     // kernel rather than triggering the default terminate action.
     let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
-    let mut sigint  = signal(SignalKind::interrupt()).expect("SIGINT handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("SIGINT handler");
     let mut sigusr1 = signal(SignalKind::user_defined1()).expect("SIGUSR1 handler");
 
     // Run initial upgrade before spawning children
@@ -127,8 +167,7 @@ pub async fn run(args: &[String]) {
         return;
     }
 
-    let exe = std::env::current_exe()
-        .unwrap_or_else(|_| PathBuf::from("acc-agent"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("acc-agent"));
 
     // Log capabilities from the Worker trait before spawning.
     let caps = crate::worker::enabled_capabilities();
@@ -138,8 +177,12 @@ pub async fn run(args: &[String]) {
     // Represented as (name, exe_path, args, direct_exe) tuples for uniform spawning.
     let processes: Vec<(String, PathBuf, Vec<String>, bool)> =
         if let Some(dyn_procs) = load_acc_json_processes() {
-            log(&cfg, &format!("using acc.json worker config ({} entries)", dyn_procs.len()));
-            dyn_procs.into_iter()
+            log(
+                &cfg,
+                &format!("using acc.json worker config ({} entries)", dyn_procs.len()),
+            );
+            dyn_procs
+                .into_iter()
                 .filter(|p| {
                     // Per-process env var gate.
                     p.enabled_if_env.as_ref()
@@ -162,11 +205,15 @@ pub async fn run(args: &[String]) {
                 })
                 .collect()
         } else {
-            CHILDREN.iter()
+            CHILDREN
+                .iter()
                 .filter(|c| (c.enabled)(&cfg))
                 .map(|c| {
                     let (child_exe, child_args) = if c.direct_exe {
-                        (PathBuf::from(c.args[0]), c.args[1..].iter().map(|s| s.to_string()).collect())
+                        (
+                            PathBuf::from(c.args[0]),
+                            c.args[1..].iter().map(|s| s.to_string()).collect(),
+                        )
                     } else {
                         (exe.clone(), c.args.iter().map(|s| s.to_string()).collect())
                     };
@@ -175,16 +222,26 @@ pub async fn run(args: &[String]) {
                 .collect()
         };
 
-    log(&cfg, &format!("spawning: {}", processes.iter().map(|(n, _, _, _)| n.as_str()).collect::<Vec<_>>().join(", ")));
+    log(
+        &cfg,
+        &format!(
+            "spawning: {}",
+            processes
+                .iter()
+                .map(|(n, _, _, _)| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    );
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let mut join_handles = Vec::new();
     for (name, child_exe, child_args, _direct) in processes {
         let child_name = name;
-        let rx         = shutdown_rx.clone();
+        let rx = shutdown_rx.clone();
         let agent_name = cfg.agent_name.clone();
-        let acc_dir    = cfg.acc_dir.clone();
+        let acc_dir = cfg.acc_dir.clone();
 
         join_handles.push(tokio::spawn(async move {
             child_loop(child_exe, child_name, child_args, rx, agent_name, acc_dir).await;
@@ -200,7 +257,8 @@ pub async fn run(args: &[String]) {
     let _ = tokio::time::timeout(
         SHUTDOWN_GRACE + Duration::from_secs(2),
         futures_util::future::join_all(join_handles),
-    ).await;
+    )
+    .await;
 
     if do_restart {
         // FIX #7: Do NOT delete pid_path before exec(). exec() preserves the PID,
@@ -245,7 +303,9 @@ async fn child_loop(
             Err(e) => {
                 child_log(&agent_name, &acc_dir, &name, &format!("spawn failed: {e}"));
                 backoff = sleep_or_shutdown(backoff, &mut shutdown).await;
-                if *shutdown.borrow() { break; }
+                if *shutdown.borrow() {
+                    break;
+                }
                 continue;
             }
         };
@@ -264,19 +324,29 @@ async fn child_loop(
 
         let uptime = started.elapsed();
         match exit_status.unwrap() {
-            Ok(s) => child_log(&agent_name, &acc_dir, &name,
-                &format!("exited {s} (uptime {uptime:?})")),
-            Err(e) => child_log(&agent_name, &acc_dir, &name,
-                &format!("wait error: {e}")),
+            Ok(s) => child_log(
+                &agent_name,
+                &acc_dir,
+                &name,
+                &format!("exited {s} (uptime {uptime:?})"),
+            ),
+            Err(e) => child_log(&agent_name, &acc_dir, &name, &format!("wait error: {e}")),
         }
 
         if uptime >= HEALTHY_UPTIME {
             backoff = Duration::from_secs(1);
         }
 
-        child_log(&agent_name, &acc_dir, &name, &format!("restarting in {backoff:?}"));
+        child_log(
+            &agent_name,
+            &acc_dir,
+            &name,
+            &format!("restarting in {backoff:?}"),
+        );
         backoff = sleep_or_shutdown(backoff, &mut shutdown).await;
-        if *shutdown.borrow() { break; }
+        if *shutdown.borrow() {
+            break;
+        }
     }
 
     child_log(&agent_name, &acc_dir, &name, "stopped");
@@ -297,7 +367,10 @@ async fn graceful_kill(child: &mut tokio::process::Child) {
         let _ = std::process::Command::new("kill")
             .args(["-15", &pid.to_string()])
             .status();
-        if tokio::time::timeout(SHUTDOWN_GRACE, child.wait()).await.is_err() {
+        if tokio::time::timeout(SHUTDOWN_GRACE, child.wait())
+            .await
+            .is_err()
+        {
             let _ = child.start_kill();
             // Reap after SIGKILL so we don't accumulate zombies across re-execs
             let _ = child.wait().await;
@@ -320,7 +393,11 @@ fn log(cfg: &Config, msg: &str) {
     let line = format!("[{ts}] [{}] [supervise] {msg}", cfg.agent_name);
     eprintln!("{line}");
     let path = cfg.acc_dir.join("logs").join("supervise.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         use std::io::Write;
         let _ = writeln!(f, "{line}");
     }
@@ -332,7 +409,11 @@ fn child_log(agent_name: &str, acc_dir: &std::path::Path, child: &str, msg: &str
     let line = format!("[{ts}] [{agent_name}] [supervise/{child}] {msg}");
     eprintln!("{line}");
     let path = acc_dir.join("logs").join("supervise.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         use std::io::Write;
         let _ = writeln!(f, "{line}");
     }

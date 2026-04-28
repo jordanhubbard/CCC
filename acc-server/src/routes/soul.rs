@@ -24,9 +24,9 @@ use tokio::time::{sleep, Duration};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/agents/:name/soul",        get(get_soul))
-        .route("/api/agents/:name/soul/data",   post(post_soul_data))
-        .route("/api/agents/move",              post(move_agent))
+        .route("/api/agents/:name/soul", get(get_soul))
+        .route("/api/agents/:name/soul/data", post(post_soul_data))
+        .route("/api/agents/move", post(move_agent))
 }
 
 // ── GET /api/agents/:name/soul ────────────────────────────────────────────────
@@ -37,14 +37,24 @@ async fn get_soul(
     Path(name): Path<String>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let agent_name = name.to_lowercase();
     let agents = state.agents.read().await;
     let registry = match agents.as_object().and_then(|m| m.get(&agent_name)) {
         Some(a) => a.clone(),
-        None => return (StatusCode::NOT_FOUND, Json(json!({"error":"Agent not found"}))).into_response(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"Agent not found"})),
+            )
+                .into_response()
+        }
     };
     drop(agents);
 
@@ -71,7 +81,8 @@ async fn get_soul(
             "host_data": host_data,
             "host_data_status": if host_data.is_some() { "ready" } else { "pending" },
         }
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // ── POST /api/agents/:name/soul/data ─────────────────────────────────────────
@@ -85,7 +96,11 @@ async fn post_soul_data(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let agent_name = name.to_lowercase();
@@ -117,23 +132,44 @@ async fn move_agent(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let source = match body.get("source").and_then(|v| v.as_str()) {
         Some(s) => s.to_lowercase(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error":"source required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"source required"})),
+            )
+                .into_response()
+        }
     };
     let target = match body.get("target").and_then(|v| v.as_str()) {
         Some(t) => t.to_lowercase(),
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error":"target required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"target required"})),
+            )
+                .into_response()
+        }
     };
-    let decommission = body.get("decommission_source")
+    let decommission = body
+        .get("decommission_source")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
     if source == target {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error":"source and target must differ"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error":"source and target must differ"})),
+        )
+            .into_response();
     }
 
     // Validate both agents exist
@@ -141,10 +177,18 @@ async fn move_agent(
         let agents = state.agents.read().await;
         let map = agents.as_object().unwrap();
         if !map.contains_key(&source) {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": format!("source agent '{}' not found", source)}))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("source agent '{}' not found", source)})),
+            )
+                .into_response();
         }
         if !map.contains_key(&target) {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": format!("target agent '{}' not found", target)}))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("target agent '{}' not found", target)})),
+            )
+                .into_response();
         }
     }
 
@@ -156,7 +200,8 @@ async fn move_agent(
             "to": source,
             "from": "server",
             "body": {"reason": "move"}
-        })).unwrap_or_default();
+        }))
+        .unwrap_or_default();
         let _ = state.bus_tx.send(event_str);
     }
 
@@ -171,13 +216,37 @@ async fn move_agent(
         let target_entry = map.get(&target).cloned().unwrap_or(json!({}));
 
         // Identity fields from source
-        let identity_keys = ["name", "token", "slack_id", "capabilities", "billing",
-                             "tags", "registeredAt", "type"];
+        let identity_keys = [
+            "name",
+            "token",
+            "slack_id",
+            "capabilities",
+            "billing",
+            "tags",
+            "registeredAt",
+            "type",
+        ];
         // Connectivity/hardware from target
-        let hw_keys = ["host", "tailscale_ip", "ssh", "gpu", "gpu_temp_c", "gpu_power_w",
-                       "gpu_util_pct", "ram", "ram_used_mb", "ram_avail_mb", "ram_total_mb",
-                       "unified_vram_used_mb", "unified_vram_free_mb", "unified_vram_total_mb",
-                       "ollama_status", "ollama_models", "ccc_version", "lastSeen"];
+        let hw_keys = [
+            "host",
+            "tailscale_ip",
+            "ssh",
+            "gpu",
+            "gpu_temp_c",
+            "gpu_power_w",
+            "gpu_util_pct",
+            "ram",
+            "ram_used_mb",
+            "ram_avail_mb",
+            "ram_total_mb",
+            "unified_vram_used_mb",
+            "unified_vram_free_mb",
+            "unified_vram_total_mb",
+            "ollama_status",
+            "ollama_models",
+            "ccc_version",
+            "lastSeen",
+        ];
 
         let mut merged = serde_json::Map::new();
         for key in &identity_keys {
@@ -208,14 +277,16 @@ async fn move_agent(
     // Step 3: send soul.import to target machine (agent will restart as source name)
     let new_token = {
         let agents = state.agents.read().await;
-        agents.as_object()
+        agents
+            .as_object()
             .and_then(|m| m.get(&source))
             .and_then(|a| a.get("token"))
             .and_then(|t| t.as_str())
             .unwrap_or("")
             .to_string()
     };
-    let tar_hex = host_data.as_ref()
+    let tar_hex = host_data
+        .as_ref()
         .and_then(|h| h.get("tar_gz_hex"))
         .cloned()
         .unwrap_or(json!(null));
@@ -231,7 +302,9 @@ async fn move_agent(
         "from": "server",
         "body": import_payload,
     });
-    let _ = state.bus_tx.send(serde_json::to_string(&import_event).unwrap_or_default());
+    let _ = state
+        .bus_tx
+        .send(serde_json::to_string(&import_event).unwrap_or_default());
 
     // Step 4: tell source to decommission itself
     if decommission {
@@ -241,7 +314,9 @@ async fn move_agent(
             "from": "server",
             "body": {"reason": format!("moved to {}", target)},
         });
-        let _ = state.bus_tx.send(serde_json::to_string(&decomm_event).unwrap_or_default());
+        let _ = state
+            .bus_tx
+            .send(serde_json::to_string(&decomm_event).unwrap_or_default());
     }
 
     Json(json!({
@@ -251,7 +326,8 @@ async fn move_agent(
         "host_data_transferred": host_data.is_some(),
         "decommissioned_source": decommission,
         "status": "soul.import sent to target — agent will restart with new identity",
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

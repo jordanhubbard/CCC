@@ -14,7 +14,9 @@ async fn main() {
         std::env::var("RUST_LOG").unwrap_or_else(|_| "acc_server=info,tower_http=info".into()),
     );
     let fmt_layer = tracing_subscriber::fmt::layer();
-    let registry = tracing_subscriber::registry().with(env_filter).with(fmt_layer);
+    let registry = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer);
     match tracing_journald::layer() {
         Ok(journald) => {
             registry.with(journald).init();
@@ -29,7 +31,9 @@ async fn main() {
     let port = cfg.port;
 
     let supervisor_handle = if cfg.supervisor_enabled && !cfg.supervisor_processes.is_empty() {
-        let processes: Vec<supervisor::ManagedProcess> = cfg.supervisor_processes.iter()
+        let processes: Vec<supervisor::ManagedProcess> = cfg
+            .supervisor_processes
+            .iter()
             .map(|p| supervisor::ManagedProcess {
                 name: p.name.clone(),
                 command: p.command.clone(),
@@ -100,9 +104,9 @@ async fn main() {
         projects: tokio::sync::RwLock::new(Vec::new()),
         brain: Arc::new(brain::BrainQueue::from_config(&cfg.llm_providers)),
         bus_tx: tokio::sync::broadcast::channel(256).0,
-        bus_seq: std::sync::atomic::AtomicU64::new(
-            acc_server::routes::bus::initial_bus_seq(&cfg.bus_log_path),
-        ),
+        bus_seq: std::sync::atomic::AtomicU64::new(acc_server::routes::bus::initial_bus_seq(
+            &cfg.bus_log_path,
+        )),
         start_time: std::time::SystemTime::now(),
         fs_root,
         supervisor: supervisor_handle,
@@ -193,7 +197,9 @@ async fn main() {
 async fn shutdown_signal() {
     use tokio::signal;
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
     #[cfg(unix)]
     let terminate = async {

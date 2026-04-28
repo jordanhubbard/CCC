@@ -112,8 +112,7 @@ fn watchdog_has_alerts(raw: &str) -> bool {
     let Some(data) = parse_json(raw) else {
         return true;
     };
-    data["alert_count"].as_u64().unwrap_or(0) > 0
-        || !data["healthy"].as_bool().unwrap_or(true)
+    data["alert_count"].as_u64().unwrap_or(0) > 0 || !data["healthy"].as_bool().unwrap_or(true)
 }
 
 fn summarize_health(raw: &str) -> String {
@@ -148,10 +147,7 @@ fn summarize_health(raw: &str) -> String {
         .filter(|a| !a["online"].as_bool().unwrap_or(true))
         .collect();
     if !offline.is_empty() {
-        let names: Vec<&str> = offline
-            .iter()
-            .filter_map(|a| a["name"].as_str())
-            .collect();
+        let names: Vec<&str> = offline.iter().filter_map(|a| a["name"].as_str()).collect();
         lines.push(format!("AGENTS OFFLINE: {}", names.join(", ")));
     }
     lines.join("\n")

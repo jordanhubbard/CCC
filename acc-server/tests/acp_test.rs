@@ -21,9 +21,13 @@ fn acp_session(id: &str, agent: &str) -> serde_json::Value {
 #[tokio::test]
 async fn test_list_all_no_auth_required() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
-    let req = Request::builder().method("GET").uri("/api/acp/sessions").body(Body::empty()).unwrap();
+    use axum::http::{Request, StatusCode};
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/acp/sessions")
+        .body(Body::empty())
+        .unwrap();
     let resp = helpers::call(&ts.app, req).await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
@@ -34,9 +38,13 @@ async fn test_list_all_no_auth_required() {
 #[tokio::test]
 async fn test_list_agent_no_auth_required() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
-    let req = Request::builder().method("GET").uri("/api/acp/sessions/unknown-agent").body(Body::empty()).unwrap();
+    use axum::http::{Request, StatusCode};
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/acp/sessions/unknown-agent")
+        .body(Body::empty())
+        .unwrap();
     let resp = helpers::call(&ts.app, req).await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
@@ -48,14 +56,18 @@ async fn test_list_agent_no_auth_required() {
 #[tokio::test]
 async fn test_register_requires_auth() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     let req = Request::builder()
-        .method("POST").uri("/api/acp/sessions/test-agent-r")
+        .method("POST")
+        .uri("/api/acp/sessions/test-agent-r")
         .header("Content-Type", "application/json")
         .body(Body::from(acp_session("s-r", "test-agent-r").to_string()))
         .unwrap();
-    assert_eq!(helpers::call(&ts.app, req).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        helpers::call(&ts.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
@@ -70,15 +82,19 @@ async fn test_register_and_list_agent_sessions() {
             &format!("/api/acp/sessions/{agent}"),
             &acp_session(session_id, agent),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
     assert_eq!(helpers::body_json(resp).await["ok"], true);
 
     // The list-agent endpoint doesn't require auth
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     let req = Request::builder()
-        .method("GET").uri(&format!("/api/acp/sessions/{agent}")).body(Body::empty()).unwrap();
+        .method("GET")
+        .uri(&format!("/api/acp/sessions/{agent}"))
+        .body(Body::empty())
+        .unwrap();
     let body = helpers::body_json(helpers::call(&ts.app, req).await).await;
     let sessions = body["sessions"].as_array().unwrap();
     assert!(sessions.iter().any(|s| s["id"] == session_id));
@@ -94,8 +110,12 @@ async fn test_update_session() {
 
     helpers::call(
         &ts.app,
-        helpers::post_json(&format!("/api/acp/sessions/{agent}"), &acp_session(session_id, agent)),
-    ).await;
+        helpers::post_json(
+            &format!("/api/acp/sessions/{agent}"),
+            &acp_session(session_id, agent),
+        ),
+    )
+    .await;
 
     let resp = helpers::call(
         &ts.app,
@@ -103,7 +123,8 @@ async fn test_update_session() {
             &format!("/api/acp/sessions/{agent}/{session_id}"),
             &json!({"status": "idle", "label": "refactoring"}),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(helpers::body_json(resp).await["ok"], true);
 }
@@ -113,8 +134,12 @@ async fn test_update_nonexistent_session_returns_404() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        helpers::put_json("/api/acp/sessions/ghost/no-sess", &json!({"status": "idle"})),
-    ).await;
+        helpers::put_json(
+            "/api/acp/sessions/ghost/no-sess",
+            &json!({"status": "idle"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -128,22 +153,24 @@ async fn test_remove_session() {
 
     helpers::call(
         &ts.app,
-        helpers::post_json(&format!("/api/acp/sessions/{agent}"), &acp_session(session_id, agent)),
-    ).await;
+        helpers::post_json(
+            &format!("/api/acp/sessions/{agent}"),
+            &acp_session(session_id, agent),
+        ),
+    )
+    .await;
 
     let resp = helpers::call(
         &ts.app,
         helpers::delete(&format!("/api/acp/sessions/{agent}/{session_id}")),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
 async fn test_remove_nonexistent_session_returns_404() {
     let ts = helpers::TestServer::new().await;
-    let resp = helpers::call(
-        &ts.app,
-        helpers::delete("/api/acp/sessions/ghost/no-sess"),
-    ).await;
+    let resp = helpers::call(&ts.app, helpers::delete("/api/acp/sessions/ghost/no-sess")).await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

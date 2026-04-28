@@ -78,7 +78,12 @@ pub fn router() -> Router<Arc<AppState>> {
             "/api/conversations",
             get(list_conversations).post(create_conversation),
         )
-        .route("/api/conversations/:id", get(get_conversation).patch(patch_conversation).delete(delete_conversation))
+        .route(
+            "/api/conversations/:id",
+            get(get_conversation)
+                .patch(patch_conversation)
+                .delete(delete_conversation),
+        )
         .route("/api/conversations/:id/messages", post(add_message))
 }
 
@@ -189,15 +194,29 @@ async fn patch_conversation(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     let mut convs = conversations().write().await;
-    let idx = convs.iter().position(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let idx = convs
+        .iter()
+        .position(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id));
     match idx {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Conversation not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Conversation not found"})),
+        )
+            .into_response(),
         Some(i) => {
             let obj = convs[i].as_object_mut().unwrap();
-            if let Some(participants) = body.get("participants") { obj.insert("participants".into(), participants.clone()); }
-            if let Some(channel) = body.get("channel") { obj.insert("channel".into(), channel.clone()); }
-            if let Some(tags) = body.get("tags") { obj.insert("tags".into(), tags.clone()); }
-            if let Some(project_id) = body.get("projectId") { obj.insert("projectId".into(), project_id.clone()); }
+            if let Some(participants) = body.get("participants") {
+                obj.insert("participants".into(), participants.clone());
+            }
+            if let Some(channel) = body.get("channel") {
+                obj.insert("channel".into(), channel.clone());
+            }
+            if let Some(tags) = body.get("tags") {
+                obj.insert("tags".into(), tags.clone());
+            }
+            if let Some(project_id) = body.get("projectId") {
+                obj.insert("projectId".into(), project_id.clone());
+            }
             obj.insert("updatedAt".into(), json!(chrono::Utc::now().to_rfc3339()));
             let updated = convs[i].clone();
             drop(convs);
@@ -214,9 +233,15 @@ async fn delete_conversation(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let mut convs = conversations().write().await;
-    let idx = convs.iter().position(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let idx = convs
+        .iter()
+        .position(|c| c.get("id").and_then(|v| v.as_str()) == Some(&id));
     match idx {
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "Conversation not found"}))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Conversation not found"})),
+        )
+            .into_response(),
         Some(i) => {
             convs.remove(i);
             drop(convs);

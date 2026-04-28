@@ -94,7 +94,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/lessons/trending", get(get_trending))
         .route("/api/lessons/heartbeat", get(get_heartbeat))
         // static routes above must precede :id to avoid capture conflicts
-        .route("/api/lessons/:id", get(get_lesson).patch(patch_lesson).delete(delete_lesson))
+        .route(
+            "/api/lessons/:id",
+            get(get_lesson).patch(patch_lesson).delete(delete_lesson),
+        )
 }
 
 // ── POST /api/lessons ─────────────────────────────────────────────────────
@@ -157,12 +160,24 @@ async fn get_lesson(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let lessons = lessons_store().read().await;
-    match lessons.iter().find(|l| l.get("id").and_then(|v| v.as_str()) == Some(&id)).cloned() {
+    match lessons
+        .iter()
+        .find(|l| l.get("id").and_then(|v| v.as_str()) == Some(&id))
+        .cloned()
+    {
         Some(l) => Json(json!({"ok": true, "lesson": l})).into_response(),
-        None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error": "Lesson not found"}))).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error": "Lesson not found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -175,25 +190,45 @@ async fn patch_lesson(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let mut lessons = lessons_store().write().await;
-    let idx = lessons.iter().position(|l| l.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let idx = lessons
+        .iter()
+        .position(|l| l.get("id").and_then(|v| v.as_str()) == Some(&id));
     match idx {
-        None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error": "Lesson not found"}))).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error": "Lesson not found"})),
+        )
+            .into_response(),
         Some(i) => {
             let obj = lessons[i].as_object_mut().unwrap();
             if let Some(confidence) = body.get("confidence").and_then(|v| v.as_f64()) {
                 obj.insert("confidence".into(), json!(confidence));
             }
-            if let Some(tags) = body.get("tags") { obj.insert("tags".into(), tags.clone()); }
-            if let Some(fix) = body.get("fix").and_then(|v| v.as_str()) { obj.insert("fix".into(), json!(fix)); }
-            if let Some(symptom) = body.get("symptom").and_then(|v| v.as_str()) { obj.insert("symptom".into(), json!(symptom)); }
+            if let Some(tags) = body.get("tags") {
+                obj.insert("tags".into(), tags.clone());
+            }
+            if let Some(fix) = body.get("fix").and_then(|v| v.as_str()) {
+                obj.insert("fix".into(), json!(fix));
+            }
+            if let Some(symptom) = body.get("symptom").and_then(|v| v.as_str()) {
+                obj.insert("symptom".into(), json!(symptom));
+            }
             obj.insert("updatedAt".into(), json!(chrono::Utc::now().to_rfc3339()));
             let updated = lessons[i].clone();
             drop(lessons);
             flush_lessons().await;
-            (axum::http::StatusCode::OK, Json(json!({"ok": true, "lesson": updated}))).into_response()
+            (
+                axum::http::StatusCode::OK,
+                Json(json!({"ok": true, "lesson": updated})),
+            )
+                .into_response()
         }
     }
 }
@@ -206,12 +241,22 @@ async fn delete_lesson(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let mut lessons = lessons_store().write().await;
-    let idx = lessons.iter().position(|l| l.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let idx = lessons
+        .iter()
+        .position(|l| l.get("id").and_then(|v| v.as_str()) == Some(&id));
     match idx {
-        None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error": "Lesson not found"}))).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error": "Lesson not found"})),
+        )
+            .into_response(),
         Some(i) => {
             lessons.remove(i);
             drop(lessons);

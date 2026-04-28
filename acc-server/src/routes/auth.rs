@@ -167,11 +167,7 @@ async fn create_user(
     }
 
     // Update in-memory cache
-    state
-        .user_token_hashes
-        .write()
-        .unwrap()
-        .insert(token_hash);
+    state.user_token_hashes.write().unwrap().insert(token_hash);
 
     tracing::info!("Created user: {}", body.username);
     Ok((

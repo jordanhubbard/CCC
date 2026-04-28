@@ -40,19 +40,19 @@ pub struct DispatchConfig {
 impl DispatchConfig {
     pub fn from_env() -> Self {
         Self {
-            enabled:                   env_bool("ACC_DISPATCH_ENABLED", true),
-            tick_secs:                 env_u64("ACC_DISPATCH_TICK", 15),
-            nudge_after_secs:          env_i64("ACC_DISPATCH_NUDGE_AFTER", 30),
-            assign_after_secs:         env_i64("ACC_DISPATCH_ASSIGN_AFTER", 90),
-            max_assign_attempts:       env_i64("ACC_DISPATCH_MAX_ASSIGN_ATTEMPTS", 3),
-            backfill_threshold_secs:   env_i64("ACC_DISPATCH_BACKFILL_THRESHOLD", 3600),
-            idle_grace_period_secs:    env_i64("ACC_IDLE_GRACE_PERIOD", 120),
-            idea_approve_threshold:    env_usize("ACC_IDEA_APPROVE_THRESHOLD", 3),
-            idea_reject_threshold:     env_usize("ACC_IDEA_REJECT_THRESHOLD", 2),
-            idea_vote_expiry_secs:     env_i64("ACC_IDEA_VOTE_EXPIRY", 604_800),
+            enabled: env_bool("ACC_DISPATCH_ENABLED", true),
+            tick_secs: env_u64("ACC_DISPATCH_TICK", 15),
+            nudge_after_secs: env_i64("ACC_DISPATCH_NUDGE_AFTER", 30),
+            assign_after_secs: env_i64("ACC_DISPATCH_ASSIGN_AFTER", 90),
+            max_assign_attempts: env_i64("ACC_DISPATCH_MAX_ASSIGN_ATTEMPTS", 3),
+            backfill_threshold_secs: env_i64("ACC_DISPATCH_BACKFILL_THRESHOLD", 3600),
+            idle_grace_period_secs: env_i64("ACC_IDLE_GRACE_PERIOD", 120),
+            idea_approve_threshold: env_usize("ACC_IDEA_APPROVE_THRESHOLD", 3),
+            idea_reject_threshold: env_usize("ACC_IDEA_REJECT_THRESHOLD", 2),
+            idea_vote_expiry_secs: env_i64("ACC_IDEA_VOTE_EXPIRY", 604_800),
             idea_expiry_warn_before_secs: env_i64("ACC_IDEA_EXPIRY_WARN_BEFORE", 86_400),
-            rocky_response_timeout_secs:  env_i64("ACC_ROCKY_RESPONSE_TIMEOUT", 14_400),
-            max_tasks_per_agent:          env_usize("ACC_MAX_TASKS_PER_AGENT", 2),
+            rocky_response_timeout_secs: env_i64("ACC_ROCKY_RESPONSE_TIMEOUT", 14_400),
+            max_tasks_per_agent: env_usize("ACC_MAX_TASKS_PER_AGENT", 2),
         }
     }
 }
@@ -63,13 +63,22 @@ fn env_bool(key: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 fn env_i64(key: &str, default: i64) -> i64 {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -80,13 +89,13 @@ pub async fn run(state: Arc<AppState>) {
         info!("[dispatch] disabled (ACC_DISPATCH_ENABLED=false)");
         return;
     }
-    info!("[dispatch] tick loop started (tick={}s nudge={}s assign={}s backfill={}s)",
-        cfg.tick_secs, cfg.nudge_after_secs, cfg.assign_after_secs, cfg.backfill_threshold_secs);
+    info!(
+        "[dispatch] tick loop started (tick={}s nudge={}s assign={}s backfill={}s)",
+        cfg.tick_secs, cfg.nudge_after_secs, cfg.assign_after_secs, cfg.backfill_threshold_secs
+    );
 
     let mut bus_rx = state.bus_tx.subscribe();
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_secs(cfg.tick_secs)
-    );
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(cfg.tick_secs));
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -123,22 +132,43 @@ async fn handle_bus_message(state: &Arc<AppState>, cfg: &DispatchConfig, msg: &s
             }
         }
         Some("rocky:human_response") => {
-            let task_id = match v["idea_task_id"].as_str() { Some(id) => id.to_string(), None => return };
-            let action = match v["action"].as_str() { Some(a) => a.to_string(), None => return };
+            let task_id = match v["idea_task_id"].as_str() {
+                Some(id) => id.to_string(),
+                None => return,
+            };
+            let action = match v["action"].as_str() {
+                Some(a) => a.to_string(),
+                None => return,
+            };
             let now = Utc::now();
 
             match action.as_str() {
                 "extend_7d" => {
-                    update_task_meta_field(state, &task_id, "expiry_extended_at", json!(now.to_rfc3339())).await;
+                    update_task_meta_field(
+                        state,
+                        &task_id,
+                        "expiry_extended_at",
+                        json!(now.to_rfc3339()),
+                    )
+                    .await;
                     info!("[dispatch] rocky: extended 7d idea={}", task_id);
                 }
                 "promote_anyway" => {
                     let ideas = fetch_open_ideas(state).await;
-                    if let Some(idea) = ideas.iter().find(|i| i["id"].as_str() == Some(task_id.as_str())) {
-                        let votes = idea["metadata"]["votes"].as_array().cloned().unwrap_or_default();
-                        let approvals: Vec<&Value> = votes.iter()
-                            .filter(|v| v["vote"].as_str() == Some("approve")
-                                && !v["refinement"].as_str().unwrap_or("").is_empty())
+                    if let Some(idea) = ideas
+                        .iter()
+                        .find(|i| i["id"].as_str() == Some(task_id.as_str()))
+                    {
+                        let votes = idea["metadata"]["votes"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default();
+                        let approvals: Vec<&Value> = votes
+                            .iter()
+                            .filter(|v| {
+                                v["vote"].as_str() == Some("approve")
+                                    && !v["refinement"].as_str().unwrap_or("").is_empty()
+                            })
                             .collect();
                         promote_idea(state, idea, &approvals, now).await;
                     }
@@ -166,7 +196,9 @@ async fn tick(state: &Arc<AppState>, cfg: &DispatchConfig) {
     let open_tasks = fetch_open_dispatchable_tasks(state).await;
 
     for task in &open_tasks {
-        if let Some(assigned) = dispatch_task(state, cfg, task, &agents_snapshot, &claimed_counts, now).await {
+        if let Some(assigned) =
+            dispatch_task(state, cfg, task, &agents_snapshot, &claimed_counts, now).await
+        {
             *claimed_counts.entry(assigned).or_insert(0) += 1;
         }
     }
@@ -227,12 +259,27 @@ async fn auto_refresh_workspaces(state: &Arc<AppState>) {
             Some(p) if !p.is_empty() => p.to_string(),
             _ => continue,
         };
-        let status = project.get("status").and_then(|v| v.as_str()).unwrap_or("active");
-        if status != "active" { continue; }
-        let dirty = project.get("agentfs_dirty").and_then(|v| v.as_bool()).unwrap_or(false);
-        if dirty { continue; } // never overwrite uncommitted work
-        let clone_status = project.get("clone_status").and_then(|v| v.as_str()).unwrap_or("");
-        if clone_status != "ready" { continue; } // not yet cloned, or failed
+        let status = project
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("active");
+        if status != "active" {
+            continue;
+        }
+        let dirty = project
+            .get("agentfs_dirty")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if dirty {
+            continue;
+        } // never overwrite uncommitted work
+        let clone_status = project
+            .get("clone_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if clone_status != "ready" {
+            continue;
+        } // not yet cloned, or failed
 
         // Skip if any task for this project is currently in flight —
         // an agent is actively working in this directory and a pull
@@ -244,9 +291,12 @@ async fn auto_refresh_workspaces(state: &Arc<AppState>) {
                  WHERE project_id=?1 AND status IN ('claimed','in_progress')",
                 params![project_id],
                 |row| row.get(0),
-            ).unwrap_or(0)
+            )
+            .unwrap_or(0)
         };
-        if in_flight > 0 { continue; }
+        if in_flight > 0 {
+            continue;
+        }
 
         match crate::routes::projects::git_pull_workspace(&path).await {
             Ok(s) if s == "already up to date" => {
@@ -282,7 +332,7 @@ async fn sweep_expired_claims(state: &Arc<AppState>) {
             "SELECT id, COALESCE(claimed_by,'') FROM fleet_tasks
              WHERE status IN ('claimed','in_progress')
                AND claim_expires_at IS NOT NULL
-               AND claim_expires_at < ?1"
+               AND claim_expires_at < ?1",
         ) {
             Ok(s) => s,
             Err(_) => return,
@@ -290,11 +340,16 @@ async fn sweep_expired_claims(state: &Arc<AppState>) {
         let rows = stmt.query_map(params![now_str], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         });
-        let rows = match rows { Ok(r) => r, Err(_) => return };
+        let rows = match rows {
+            Ok(r) => r,
+            Err(_) => return,
+        };
         rows.filter_map(|r| r.ok()).collect()
     };
 
-    if unclaimed.is_empty() { return; }
+    if unclaimed.is_empty() {
+        return;
+    }
 
     let db = state.fleet_db.lock().await;
     for (id, prev_agent) in &unclaimed {
@@ -305,13 +360,19 @@ async fn sweep_expired_claims(state: &Arc<AppState>) {
                AND claim_expires_at IS NOT NULL AND claim_expires_at < ?1",
             params![now_str, id],
         );
-        info!("[dispatch] swept expired claim task={} prev_agent={}", id, prev_agent);
-        let _ = state.bus_tx.send(json!({
-            "type": "tasks:unclaimed",
-            "task_id": id,
-            "agent": prev_agent,
-            "reason": "claim_expired",
-        }).to_string());
+        info!(
+            "[dispatch] swept expired claim task={} prev_agent={}",
+            id, prev_agent
+        );
+        let _ = state.bus_tx.send(
+            json!({
+                "type": "tasks:unclaimed",
+                "task_id": id,
+                "agent": prev_agent,
+                "reason": "claim_expired",
+            })
+            .to_string(),
+        );
     }
 }
 
@@ -328,7 +389,10 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
     let projects = state.projects.read().await.clone();
 
     for project in projects.iter() {
-        let dirty = project.get("agentfs_dirty").and_then(|v| v.as_bool()).unwrap_or(false);
+        let dirty = project
+            .get("agentfs_dirty")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !dirty {
             continue;
         }
@@ -336,7 +400,10 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => continue,
         };
-        let project_status = project.get("status").and_then(|v| v.as_str()).unwrap_or("active");
+        let project_status = project
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("active");
         if project_status != "active" {
             continue; // skip archived projects
         }
@@ -345,8 +412,10 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
         // this project failed in a row. Operator must POST /clean
         // manually (or fix the underlying problem and reset) before we
         // resume. Prevents queueing dozens of doomed tasks.
-        let consecutive_failures = project.get("phase_commit_consecutive_failures")
-            .and_then(|v| v.as_i64()).unwrap_or(0);
+        let consecutive_failures = project
+            .get("phase_commit_consecutive_failures")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         if consecutive_failures >= 3 {
             // Emit a bus alert once per project per 10 ticks (~150s) so the
             // Slack gateway surfaces it to the human — then log and skip.
@@ -356,18 +425,24 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
                     "[dispatch] phase_commit auto-fill paused for project {project_id} \
                      — {consecutive_failures} consecutive failures; reset via /clean or manual fix"
                 );
-                let project_name = project.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let _ = state.bus_tx.send(serde_json::json!({
-                    "type": "phase_commit.paused",
-                    "project_id": project_id,
-                    "project_name": project_name,
-                    "consecutive_failures": consecutive_failures,
-                    "action_required": format!(
-                        "Git push is failing for project '{}'. Check remote/SSH credentials, \
-                         then POST /api/projects/{}/clean to resume auto-commits.",
-                        project_name, project_id
-                    ),
-                }).to_string());
+                let project_name = project
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let _ = state.bus_tx.send(
+                    serde_json::json!({
+                        "type": "phase_commit.paused",
+                        "project_id": project_id,
+                        "project_name": project_name,
+                        "consecutive_failures": consecutive_failures,
+                        "action_required": format!(
+                            "Git push is failing for project '{}'. Check remote/SSH credentials, \
+                             then POST /api/projects/{}/clean to resume auto-commits.",
+                            project_name, project_id
+                        ),
+                    })
+                    .to_string(),
+                );
             }
             continue;
         }
@@ -383,7 +458,8 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
                    AND status IN ('open','claimed','in_progress')",
                 params![project_id],
                 |row| row.get(0),
-            ).unwrap_or(0)
+            )
+            .unwrap_or(0)
         };
         if already_in_flight > 0 {
             continue;
@@ -391,7 +467,11 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
 
         // File a new phase_commit task
         let task_id = format!("task-{}", uuid::Uuid::new_v4().simple());
-        let project_name = project.get("name").and_then(|v| v.as_str()).unwrap_or("project").to_string();
+        let project_name = project
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("project")
+            .to_string();
         let title = format!("phase_commit: {project_name}");
         let description = format!(
             "Auto-filed milestone-commit task. The project's AgentFS workspace \
@@ -404,7 +484,8 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
         let metadata = json!({
             "source": "auto-phase-commit",
             "auto_filed_at": Utc::now().to_rfc3339(),
-        }).to_string();
+        })
+        .to_string();
         let phase = "milestone";
 
         let inserted = {
@@ -418,8 +499,10 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
         };
         match inserted {
             Ok(_) => {
-                info!("[dispatch] auto-filed phase_commit task {} for project {} ({})",
-                    task_id, project_id, project_name);
+                info!(
+                    "[dispatch] auto-filed phase_commit task {} for project {} ({})",
+                    task_id, project_id, project_name
+                );
                 let _ = state.bus_tx.send(
                     json!({
                         "type": "tasks:added",
@@ -427,11 +510,15 @@ async fn auto_file_phase_commits(state: &Arc<AppState>) {
                         "task_type": "phase_commit",
                         "project_id": project_id,
                         "auto_filed": true,
-                    }).to_string()
+                    })
+                    .to_string(),
                 );
             }
             Err(e) => {
-                info!("[dispatch] auto-file phase_commit failed for project {}: {e}", project_id);
+                info!(
+                    "[dispatch] auto-file phase_commit failed for project {}: {e}",
+                    project_id
+                );
             }
         }
     }
@@ -448,8 +535,12 @@ async fn dispatch_task(
     claimed_counts: &HashMap<String, usize>,
     now: DateTime<Utc>,
 ) -> Option<String> {
-    let task_id = match task["id"].as_str() { Some(id) => id, None => return None };
-    let created_at = match task["created_at"].as_str()
+    let task_id = match task["id"].as_str() {
+        Some(id) => id,
+        None => return None,
+    };
+    let created_at = match task["created_at"]
+        .as_str()
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc))
     {
@@ -459,16 +550,23 @@ async fn dispatch_task(
 
     let dispatch_meta = task["metadata"]["dispatch"].as_object();
     let assign_attempts: i64 = dispatch_meta
-        .and_then(|m| m.get("assign_attempts")).and_then(|v| v.as_i64()).unwrap_or(0);
+        .and_then(|m| m.get("assign_attempts"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     let last_nudge_at: Option<DateTime<Utc>> = dispatch_meta
-        .and_then(|m| m.get("last_nudge_at")).and_then(|v| v.as_str())
+        .and_then(|m| m.get("last_nudge_at"))
+        .and_then(|v| v.as_str())
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc));
 
     let blacklist: Vec<String> = dispatch_meta
         .and_then(|m| m.get("blacklist"))
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     if assign_attempts >= cfg.max_assign_attempts {
@@ -479,11 +577,19 @@ async fn dispatch_task(
     let is_backfill = age_secs >= cfg.backfill_threshold_secs;
 
     // Phase 3: explicit assign (backfill or aged past assign threshold)
-    let nudge_age = last_nudge_at.map(|t| (now - t).num_seconds()).unwrap_or(i64::MAX);
+    let nudge_age = last_nudge_at
+        .map(|t| (now - t).num_seconds())
+        .unwrap_or(i64::MAX);
     let past_assign = nudge_age >= cfg.assign_after_secs || is_backfill;
 
     if past_assign {
-        if let Some(agent) = select_best_agent(task, agents, claimed_counts, &blacklist, cfg.max_tasks_per_agent) {
+        if let Some(agent) = select_best_agent(
+            task,
+            agents,
+            claimed_counts,
+            &blacklist,
+            cfg.max_tasks_per_agent,
+        ) {
             explicit_assign(state, task_id, &agent, now).await;
             info!("[dispatch] phase3 assign task={} agent={}", task_id, agent);
             return Some(agent);
@@ -491,22 +597,35 @@ async fn dispatch_task(
             // no capable agent with capacity — fall back to broadcast nudge
             publish_nudge(state, task_id, task, None);
             update_nudge_meta(state, task_id, task, now).await;
-            info!("[dispatch] phase2 broadcast (no capable agent with capacity) task={}", task_id);
+            info!(
+                "[dispatch] phase2 broadcast (no capable agent with capacity) task={}",
+                task_id
+            );
         }
         return None;
     }
 
     // Phase 2: broadcast nudge (past nudge threshold, not yet assign threshold)
-    let past_nudge = last_nudge_at.map(|t| (now - t).num_seconds() >= cfg.nudge_after_secs)
+    let past_nudge = last_nudge_at
+        .map(|t| (now - t).num_seconds() >= cfg.nudge_after_secs)
         .unwrap_or(true);
 
     if past_nudge {
         // Try directed first; fall back to broadcast if no match
-        let target = select_best_agent(task, agents, claimed_counts, &blacklist, cfg.max_tasks_per_agent);
+        let target = select_best_agent(
+            task,
+            agents,
+            claimed_counts,
+            &blacklist,
+            cfg.max_tasks_per_agent,
+        );
         publish_nudge(state, task_id, task, target.as_deref());
         update_nudge_meta(state, task_id, task, now).await;
         if let Some(ref a) = target {
-            info!("[dispatch] phase2 directed-nudge task={} agent={}", task_id, a);
+            info!(
+                "[dispatch] phase2 directed-nudge task={} agent={}",
+                task_id, a
+            );
         } else {
             info!("[dispatch] phase2 broadcast task={}", task_id);
         }
@@ -526,25 +645,45 @@ pub fn select_best_agent(
     blacklist: &[String],
     max_per_agent: usize,
 ) -> Option<String> {
-    let preferred_executor = task.get("preferred_executor")
+    let preferred_executor = task
+        .get("preferred_executor")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .or_else(|| task["metadata"]["preferred_executor"].as_str().filter(|s| !s.is_empty()));
-    let required_executors: Vec<&str> = task.get("required_executors")
+        .or_else(|| {
+            task["metadata"]["preferred_executor"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+        });
+    let required_executors: Vec<&str> = task
+        .get("required_executors")
         .and_then(|v| v.as_array())
         .or_else(|| task["metadata"]["required_executors"].as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).filter(|s| !s.is_empty()).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
 
-    let mut candidates: Vec<(String, usize, bool)> = agents.as_object()?
+    let mut candidates: Vec<(String, usize, bool)> = agents
+        .as_object()?
         .iter()
         .filter_map(|(name, agent)| {
-            if !is_agent_online(agent) { return None; }
-            if blacklist.contains(name) { return None; }
+            if !is_agent_online(agent) {
+                return None;
+            }
+            if blacklist.contains(name) {
+                return None;
+            }
             let load = *claimed_counts.get(name).unwrap_or(&0);
-            if load >= max_per_agent { return None; }
+            if load >= max_per_agent {
+                return None;
+            }
             if !required_executors.is_empty()
-                && !required_executors.iter().any(|req| agent_supports_executor(agent, req))
+                && !required_executors
+                    .iter()
+                    .any(|req| agent_supports_executor(agent, req))
             {
                 return None;
             }
@@ -572,7 +711,9 @@ pub fn select_best_agent(
         })
         .collect();
 
-    if candidates.is_empty() { return None; }
+    if candidates.is_empty() {
+        return None;
+    }
 
     if preferred_executor.is_some() && candidates.iter().any(|c| c.2) {
         candidates.retain(|c| c.2);
@@ -605,7 +746,8 @@ fn agent_supports_executor(agent: &Value, executor: &str) -> bool {
 
 /// Check if an agent is online (lastSeen within 300s).
 pub fn is_agent_online(agent: &Value) -> bool {
-    agent.get("lastSeen")
+    agent
+        .get("lastSeen")
         .and_then(|v| v.as_str())
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| (Utc::now() - dt.with_timezone(&Utc)).num_seconds() < 300)
@@ -616,11 +758,16 @@ pub fn is_agent_online(agent: &Value) -> bool {
 
 /// Called from routes/tasks.rs immediately after a task is inserted.
 pub async fn nudge_new_task(state: &Arc<AppState>, task: &Value) {
-    let task_id = match task["id"].as_str() { Some(id) => id, None => return };
+    let task_id = match task["id"].as_str() {
+        Some(id) => id,
+        None => return,
+    };
     let agents = state.agents.read().await;
     let claimed_counts = get_claimed_counts(state).await;
     let max_per_agent = std::env::var("ACC_MAX_TASKS_PER_AGENT")
-        .ok().and_then(|v| v.parse().ok()).unwrap_or(2usize);
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2usize);
     let target = select_best_agent(task, &agents, &claimed_counts, &[], max_per_agent);
     publish_nudge(state, task_id, task, target.as_deref());
 }
@@ -663,16 +810,22 @@ async fn explicit_assign(state: &Arc<AppState>, task_id: &str, agent: &str, now:
     if rows > 0 {
         // Increment assign_attempts in metadata
         update_assign_meta(state, task_id).await;
-        let _ = state.bus_tx.send(json!({
-            "type": "tasks:dispatch_assigned",
-            "to": agent,
-            "task_id": task_id,
-        }).to_string());
-        let _ = state.bus_tx.send(json!({
-            "type": "tasks:claimed",
-            "task_id": task_id,
-            "agent": agent,
-        }).to_string());
+        let _ = state.bus_tx.send(
+            json!({
+                "type": "tasks:dispatch_assigned",
+                "to": agent,
+                "task_id": task_id,
+            })
+            .to_string(),
+        );
+        let _ = state.bus_tx.send(
+            json!({
+                "type": "tasks:claimed",
+                "task_id": task_id,
+                "agent": agent,
+            })
+            .to_string(),
+        );
     }
 }
 
@@ -687,16 +840,26 @@ async fn tally_idea_votes(
     let ideas = fetch_open_ideas(state).await;
 
     for idea in &ideas {
-        let task_id = match idea["id"].as_str() { Some(id) => id, None => continue };
+        let task_id = match idea["id"].as_str() {
+            Some(id) => id,
+            None => continue,
+        };
 
-        let votes = idea["metadata"]["votes"].as_array().cloned().unwrap_or_default();
+        let votes = idea["metadata"]["votes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let creator = idea["metadata"]["created_by"].as_str().unwrap_or("");
 
-        let approvals: Vec<&Value> = votes.iter()
-            .filter(|v| v["vote"].as_str() == Some("approve")
-                && !v["refinement"].as_str().unwrap_or("").is_empty())
+        let approvals: Vec<&Value> = votes
+            .iter()
+            .filter(|v| {
+                v["vote"].as_str() == Some("approve")
+                    && !v["refinement"].as_str().unwrap_or("").is_empty()
+            })
             .collect();
-        let rejections: usize = votes.iter()
+        let rejections: usize = votes
+            .iter()
             .filter(|v| v["vote"].as_str() == Some("reject"))
             .count();
 
@@ -710,30 +873,40 @@ async fn tally_idea_votes(
         }
 
         // Nudge eligible voters
-        let voted_agents: Vec<&str> = votes.iter()
-            .filter_map(|v| v["agent"].as_str())
-            .collect();
+        let voted_agents: Vec<&str> = votes.iter().filter_map(|v| v["agent"].as_str()).collect();
 
-        let eligible: Vec<String> = agents.as_object()
-            .map(|obj| obj.iter()
-                .filter_map(|(name, agent)| {
-                    if !is_agent_online(agent) { return None; }
-                    if name == creator { return None; }
-                    if voted_agents.contains(&name.as_str()) { return None; }
-                    Some(name.clone())
-                })
-                .collect())
+        let eligible: Vec<String> = agents
+            .as_object()
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(name, agent)| {
+                        if !is_agent_online(agent) {
+                            return None;
+                        }
+                        if name == creator {
+                            return None;
+                        }
+                        if voted_agents.contains(&name.as_str()) {
+                            return None;
+                        }
+                        Some(name.clone())
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         for agent_name in &eligible {
-            let _ = state.bus_tx.send(json!({
-                "type": "tasks:dispatch_nudge",
-                "to": agent_name,
-                "task_id": task_id,
-                "task_type": "vote",
-                "project_id": idea["project_id"],
-                "priority": idea["priority"],
-            }).to_string());
+            let _ = state.bus_tx.send(
+                json!({
+                    "type": "tasks:dispatch_nudge",
+                    "to": agent_name,
+                    "task_id": task_id,
+                    "task_type": "vote",
+                    "project_id": idea["project_id"],
+                    "priority": idea["priority"],
+                })
+                .to_string(),
+            );
         }
     }
 }
@@ -744,23 +917,34 @@ async fn promote_idea(
     approvals: &[&Value],
     now: DateTime<Utc>,
 ) {
-    let idea_id = match idea["id"].as_str() { Some(id) => id, None => return };
+    let idea_id = match idea["id"].as_str() {
+        Some(id) => id,
+        None => return,
+    };
     let now_str = now.to_rfc3339();
 
     // Build merged description
     let base_desc = idea["description"].as_str().unwrap_or("");
-    let refinements: String = approvals.iter()
+    let refinements: String = approvals
+        .iter()
         .filter_map(|v| {
             let agent = v["agent"].as_str().unwrap_or("?");
             let r = v["refinement"].as_str().unwrap_or("").trim();
-            if r.is_empty() { None } else { Some(format!("- **{}**: {}", agent, r)) }
+            if r.is_empty() {
+                None
+            } else {
+                Some(format!("- **{}**: {}", agent, r))
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");
     let full_desc = if refinements.is_empty() {
         base_desc.to_string()
     } else {
-        format!("{}\n\n---\n**Agent refinements:**\n{}", base_desc, refinements)
+        format!(
+            "{}\n\n---\n**Agent refinements:**\n{}",
+            base_desc, refinements
+        )
     };
 
     let new_id = format!("task-{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
@@ -777,9 +961,13 @@ async fn promote_idea(
             params![new_id, project_id, title, full_desc, priority, meta],
         );
         let completed_meta = {
-            let raw: String = db.query_row(
-                "SELECT metadata FROM fleet_tasks WHERE id=?1", params![idea_id], |r| r.get(0)
-            ).unwrap_or_else(|_| "{}".to_string());
+            let raw: String = db
+                .query_row(
+                    "SELECT metadata FROM fleet_tasks WHERE id=?1",
+                    params![idea_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "{}".to_string());
             let mut m: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
             m["promoted"] = json!(true);
             m.to_string()
@@ -790,13 +978,19 @@ async fn promote_idea(
         );
     }
 
-    let _ = state.bus_tx.send(json!({
-        "type": "tasks:added",
-        "task_id": new_id,
-        "project_id": project_id,
-        "promoted_from": idea_id,
-    }).to_string());
-    info!("[dispatch] idea promoted idea={} → work={}", idea_id, new_id);
+    let _ = state.bus_tx.send(
+        json!({
+            "type": "tasks:added",
+            "task_id": new_id,
+            "project_id": project_id,
+            "promoted_from": idea_id,
+        })
+        .to_string(),
+    );
+    info!(
+        "[dispatch] idea promoted idea={} → work={}",
+        idea_id, new_id
+    );
 }
 
 async fn reject_idea(state: &Arc<AppState>, task_id: &str, now: DateTime<Utc>) {
@@ -811,15 +1005,20 @@ async fn reject_idea(state: &Arc<AppState>, task_id: &str, now: DateTime<Utc>) {
 // ── Rocky pre-expiry escalation ───────────────────────────────────────────────
 
 async fn check_idea_expiry(state: &Arc<AppState>, cfg: &DispatchConfig, now: DateTime<Utc>) {
-    let warn_threshold = Duration::seconds(cfg.idea_vote_expiry_secs - cfg.idea_expiry_warn_before_secs);
+    let warn_threshold =
+        Duration::seconds(cfg.idea_vote_expiry_secs - cfg.idea_expiry_warn_before_secs);
     let expire_threshold = Duration::seconds(cfg.idea_vote_expiry_secs);
     let rocky_timeout = Duration::seconds(cfg.rocky_response_timeout_secs);
 
     let ideas = fetch_open_ideas(state).await;
 
     for idea in &ideas {
-        let task_id = match idea["id"].as_str() { Some(id) => id, None => continue };
-        let created_at = match idea["created_at"].as_str()
+        let task_id = match idea["id"].as_str() {
+            Some(id) => id,
+            None => continue,
+        };
+        let created_at = match idea["created_at"]
+            .as_str()
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         {
             Some(dt) => dt.with_timezone(&Utc),
@@ -829,23 +1028,30 @@ async fn check_idea_expiry(state: &Arc<AppState>, cfg: &DispatchConfig, now: Dat
         let age = now - created_at;
         let meta = &idea["metadata"];
         let expiry_warned = meta["expiry_warned"].as_bool().unwrap_or(false);
-        let extended_at = meta["expiry_extended_at"].as_str()
+        let extended_at = meta["expiry_extended_at"]
+            .as_str()
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc));
 
         // Effective expiry: base + optional 7-day extension
         let effective_expiry = expire_threshold
-            + extended_at.map(|_| Duration::days(7)).unwrap_or(Duration::zero());
+            + extended_at
+                .map(|_| Duration::days(7))
+                .unwrap_or(Duration::zero());
 
         // Hard expire after timeout waiting for Rocky
         if expiry_warned {
-            let warn_sent_at = meta["rocky_warn_sent_at"].as_str()
+            let warn_sent_at = meta["rocky_warn_sent_at"]
+                .as_str()
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|dt| dt.with_timezone(&Utc));
             if let Some(sent) = warn_sent_at {
                 if age > effective_expiry || (now - sent) > rocky_timeout {
                     reject_idea(state, task_id, now).await;
-                    info!("[dispatch] idea expired (Rocky timeout/expiry) task={}", task_id);
+                    info!(
+                        "[dispatch] idea expired (Rocky timeout/expiry) task={}",
+                        task_id
+                    );
                 }
             }
             continue;
@@ -853,13 +1059,20 @@ async fn check_idea_expiry(state: &Arc<AppState>, cfg: &DispatchConfig, now: Dat
 
         // Warn Rocky when approaching expiry
         if age > warn_threshold && age < effective_expiry {
-            let votes = idea["metadata"]["votes"].as_array().cloned().unwrap_or_default();
-            let vote_summary = votes.iter()
-                .map(|v| format!("- {} ({}): {}",
-                    v["agent"].as_str().unwrap_or("?"),
-                    v["vote"].as_str().unwrap_or("?"),
-                    v["refinement"].as_str().unwrap_or(""),
-                ))
+            let votes = idea["metadata"]["votes"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let vote_summary = votes
+                .iter()
+                .map(|v| {
+                    format!(
+                        "- {} ({}): {}",
+                        v["agent"].as_str().unwrap_or("?"),
+                        v["vote"].as_str().unwrap_or("?"),
+                        v["refinement"].as_str().unwrap_or(""),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -881,7 +1094,13 @@ async fn check_idea_expiry(state: &Arc<AppState>, cfg: &DispatchConfig, now: Dat
 
             // Mark warned in metadata
             update_task_meta_field(state, task_id, "expiry_warned", json!(true)).await;
-            update_task_meta_field(state, task_id, "rocky_warn_sent_at", json!(now.to_rfc3339())).await;
+            update_task_meta_field(
+                state,
+                task_id,
+                "rocky_warn_sent_at",
+                json!(now.to_rfc3339()),
+            )
+            .await;
             info!("[dispatch] rocky escalation sent for idea={}", task_id);
         }
     }
@@ -918,28 +1137,41 @@ pub async fn detect_idle_agents(
 
     if let Some(obj) = agents.as_object() {
         for (name, agent) in obj {
-            if !is_agent_online(agent) { continue; }
+            if !is_agent_online(agent) {
+                continue;
+            }
 
             // Grace period check
-            let online_since = agent.get("online_since")
+            let online_since = agent
+                .get("online_since")
                 .and_then(|v| v.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|dt| dt.with_timezone(&Utc));
             if let Some(since) = online_since {
-                if (now - since).num_seconds() < cfg.idle_grace_period_secs { continue; }
+                if (now - since).num_seconds() < cfg.idle_grace_period_secs {
+                    continue;
+                }
             }
 
             // No active tasks
-            if claimed_counts.get(name).copied().unwrap_or(0) > 0 { continue; }
+            if claimed_counts.get(name).copied().unwrap_or(0) > 0 {
+                continue;
+            }
 
             // No claimable real work
             let max_per_agent = cfg.max_tasks_per_agent;
             let has_work = open_real_tasks.iter().any(|task| {
-                select_best_agent(task, agents, claimed_counts, &[], max_per_agent).as_deref() == Some(name.as_str())
-                || (task.get("preferred_agent").and_then(|v| v.as_str()).is_none()
-                    && task["metadata"]["preferred_agent"].as_str().is_none())
+                select_best_agent(task, agents, claimed_counts, &[], max_per_agent).as_deref()
+                    == Some(name.as_str())
+                    || (task
+                        .get("preferred_agent")
+                        .and_then(|v| v.as_str())
+                        .is_none()
+                        && task["metadata"]["preferred_agent"].as_str().is_none())
             });
-            if has_work { continue; }
+            if has_work {
+                continue;
+            }
 
             idle.push(name.clone());
         }
@@ -947,11 +1179,7 @@ pub async fn detect_idle_agents(
     idle
 }
 
-async fn maybe_create_discovery_task(
-    state: &Arc<AppState>,
-    agent_name: &str,
-    now: DateTime<Utc>,
-) {
+async fn maybe_create_discovery_task(state: &Arc<AppState>, agent_name: &str, now: DateTime<Utc>) {
     // Already has a discovery task?
     let existing = {
         let db = state.fleet_db.lock().await;
@@ -962,7 +1190,9 @@ async fn maybe_create_discovery_task(
         ).unwrap_or(0);
         count > 0
     };
-    if existing { return; }
+    if existing {
+        return;
+    }
 
     // Find project with no open idea tasks, oldest activity first
     let project_id = {
@@ -973,9 +1203,8 @@ async fn maybe_create_discovery_task(
              ORDER BY (SELECT MAX(updated_at) FROM fleet_tasks t2 WHERE t2.project_id=fleet_tasks.project_id) ASC \
              LIMIT 1"
         ).ok();
-        stmt.as_mut().and_then(|s| {
-            s.query_row([], |r| r.get::<_, String>(0)).ok()
-        })
+        stmt.as_mut()
+            .and_then(|s| s.query_row([], |r| r.get::<_, String>(0)).ok())
     };
 
     let project_id = match project_id {
@@ -1004,12 +1233,18 @@ async fn maybe_create_discovery_task(
         );
     }
 
-    let _ = state.bus_tx.send(json!({
-        "type": "tasks:dispatch_assigned",
-        "to": agent_name,
-        "task_id": task_id,
-    }).to_string());
-    info!("[dispatch] discovery task created task={} agent={} project={}", task_id, agent_name, project_id);
+    let _ = state.bus_tx.send(
+        json!({
+            "type": "tasks:dispatch_assigned",
+            "to": agent_name,
+            "task_id": task_id,
+        })
+        .to_string(),
+    );
+    info!(
+        "[dispatch] discovery task created task={} agent={} project={}",
+        task_id, agent_name, project_id
+    );
 }
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
@@ -1019,7 +1254,7 @@ async fn get_claimed_counts(state: &Arc<AppState>) -> HashMap<String, usize> {
     let mut stmt = match db.prepare(
         "SELECT claimed_by, COUNT(*) FROM fleet_tasks \
          WHERE status IN ('claimed','in_progress') AND claimed_by IS NOT NULL \
-         GROUP BY claimed_by"
+         GROUP BY claimed_by",
     ) {
         Ok(s) => s,
         Err(_) => return HashMap::new(),
@@ -1042,7 +1277,8 @@ async fn fetch_task_by_id(state: &Arc<AppState>, id: &str) -> Option<Value> {
          FROM fleet_tasks WHERE id=?1 AND status='open'",
         params![id],
         row_to_value,
-    ).ok()
+    )
+    .ok()
 }
 
 async fn fetch_open_dispatchable_tasks(state: &Arc<AppState>) -> Vec<Value> {
@@ -1053,7 +1289,7 @@ async fn fetch_open_dispatchable_tasks(state: &Arc<AppState>) -> Vec<Value> {
          task_type,review_of,phase,blocked_by,review_result \
          FROM fleet_tasks \
          WHERE status='open' AND task_type NOT IN ('discovery','idea') \
-         ORDER BY priority ASC, created_at ASC"
+         ORDER BY priority ASC, created_at ASC",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -1071,7 +1307,7 @@ async fn fetch_open_ideas(state: &Arc<AppState>) -> Vec<Value> {
          task_type,review_of,phase,blocked_by,review_result \
          FROM fleet_tasks \
          WHERE status='open' AND task_type='idea' \
-         ORDER BY created_at ASC"
+         ORDER BY created_at ASC",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -1110,7 +1346,11 @@ fn row_to_value(row: &rusqlite::Row) -> rusqlite::Result<Value> {
 
 async fn update_nudge_meta(state: &Arc<AppState>, task_id: &str, task: &Value, now: DateTime<Utc>) {
     let raw_meta = task["metadata"].clone();
-    let mut meta: Value = if raw_meta.is_object() { raw_meta } else { json!({}) };
+    let mut meta: Value = if raw_meta.is_object() {
+        raw_meta
+    } else {
+        json!({})
+    };
     let nudge_count = meta["dispatch"]["nudge_count"].as_i64().unwrap_or(0) + 1;
     meta["dispatch"]["nudge_count"] = json!(nudge_count);
     meta["dispatch"]["last_nudge_at"] = json!(now.to_rfc3339());
@@ -1124,9 +1364,13 @@ async fn update_nudge_meta(state: &Arc<AppState>, task_id: &str, task: &Value, n
 async fn update_assign_meta(state: &Arc<AppState>, task_id: &str) {
     let now = Utc::now().to_rfc3339();
     let db = state.fleet_db.lock().await;
-    let raw: String = db.query_row(
-        "SELECT metadata FROM fleet_tasks WHERE id=?1", params![task_id], |r| r.get(0)
-    ).unwrap_or_else(|_| "{}".to_string());
+    let raw: String = db
+        .query_row(
+            "SELECT metadata FROM fleet_tasks WHERE id=?1",
+            params![task_id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "{}".to_string());
     let mut meta: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
     let attempts = meta["dispatch"]["assign_attempts"].as_i64().unwrap_or(0) + 1;
     meta["dispatch"]["assign_attempts"] = json!(attempts);
@@ -1139,9 +1383,13 @@ async fn update_assign_meta(state: &Arc<AppState>, task_id: &str) {
 
 async fn update_task_meta_field(state: &Arc<AppState>, task_id: &str, field: &str, value: Value) {
     let db = state.fleet_db.lock().await;
-    let raw: String = db.query_row(
-        "SELECT metadata FROM fleet_tasks WHERE id=?1", params![task_id], |r| r.get(0)
-    ).unwrap_or_else(|_| "{}".to_string());
+    let raw: String = db
+        .query_row(
+            "SELECT metadata FROM fleet_tasks WHERE id=?1",
+            params![task_id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "{}".to_string());
     let mut meta: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
     meta[field] = value;
     let now = Utc::now().to_rfc3339();
@@ -1171,14 +1419,18 @@ mod tests {
             for cap in *caps {
                 caps_map.insert(cap.to_string(), json!(true));
             }
-            let executors: Vec<Value> = caps.iter()
+            let executors: Vec<Value> = caps
+                .iter()
                 .map(|cap| json!({"executor": cap, "ready": true}))
                 .collect();
-            map.insert(name.to_string(), json!({
-                "lastSeen": last_seen,
-                "capabilities": caps_map,
-                "executors": executors,
-            }));
+            map.insert(
+                name.to_string(),
+                json!({
+                    "lastSeen": last_seen,
+                    "capabilities": caps_map,
+                    "executors": executors,
+                }),
+            );
         }
         Value::Object(map)
     }
@@ -1193,10 +1445,7 @@ mod tests {
 
     #[test]
     fn test_capability_match_no_requirement() {
-        let agents = make_agents(&[
-            ("alpha", true, &[], 10),
-            ("beta",  true, &["gpu"], 10),
-        ]);
+        let agents = make_agents(&[("alpha", true, &[], 10), ("beta", true, &["gpu"], 10)]);
         let task = make_task(None);
         let result = select_best_agent(&task, &agents, &HashMap::new(), &[], 99);
         assert!(result.is_some());
@@ -1230,10 +1479,7 @@ mod tests {
 
     #[test]
     fn test_offline_agent_excluded() {
-        let agents = make_agents(&[
-            ("online",  true,  &[], 10),
-            ("offline", false, &[], 10),
-        ]);
+        let agents = make_agents(&[("online", true, &[], 10), ("offline", false, &[], 10)]);
         let task = make_task(None);
         let result = select_best_agent(&task, &agents, &HashMap::new(), &[], 99);
         assert_eq!(result.as_deref(), Some("online"));
@@ -1241,10 +1487,7 @@ mod tests {
 
     #[test]
     fn test_select_least_loaded_agent() {
-        let agents = make_agents(&[
-            ("busy",  true, &[], 10),
-            ("light", true, &[], 10),
-        ]);
+        let agents = make_agents(&[("busy", true, &[], 10), ("light", true, &[], 10)]);
         let mut counts = HashMap::new();
         counts.insert("busy".to_string(), 3);
         counts.insert("light".to_string(), 1);
@@ -1267,9 +1510,7 @@ mod tests {
 
     #[test]
     fn test_no_eligible_agents_returns_none() {
-        let agents = make_agents(&[
-            ("offline", false, &[], 10),
-        ]);
+        let agents = make_agents(&[("offline", false, &[], 10)]);
         let task = make_task(None);
         let result = select_best_agent(&task, &agents, &HashMap::new(), &[], 99);
         assert!(result.is_none());
@@ -1277,10 +1518,7 @@ mod tests {
 
     #[test]
     fn test_blacklisted_agent_excluded() {
-        let agents = make_agents(&[
-            ("agent-a", true, &[], 10),
-            ("agent-b", true, &[], 10),
-        ]);
+        let agents = make_agents(&[("agent-a", true, &[], 10), ("agent-b", true, &[], 10)]);
         let task = make_task(None);
         let blacklist = vec!["agent-a".to_string()];
         let result = select_best_agent(&task, &agents, &HashMap::new(), &blacklist, 99);
@@ -1289,9 +1527,7 @@ mod tests {
 
     #[test]
     fn test_all_blacklisted_returns_none() {
-        let agents = make_agents(&[
-            ("agent-a", true, &[], 10),
-        ]);
+        let agents = make_agents(&[("agent-a", true, &[], 10)]);
         let task = make_task(None);
         let blacklist = vec!["agent-a".to_string()];
         let result = select_best_agent(&task, &agents, &HashMap::new(), &blacklist, 99);
