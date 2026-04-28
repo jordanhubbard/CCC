@@ -20,7 +20,7 @@ pub async fn run(args: &[String]) {
     // Gateway mode: long-running Slack/Telegram bot.
     if args.iter().any(|a| a == "--gateway") {
         // Optional --workspace <name> selects which set of env vars to use.
-        // e.g. --workspace ofterra → reads SLACK_APP_TOKEN_OFTERRA, SLACK_BOT_TOKEN_OFTERRA
+        // e.g. --workspace offtera → reads SLACK_APP_TOKEN_OFFTERA, SLACK_BOT_TOKEN_OFFTERA
         let workspace = args.windows(2)
             .find(|w| w[0] == "--workspace")
             .map(|w| w[1].to_uppercase());

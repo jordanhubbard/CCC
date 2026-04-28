@@ -24,7 +24,7 @@ pub struct QueueWorker;
 pub struct TasksWorker;
 pub struct HermesWorker;
 pub struct GatewayWorker;
-pub struct GatewayOfterraWorker;
+pub struct GatewayOffteraWorker;
 pub struct ProxyWorker;
 
 impl Worker for BusWorker {
@@ -66,13 +66,17 @@ impl Worker for GatewayWorker {
     }
 }
 
-impl Worker for GatewayOfterraWorker {
-    fn name(&self) -> &'static str { "gateway-ofterra" }
+impl Worker for GatewayOffteraWorker {
+    fn name(&self) -> &'static str { "gateway-offtera" }
     fn capabilities(&self) -> Vec<String> {
-        vec!["slack-ofterra".into(), "chat-ofterra".into()]
+        vec!["slack-offtera".into(), "chat-offtera".into()]
     }
     fn enabled(&self) -> bool {
-        std::env::var("SLACK_APP_TOKEN_OFTERRA").map(|t| t.starts_with("xapp-")).unwrap_or(false)
+        // Accept both env-var spellings during the typo-fix migration.
+        std::env::var("SLACK_APP_TOKEN_OFFTERA")
+            .or_else(|_| std::env::var("SLACK_APP_TOKEN_OFTERRA"))
+            .map(|t| t.starts_with("xapp-"))
+            .unwrap_or(false)
     }
 }
 
@@ -94,7 +98,7 @@ pub fn all_workers() -> Vec<Box<dyn Worker>> {
         Box::new(TasksWorker),
         Box::new(HermesWorker),
         Box::new(GatewayWorker),
-        Box::new(GatewayOfterraWorker),
+        Box::new(GatewayOffteraWorker),
         Box::new(ProxyWorker),
     ]
 }

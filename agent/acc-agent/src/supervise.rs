@@ -78,10 +78,15 @@ fn slack_gateway_enabled(_: &Config) -> bool {
         .unwrap_or(false)
 }
 
-fn slack_gateway_ofterra_enabled(_: &Config) -> bool {
-    std::env::var("SLACK_APP_TOKEN_OFTERRA")
-        .map(|t| t.starts_with("xapp-"))
-        .unwrap_or(false)
+fn slack_gateway_offtera_enabled(_: &Config) -> bool {
+    // Accept both the corrected name and the historical typo so that hosts
+    // mid-migration with the old env-var name still light up the gateway.
+    let has = |k: &str| {
+        std::env::var(k)
+            .map(|t| t.starts_with("xapp-"))
+            .unwrap_or(false)
+    };
+    has("SLACK_APP_TOKEN_OFFTERA") || has("SLACK_APP_TOKEN_OFTERRA")
 }
 
 static CHILDREN: &[ChildSpec] = &[
@@ -90,7 +95,7 @@ static CHILDREN: &[ChildSpec] = &[
     ChildSpec { name: "tasks",            args: &["tasks"],                                            direct_exe: false, enabled: always                      },
     ChildSpec { name: "hermes",           args: &["hermes", "--poll"],                                 direct_exe: false, enabled: always                      },
     ChildSpec { name: "gateway",          args: &["hermes", "--gateway"],                              direct_exe: false, enabled: slack_gateway_enabled        },
-    ChildSpec { name: "gateway-ofterra",  args: &["hermes", "--gateway", "--workspace", "ofterra"],    direct_exe: false, enabled: slack_gateway_ofterra_enabled },
+    ChildSpec { name: "gateway-offtera",  args: &["hermes", "--gateway", "--workspace", "offtera"],    direct_exe: false, enabled: slack_gateway_offtera_enabled },
     ChildSpec { name: "proxy",            args: &["proxy", "--port", "9099"],                          direct_exe: false, enabled: nvidia_enabled               },
 ];
 
