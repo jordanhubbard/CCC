@@ -5,10 +5,11 @@ mod telegram;
 use super::agent::HermesAgent;
 use super::provider::make_provider;
 use super::slack_api::SlackApiClient;
-use super::slack_tools::all_slack_tools;
-use super::tool::ToolRegistry;
+use super::slack_tools::{all_slack_tools, SlackMemorySearchTool};
+use super::tool::{Tool, ToolRegistry};
 use crate::config::Config;
 use acc_client::Client;
+use acc_qdrant::QdrantClient;
 use session::SessionStore;
 use std::sync::Arc;
 
@@ -60,6 +61,22 @@ pub async fn run(workspace: Option<&str>) {
     } else {
         None
     };
+
+    // slack_memory_search is registered when both Qdrant and an embed
+    // client are configured. The hub host always has Qdrant local; other
+    // bot hosts query it remotely if QDRANT_URL is set on their host.
+    let memory_search_count = match build_memory_search_tool() {
+        Ok(Some(tool)) => {
+            tool_list.push(tool);
+            1
+        }
+        Ok(None) => 0,
+        Err(e) => {
+            eprintln!("[hermes-gateway/{ws_label}] slack_memory_search disabled: {e}");
+            0
+        }
+    };
+
     let tools = ToolRegistry::new(tool_list);
 
     let agent = Arc::new(HermesAgent::new(cfg.clone(), client.clone(), provider, tools));
@@ -92,9 +109,11 @@ pub async fn run(workspace: Option<&str>) {
             .await
             {
                 Some(adapter) => {
+                    let slack_tool_count = if slack_api.is_some() { 5 } else { 0 };
                     eprintln!(
-                        "[hermes-gateway/{ws_label}] Slack adapter started ({} tools registered)",
-                        if slack_api.is_some() { 5 } else { 0 }
+                        "[hermes-gateway/{ws_label}] Slack adapter started \
+                         ({} Slack tools, {} memory-search tools)",
+                        slack_tool_count, memory_search_count
                     );
                     let adapter = Arc::new(adapter);
                     handles.push(tokio::spawn(async move { adapter.run().await }));
@@ -138,6 +157,37 @@ pub async fn run(workspace: Option<&str>) {
 /// the historical default workspace.
 fn workspace_slug(workspace: Option<&str>) -> String {
     workspace.unwrap_or("omgjkh").to_lowercase()
+}
+
+/// Build the slack_memory_search tool when Qdrant + embed config is
+/// available. Returns `Ok(Some(tool))` when fully configured, `Ok(None)`
+/// when Qdrant is intentionally not configured (no `QDRANT_URL`), and
+/// `Err(reason)` when partially configured so the operator sees why.
+fn build_memory_search_tool() -> Result<Option<Box<dyn Tool>>, String> {
+    let qdrant_url = match std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()) {
+        Some(u) => u,
+        None => return Ok(None),
+    };
+    let qdrant_key = std::env::var("QDRANT_API_KEY").ok().filter(|s| !s.is_empty());
+    let qdrant = QdrantClient::new(&qdrant_url, qdrant_key.as_deref())
+        .map_err(|e| format!("qdrant client: {e}"))?;
+    let embed = acc_tools::make_embed_client().map_err(|e| format!("embed client: {e}"))?;
+
+    let embed_dim = std::env::var("EMBED_DIM")
+        .or_else(|_| std::env::var("NVIDIA_EMBED_DIM"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(1536);
+    let collection = std::env::var("SLACK_INGEST_COLLECTION")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("holographic_memory_{embed_dim}"));
+
+    Ok(Some(Box::new(SlackMemorySearchTool::new(
+        Arc::new(qdrant),
+        Arc::new(embed),
+        collection,
+    ))))
 }
 
 /// Try the secret store first (key shape `slack/{workspace}/{bot}/{type}`),

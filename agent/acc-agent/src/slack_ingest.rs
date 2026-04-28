@@ -28,27 +28,46 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const COLLECTION: &str = "holographic_memory";
-const EMBED_DIM: u64 = 3072;
-const POLL_INTERVAL: Duration = Duration::from_secs(900); // 15 min
+const POLL_INTERVAL: Duration = Duration::from_secs(300); // 5 min
 const HISTORY_LIMIT: u32 = 100;
 const CHANNELS_PAGE_LIMIT: u32 = 200;
 const MIN_TEXT_LEN: usize = 10;
 
-// Pacing for the embed endpoint. Empirical observation against
-// NIM's text-embedding-3-large: a single call after a 30s idle window
-// succeeds, but bursts of even ~2/sec yield 429s for the rest of the
-// minute. The 5s base spacing plus the retry backoff below is the
-// minimum that lets a 200-channel cycle complete inside the quota.
-//
-// Steady state (after first backfill) is much lighter: only channels
-// with new messages since the last cycle make embed calls at all.
-const INTER_CHANNEL_DELAY: Duration = Duration::from_secs(5);
+// Light pacing — tightened back from the 5s the restrictive
+// `text-embedding-3-large` tier required, since the default model now
+// (`azure/openai/text-embedding-3-small`) handles back-to-back bursts
+// cleanly. Retry-with-backoff stays as defense-in-depth so the service
+// degrades gracefully if the operator points NVIDIA_EMBED_MODEL back at
+// a tighter-quota model.
+const INTER_CHANNEL_DELAY: Duration = Duration::from_millis(150);
 const EMBED_RETRY_429_DELAYS: &[Duration] = &[
-    Duration::from_secs(10),
+    Duration::from_secs(2),
+    Duration::from_secs(8),
     Duration::from_secs(30),
-    Duration::from_secs(60),
 ];
+
+/// Resolve the embedding dimension from env (`EMBED_DIM` or
+/// `NVIDIA_EMBED_DIM`); defaults to 1536, the dimension of
+/// `text-embedding-3-small`.
+fn resolve_embed_dim() -> u64 {
+    std::env::var("EMBED_DIM")
+        .or_else(|_| std::env::var("NVIDIA_EMBED_DIM"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(1536)
+}
+
+/// Resolve the Qdrant collection name. Defaults to
+/// `holographic_memory_<dim>` so a model swap that changes vector
+/// dimension lands in a fresh collection rather than colliding with
+/// the old one. Override via `SLACK_INGEST_COLLECTION` for ad-hoc
+/// experiments.
+fn resolve_collection_name(embed_dim: u64) -> String {
+    std::env::var("SLACK_INGEST_COLLECTION")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("holographic_memory_{embed_dim}"))
+}
 
 /// Workspaces and bots checked in every cycle. The service silently skips
 /// any (workspace, bot) pair that does not have a `bot-token` secret
@@ -88,10 +107,12 @@ pub async fn run(args: &[String]) {
         }
     };
 
+    let embed_dim = resolve_embed_dim();
+    let collection = resolve_collection_name(embed_dim);
     if let Err(e) = qdrant
         .ensure_collection(
-            COLLECTION,
-            EMBED_DIM,
+            &collection,
+            embed_dim,
             &["source", "workspace", "channel", "user"],
         )
         .await
@@ -116,13 +137,14 @@ pub async fn run(args: &[String]) {
         .expect("http client");
 
     eprintln!(
-        "[slack-ingest] starting (interval={:?}, qdrant={})",
-        POLL_INTERVAL, qdrant_url
+        "[slack-ingest] starting (interval={:?}, qdrant={}, collection={}, dim={})",
+        POLL_INTERVAL, qdrant_url, collection, embed_dim
     );
 
     loop {
         let started = std::time::Instant::now();
-        let stats = run_cycle(&client, &qdrant, &embed, &http, &watermark_dir).await;
+        let stats =
+            run_cycle(&client, &qdrant, &collection, &embed, &http, &watermark_dir).await;
         eprintln!(
             "[slack-ingest] cycle done: pairs={} channels={} ingested={} elapsed={:?}",
             stats.pairs_attempted, stats.channels_visited, stats.messages_ingested, started.elapsed()
@@ -144,6 +166,7 @@ struct CycleStats {
 async fn run_cycle(
     client: &Client,
     qdrant: &QdrantClient,
+    collection: &str,
     embed: &EmbedClient,
     http: &reqwest::Client,
     watermark_dir: &Path,
@@ -237,7 +260,7 @@ async fn run_cycle(
                     })
                     .collect();
 
-                if let Err(e) = qdrant.upsert_points_raw(COLLECTION, points).await {
+                if let Err(e) = qdrant.upsert_points_raw(collection, points).await {
                     eprintln!("[slack-ingest] {ws}/{bot}/{ch_name}: upsert: {e}");
                     continue; // Don't advance watermark.
                 }
