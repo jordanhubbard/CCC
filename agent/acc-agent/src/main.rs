@@ -17,6 +17,7 @@ mod sdk;
 mod session_discovery;
 mod session_registry;
 mod services;
+mod slack_ingest;
 mod supervise;
 mod tasks;
 mod tmux;
@@ -46,6 +47,7 @@ fn main() {
         "hermes" => tokio_run(hermes::run(rest)),
         "proxy" => tokio_run(proxy::run(rest)),
         "tasks" => tokio_run(tasks::run(rest)),
+        "slack-ingest" => tokio_run(slack_ingest::run(rest)),
         "supervise" => tokio_run(supervise::run(rest)),
         "upgrade" => tokio_run(upgrade::run_cli(rest)),
         cmd => {
@@ -75,6 +77,7 @@ fn print_help() {
     eprintln!("  acc-agent hermes  (hermes session driver)");
     eprintln!("  acc-agent proxy   (long-running daemon: NVIDIA header-strip proxy)");
     eprintln!("  acc-agent tasks     [--max=N]    (long-running daemon: fleet task worker)");
+    eprintln!("  acc-agent slack-ingest [--once]  (long-running daemon: Slack→Qdrant memory ingest)");
     eprintln!("  acc-agent supervise [--dry-run]  (master supervisor: spawns all children)");
     eprintln!();
     eprintln!("MIGRATE:");

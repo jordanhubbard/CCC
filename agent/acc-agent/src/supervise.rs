@@ -89,6 +89,16 @@ fn slack_gateway_offtera_enabled(_: &Config) -> bool {
     has("SLACK_APP_TOKEN_OFFTERA") || has("SLACK_APP_TOKEN_OFTERRA")
 }
 
+fn slack_ingest_enabled(_: &Config) -> bool {
+    // Run the Slack→Qdrant ingester on the hub only — that is where Qdrant
+    // lives and where vault-stored bot tokens are reachable in-process at
+    // sub-millisecond latency. Other hosts' agents read memory; only the
+    // hub writes it.
+    std::env::var("IS_HUB")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false)
+}
+
 static CHILDREN: &[ChildSpec] = &[
     ChildSpec { name: "bus",              args: &["bus"],                                              direct_exe: false, enabled: always                      },
     ChildSpec { name: "queue",            args: &["queue"],                                            direct_exe: false, enabled: always                      },
@@ -96,6 +106,7 @@ static CHILDREN: &[ChildSpec] = &[
     ChildSpec { name: "hermes",           args: &["hermes", "--poll"],                                 direct_exe: false, enabled: always                      },
     ChildSpec { name: "gateway",          args: &["hermes", "--gateway"],                              direct_exe: false, enabled: slack_gateway_enabled        },
     ChildSpec { name: "gateway-offtera",  args: &["hermes", "--gateway", "--workspace", "offtera"],    direct_exe: false, enabled: slack_gateway_offtera_enabled },
+    ChildSpec { name: "slack-ingest",     args: &["slack-ingest"],                                     direct_exe: false, enabled: slack_ingest_enabled         },
     ChildSpec { name: "proxy",            args: &["proxy", "--port", "9099"],                          direct_exe: false, enabled: nvidia_enabled               },
 ];
 
