@@ -30,20 +30,24 @@ use std::time::Duration;
 
 const COLLECTION: &str = "holographic_memory";
 const EMBED_DIM: u64 = 3072;
-const POLL_INTERVAL: Duration = Duration::from_secs(300); // 5 min
+const POLL_INTERVAL: Duration = Duration::from_secs(900); // 15 min
 const HISTORY_LIMIT: u32 = 100;
 const CHANNELS_PAGE_LIMIT: u32 = 200;
 const MIN_TEXT_LEN: usize = 10;
 
-// Pacing for the embed endpoint: keep one call per channel, but space
-// them out so a single cycle does not burst-trip the per-minute quota
-// upstream providers like NIM enforce. Coupled with retry-on-429
-// below, this keeps a 200-channel cycle inside its rate budget.
-const INTER_CHANNEL_DELAY: Duration = Duration::from_millis(400);
+// Pacing for the embed endpoint. Empirical observation against
+// NIM's text-embedding-3-large: a single call after a 30s idle window
+// succeeds, but bursts of even ~2/sec yield 429s for the rest of the
+// minute. The 5s base spacing plus the retry backoff below is the
+// minimum that lets a 200-channel cycle complete inside the quota.
+//
+// Steady state (after first backfill) is much lighter: only channels
+// with new messages since the last cycle make embed calls at all.
+const INTER_CHANNEL_DELAY: Duration = Duration::from_secs(5);
 const EMBED_RETRY_429_DELAYS: &[Duration] = &[
-    Duration::from_secs(2),
-    Duration::from_secs(5),
-    Duration::from_secs(15),
+    Duration::from_secs(10),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
 ];
 
 /// Workspaces and bots checked in every cycle. The service silently skips
@@ -244,8 +248,11 @@ async fn run_cycle(
                     "[slack-ingest] {ws}/{bot}/{ch_name}: +{} messages",
                     chunks.len()
                 );
-                tokio::time::sleep(INTER_CHANNEL_DELAY).await;
             }
+            // Pace the embed endpoint between every channel that produced a
+            // history page (not just the ones that ingested), since even a
+            // page that filtered to zero rows still consumed a Slack call.
+            tokio::time::sleep(INTER_CHANNEL_DELAY).await;
         }
     }
 
