@@ -57,19 +57,35 @@ pub struct QueueItem {
     #[serde(default, rename = "claimedAt", skip_serializing_if = "Option::is_none")]
     pub claimed_at: Option<DateTime<Utc>>,
 
-    #[serde(default, rename = "completedAt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "completedAt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub completed_at: Option<DateTime<Utc>>,
 
-    #[serde(default, rename = "keepaliveAt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "keepaliveAt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub keepalive_at: Option<DateTime<Utc>>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempts: Option<u64>,
 
-    #[serde(default, rename = "maxAttempts", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "maxAttempts",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_attempts: Option<u64>,
 
-    #[serde(default, rename = "blockedReason", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "blockedReason",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub blocked_reason: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,9 +197,11 @@ mod tests {
 
     #[test]
     fn status_accepts_both_spellings() {
-        let hyphen: QueueItem = serde_json::from_str(r#"{"id":"1","status":"in-progress"}"#).unwrap();
+        let hyphen: QueueItem =
+            serde_json::from_str(r#"{"id":"1","status":"in-progress"}"#).unwrap();
         assert_eq!(hyphen.status.as_deref(), Some("in-progress"));
-        let under: QueueItem = serde_json::from_str(r#"{"id":"1","status":"in_progress"}"#).unwrap();
+        let under: QueueItem =
+            serde_json::from_str(r#"{"id":"1","status":"in_progress"}"#).unwrap();
         assert_eq!(under.status.as_deref(), Some("in_progress"));
     }
 }

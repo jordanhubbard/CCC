@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::future::Future;
 use std::pin::Pin;
-use serde_json::{json, Value};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct LlmResponse {
@@ -34,12 +34,20 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn with_base_url(api_key: String, model: String, base_url: String) -> Self {
-        let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1").to_string();
+        let base_url = base_url
+            .trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .to_string();
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
             .expect("failed to build reqwest client for AnthropicProvider");
-        Self { api_key, model, client, base_url }
+        Self {
+            api_key,
+            model,
+            client,
+            base_url,
+        }
     }
 }
 
@@ -76,7 +84,10 @@ impl LlmProvider for AnthropicProvider {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                return Err(format!("API error {status}: {}", &text[..text.len().min(500)]));
+                return Err(format!(
+                    "API error {status}: {}",
+                    &text[..text.len().min(500)]
+                ));
             }
 
             let val: Value = resp
@@ -89,10 +100,8 @@ impl LlmProvider for AnthropicProvider {
                 .as_str()
                 .unwrap_or("end_turn")
                 .to_string();
-            let input_tokens =
-                val["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
-            let output_tokens =
-                val["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+            let input_tokens = val["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+            let output_tokens = val["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
 
             Ok(LlmResponse {
                 content,
@@ -115,12 +124,20 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     pub fn with_base_url(api_key: String, model: String, base_url: String) -> Self {
-        let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1").to_string();
+        let base_url = base_url
+            .trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .to_string();
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
             .expect("failed to build reqwest client for OpenAiProvider");
-        Self { api_key, model, client, base_url }
+        Self {
+            api_key,
+            model,
+            client,
+            base_url,
+        }
     }
 }
 
@@ -142,14 +159,19 @@ impl LlmProvider for OpenAiProvider {
                 let oai_content: Value = if content.is_array() {
                     let parts = content.as_array().map(Vec::as_slice).unwrap_or_default();
                     // Collect text blocks; tool_use becomes tool_calls on assistant, tool_result becomes tool on user
-                    let text_parts: Vec<&Value> = parts.iter().filter(|p| p["type"] == "text").collect();
+                    let text_parts: Vec<&Value> =
+                        parts.iter().filter(|p| p["type"] == "text").collect();
                     if text_parts.len() == 1 {
                         text_parts[0]["text"].clone()
                     } else if text_parts.is_empty() {
                         // Handle tool results or tool_use — pass raw for now
                         json!(serde_json::to_string(content).unwrap_or_default())
                     } else {
-                        json!(text_parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"))
+                        json!(text_parts
+                            .iter()
+                            .filter_map(|p| p["text"].as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n"))
                     }
                 } else {
                     content.clone()
@@ -158,16 +180,19 @@ impl LlmProvider for OpenAiProvider {
             }
 
             // Translate Anthropic tool format → OpenAI function format
-            let oai_tools: Vec<Value> = tools.iter().map(|t| {
-                json!({
-                    "type": "function",
-                    "function": {
-                        "name": t["name"],
-                        "description": t["description"],
-                        "parameters": t["input_schema"]
-                    }
+            let oai_tools: Vec<Value> = tools
+                .iter()
+                .map(|t| {
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": t["name"],
+                            "description": t["description"],
+                            "parameters": t["input_schema"]
+                        }
+                    })
                 })
-            }).collect();
+                .collect();
 
             let mut body = json!({
                 "model": self.model,
@@ -191,7 +216,10 @@ impl LlmProvider for OpenAiProvider {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                return Err(format!("API error {status}: {}", &text[..text.len().min(500)]));
+                return Err(format!(
+                    "API error {status}: {}",
+                    &text[..text.len().min(500)]
+                ));
             }
 
             let val: Value = resp
@@ -201,7 +229,10 @@ impl LlmProvider for OpenAiProvider {
 
             let choice = &val["choices"][0];
             let msg = &choice["message"];
-            let stop_reason = choice["finish_reason"].as_str().unwrap_or("stop").to_string();
+            let stop_reason = choice["finish_reason"]
+                .as_str()
+                .unwrap_or("stop")
+                .to_string();
 
             // Translate back to Anthropic content format
             let mut content_blocks: Vec<Value> = Vec::new();
@@ -233,7 +264,8 @@ impl LlmProvider for OpenAiProvider {
                 "length" => "max_tokens",
                 "stop" | "" => "end_turn",
                 other => other,
-            }.to_string();
+            }
+            .to_string();
 
             let input_tokens = val["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
             let output_tokens = val["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
@@ -273,13 +305,21 @@ impl ProviderEntry {
         let key = self.api_key.clone().unwrap_or_default();
         match self.provider_type.as_str() {
             "anthropic" => {
-                let base = self.url.clone()
+                let base = self
+                    .url
+                    .clone()
                     .unwrap_or_else(|| "https://api.anthropic.com".to_string());
-                Box::new(AnthropicProvider::with_base_url(key, self.model.clone(), base))
+                Box::new(AnthropicProvider::with_base_url(
+                    key,
+                    self.model.clone(),
+                    base,
+                ))
             }
             _ => {
                 // "openai" | "openai-compat" — anything with a /v1/chat/completions endpoint
-                let base = self.url.clone()
+                let base = self
+                    .url
+                    .clone()
                     .unwrap_or_else(|| "https://api.openai.com".to_string());
                 Box::new(OpenAiProvider::with_base_url(key, self.model.clone(), base))
             }
@@ -302,14 +342,15 @@ impl ProviderChain {
         let providers = entries
             .into_iter()
             .map(|e| {
-                let label = e.label.clone()
+                let label = e
+                    .label
+                    .clone()
                     .unwrap_or_else(|| format!("{}/{}", e.provider_type, e.model));
                 (label, e.build())
             })
             .collect();
         Self { providers }
     }
-
 }
 
 impl LlmProvider for ProviderChain {
@@ -361,17 +402,35 @@ pub fn providers_from_env() -> Vec<ProviderEntry> {
         .enumerate()
         .filter_map(|(i, part)| {
             let fields: Vec<&str> = part.trim().splitn(6, '|').collect();
-            if fields.len() < 4 { return None; }
-            let url = if fields[1].is_empty() { None } else { Some(fields[1].to_string()) };
-            let api_key = if fields[2].is_empty() { None } else { Some(fields[2].to_string()) };
+            if fields.len() < 4 {
+                return None;
+            }
+            let url = if fields[1].is_empty() {
+                None
+            } else {
+                Some(fields[1].to_string())
+            };
+            let api_key = if fields[2].is_empty() {
+                None
+            } else {
+                Some(fields[2].to_string())
+            };
             let model = fields[3].to_string();
-            let label = fields.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string());
-            let priority = fields.get(5)
+            let label = fields
+                .get(4)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            let priority = fields
+                .get(5)
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(i as u8);
             Some(ProviderEntry {
                 provider_type: fields[0].to_string(),
-                url, api_key, model, label, priority,
+                url,
+                api_key,
+                model,
+                label,
+                priority,
             })
         })
         .collect();
@@ -399,19 +458,35 @@ pub fn make_provider(api_key: String, model: String) -> Box<dyn LlmProvider> {
     let use_openai = std::env::var("HERMES_PROVIDER").as_deref() == Ok("openai")
         || llm_cfg.is_openai_configured();
     if use_openai {
-        let oai_key = if !api_key.is_empty() { api_key } else { llm_cfg.api_key };
-        Box::new(OpenAiProvider::with_base_url(oai_key, model, llm_cfg.base_url))
+        let oai_key = if !api_key.is_empty() {
+            api_key
+        } else {
+            llm_cfg.api_key
+        };
+        Box::new(OpenAiProvider::with_base_url(
+            oai_key,
+            model,
+            llm_cfg.base_url,
+        ))
     } else {
         let anthropic_url = llm_cfg.anthropic_base_url_or_default().to_string();
-        let ant_key = if !api_key.is_empty() { api_key } else { llm_cfg.anthropic_key };
-        Box::new(AnthropicProvider::with_base_url(ant_key, model, anthropic_url))
+        let ant_key = if !api_key.is_empty() {
+            api_key
+        } else {
+            llm_cfg.anthropic_key
+        };
+        Box::new(AnthropicProvider::with_base_url(
+            ant_key,
+            model,
+            anthropic_url,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{Json, Router, routing::post};
+    use axum::{routing::post, Json, Router};
     use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -420,9 +495,7 @@ mod tests {
 
     /// Spin up an axum server on a random port, return its URL and the
     /// recorded request bodies so tests can inspect what was sent.
-    async fn mock_server(
-        handler: Router,
-    ) -> (String, tokio::task::JoinHandle<()>) {
+    async fn mock_server(handler: Router) -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("http://{}", addr);
@@ -484,10 +557,15 @@ mod tests {
         let recorded = Arc::new(Mutex::new(vec![]));
         let (url, _h) = mock_server(anthropic_mock_router(recorded.clone())).await;
         let p = AnthropicProvider::with_base_url("key".into(), "m".into(), url);
-        let tools = vec![json!({"name":"bash","description":"run bash","input_schema":{"type":"object","properties":{}}})];
+        let tools = vec![
+            json!({"name":"bash","description":"run bash","input_schema":{"type":"object","properties":{}}}),
+        ];
         p.complete("sys", &[], &tools, 512).await.unwrap();
         let req = recorded.lock().await[0].clone();
-        assert!(req.get("tools").is_some(), "tools must be included when non-empty");
+        assert!(
+            req.get("tools").is_some(),
+            "tools must be included when non-empty"
+        );
     }
 
     #[tokio::test]
@@ -497,7 +575,10 @@ mod tests {
         let p = AnthropicProvider::with_base_url("key".into(), "m".into(), url);
         p.complete("sys", &[], &[], 512).await.unwrap();
         let req = recorded.lock().await[0].clone();
-        assert!(req.get("tools").is_none(), "tools must be omitted when empty");
+        assert!(
+            req.get("tools").is_none(),
+            "tools must be omitted when empty"
+        );
     }
 
     #[tokio::test]
@@ -614,10 +695,10 @@ mod tests {
         use axum::response::IntoResponse;
 
         // First provider always 500s
-        let failing_router = Router::new()
-            .route("/v1/chat/completions", post(|| async {
-                (StatusCode::INTERNAL_SERVER_ERROR, "oops").into_response()
-            }));
+        let failing_router = Router::new().route(
+            "/v1/chat/completions",
+            post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "oops").into_response() }),
+        );
         let (fail_url, _h1) = mock_server(failing_router).await;
 
         // Second provider succeeds
@@ -628,13 +709,19 @@ mod tests {
             providers: vec![
                 (
                     "failing".to_string(),
-                    Box::new(OpenAiProvider::with_base_url("key".into(), "m".into(), fail_url))
-                        as Box<dyn LlmProvider>,
+                    Box::new(OpenAiProvider::with_base_url(
+                        "key".into(),
+                        "m".into(),
+                        fail_url,
+                    )) as Box<dyn LlmProvider>,
                 ),
                 (
                     "working".to_string(),
-                    Box::new(OpenAiProvider::with_base_url("key".into(), "m".into(), ok_url))
-                        as Box<dyn LlmProvider>,
+                    Box::new(OpenAiProvider::with_base_url(
+                        "key".into(),
+                        "m".into(),
+                        ok_url,
+                    )) as Box<dyn LlmProvider>,
                 ),
             ],
         };
@@ -649,10 +736,10 @@ mod tests {
         use axum::http::StatusCode;
         use axum::response::IntoResponse;
 
-        let failing_router = Router::new()
-            .route("/v1/chat/completions", post(|| async {
-                (StatusCode::INTERNAL_SERVER_ERROR, "nope").into_response()
-            }));
+        let failing_router = Router::new().route(
+            "/v1/chat/completions",
+            post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "nope").into_response() }),
+        );
         let (url, _h) = mock_server(failing_router).await;
 
         let chain = ProviderChain {
@@ -679,15 +766,35 @@ mod tests {
             .enumerate()
             .filter_map(|(i, part)| {
                 let fields: Vec<&str> = part.trim().splitn(6, '|').collect();
-                if fields.len() < 4 { return None; }
-                let url = if fields[1].is_empty() { None } else { Some(fields[1].to_string()) };
-                let api_key = if fields[2].is_empty() { None } else { Some(fields[2].to_string()) };
+                if fields.len() < 4 {
+                    return None;
+                }
+                let url = if fields[1].is_empty() {
+                    None
+                } else {
+                    Some(fields[1].to_string())
+                };
+                let api_key = if fields[2].is_empty() {
+                    None
+                } else {
+                    Some(fields[2].to_string())
+                };
                 let model = fields[3].to_string();
-                let label = fields.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string());
-                let priority = fields.get(5).and_then(|s| s.parse().ok()).unwrap_or(i as u8);
+                let label = fields
+                    .get(4)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                let priority = fields
+                    .get(5)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(i as u8);
                 Some(ProviderEntry {
                     provider_type: fields[0].to_string(),
-                    url, api_key, model, label, priority,
+                    url,
+                    api_key,
+                    model,
+                    label,
+                    priority,
                 })
             })
             .collect();
@@ -712,8 +819,14 @@ mod tests {
     fn providers_from_env_parses_empty_url_and_key() {
         let entries = parse_providers_str("anthropic|||claude-opus-4-7|anthropic-main|1");
         assert_eq!(entries.len(), 1);
-        assert!(entries[0].url.is_none(), "empty url field should produce None");
-        assert!(entries[0].api_key.is_none(), "empty key field should produce None");
+        assert!(
+            entries[0].url.is_none(),
+            "empty url field should produce None"
+        );
+        assert!(
+            entries[0].api_key.is_none(),
+            "empty key field should produce None"
+        );
         assert_eq!(entries[0].label.as_deref(), Some("anthropic-main"));
         assert_eq!(entries[0].priority, 1);
     }
@@ -731,9 +844,9 @@ mod tests {
         let raw = "openai|||gpt-4o||10,anthropic|||claude-opus-4-7||5,openai-compat|http://x/v1||llama3||1";
         let entries = parse_providers_str(raw);
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].model, "llama3");       // priority 1
+        assert_eq!(entries[0].model, "llama3"); // priority 1
         assert_eq!(entries[1].model, "claude-opus-4-7"); // priority 5
-        assert_eq!(entries[2].model, "gpt-4o");       // priority 10
+        assert_eq!(entries[2].model, "gpt-4o"); // priority 10
     }
 
     #[test]
@@ -741,7 +854,10 @@ mod tests {
         // Verify that http://host:port/path is kept intact (the whole motivation
         // for switching from colon to pipe as the field delimiter)
         let entries = parse_providers_str("openai-compat|http://vllm.internal:8000/v1||mistral-7b");
-        assert_eq!(entries[0].url.as_deref(), Some("http://vllm.internal:8000/v1"));
+        assert_eq!(
+            entries[0].url.as_deref(),
+            Some("http://vllm.internal:8000/v1")
+        );
         assert_eq!(entries[0].model, "mistral-7b");
     }
 }

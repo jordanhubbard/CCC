@@ -1,11 +1,15 @@
 mod helpers;
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::json;
 
 fn no_auth_get(path: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(path).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap()
 }
 
 #[tokio::test]
@@ -33,7 +37,8 @@ async fn test_create_and_get_chain() {
                 "entities": [{"type": "project", "id": "proj-a", "label": "Project A"}]
             }),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
 
     let resp = helpers::call(&ts.app, helpers::get("/api/chains/chain-test-1")).await;
@@ -54,7 +59,8 @@ async fn test_append_event_indexes_participant_and_entity() {
             "/api/chains",
             &json!({"id": "chain-test-2", "source": "telegram", "channel_id": "42"}),
         ),
-    ).await;
+    )
+    .await;
 
     let resp = helpers::call(
         &ts.app,
@@ -69,7 +75,8 @@ async fn test_append_event_indexes_participant_and_entity() {
                 "entities": [{"type": "error", "id": "E_BUILD", "label": "build failure"}]
             }),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["event"]["event_type"], "message");
@@ -93,7 +100,8 @@ async fn test_append_duplicate_source_event_is_idempotent() {
         let resp = helpers::call(
             &ts.app,
             helpers::post_json("/api/chains/chain-test-dup/events", &event),
-        ).await;
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
@@ -111,7 +119,8 @@ async fn test_task_create_and_complete_updates_chain_task_link() {
             "/api/chains",
             &json!({"id": "chain-test-task", "source": "slack"}),
         ),
-    ).await;
+    )
+    .await;
 
     let create_resp = helpers::call(
         &ts.app,
@@ -123,7 +132,8 @@ async fn test_task_create_and_complete_updates_chain_task_link() {
                 "chain_id": "chain-test-task"
             }),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(create_resp.status(), StatusCode::CREATED);
     let task_id = helpers::body_json(create_resp).await["task"]["id"]
         .as_str()
@@ -132,7 +142,8 @@ async fn test_task_create_and_complete_updates_chain_task_link() {
 
     let chain = helpers::body_json(
         helpers::call(&ts.app, helpers::get("/api/chains/chain-test-task")).await,
-    ).await;
+    )
+    .await;
     assert_eq!(chain["tasks"][0]["task_id"], task_id);
     assert_eq!(chain["tasks"][0]["status"], "open");
 
@@ -142,13 +153,18 @@ async fn test_task_create_and_complete_updates_chain_task_link() {
             &format!("/api/tasks/{task_id}/complete"),
             &json!({"agent": "agent-a", "output": "done"}),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(complete_resp.status(), StatusCode::OK);
 
     let chain = helpers::body_json(
         helpers::call(&ts.app, helpers::get("/api/chains/chain-test-task")).await,
-    ).await;
+    )
+    .await;
     assert_eq!(chain["tasks"][0]["status"], "completed");
-    assert_eq!(chain["tasks"][0]["metadata"]["last_task_status"], "completed");
+    assert_eq!(
+        chain["tasks"][0]["metadata"]["last_task_status"],
+        "completed"
+    );
     assert!(chain["tasks"][0]["resolved_at"].as_str().is_some());
 }

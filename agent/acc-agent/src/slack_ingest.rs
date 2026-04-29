@@ -96,8 +96,8 @@ pub async fn run(args: &[String]) {
 
     let client = Client::new(&cfg.acc_url, &cfg.acc_token).expect("acc client");
 
-    let qdrant_url = std::env::var("QDRANT_URL")
-        .unwrap_or_else(|_| "http://localhost:6333".to_string());
+    let qdrant_url =
+        std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
     let qdrant_key = acc_tools::resolve_qdrant_api_key();
     let qdrant = match QdrantClient::new(&qdrant_url, qdrant_key.as_deref()) {
         Ok(q) => q,
@@ -143,11 +143,13 @@ pub async fn run(args: &[String]) {
 
     loop {
         let started = std::time::Instant::now();
-        let stats =
-            run_cycle(&client, &qdrant, &collection, &embed, &http, &watermark_dir).await;
+        let stats = run_cycle(&client, &qdrant, &collection, &embed, &http, &watermark_dir).await;
         eprintln!(
             "[slack-ingest] cycle done: pairs={} channels={} ingested={} elapsed={:?}",
-            stats.pairs_attempted, stats.channels_visited, stats.messages_ingested, started.elapsed()
+            stats.pairs_attempted,
+            stats.channels_visited,
+            stats.messages_ingested,
+            started.elapsed()
         );
         if once {
             break;
@@ -213,7 +215,10 @@ async fn run_cycle(
                 // DMs / MPDMs come back without a `name` field; fall back to
                 // the channel ID so log lines and payloads still identify
                 // the conversation.
-                let ch_name = ch["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(ch_id);
+                let ch_name = ch["name"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(ch_id);
                 stats.channels_visited += 1;
 
                 let wm_key = format!("{ws}.{ch_id}");
@@ -400,7 +405,11 @@ async fn fetch_messages(
 
 // ── Message formatting ────────────────────────────────────────────────────────
 
-fn format_message(msg: &Value, workspace: &str, channel_name: &str) -> Option<(u64, String, Value)> {
+fn format_message(
+    msg: &Value,
+    workspace: &str,
+    channel_name: &str,
+) -> Option<(u64, String, Value)> {
     let user = msg["user"]
         .as_str()
         .or_else(|| msg["username"].as_str())
@@ -414,9 +423,7 @@ fn format_message(msg: &Value, workspace: &str, channel_name: &str) -> Option<(u
     let ts_f: f64 = ts.parse().unwrap_or(0.0);
     let dt = DateTime::from_timestamp(ts_f as i64, 0).unwrap_or_else(Utc::now);
     let date_str = dt.format("%Y-%m-%d %H:%M UTC").to_string();
-    let formatted = format!(
-        "[{workspace}/#{channel_name} {date_str}] {user}: {text}"
-    );
+    let formatted = format!("[{workspace}/#{channel_name} {date_str}] {user}: {text}");
 
     // Deterministic 63-bit ID from (workspace, channel, ts) so a re-fetch
     // of the same message overwrites in-place rather than duplicating.

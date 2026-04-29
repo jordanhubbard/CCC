@@ -81,33 +81,45 @@ enum Cmd {
 enum TaskCmd {
     /// List tasks
     List {
-        #[arg(long)] status: Option<String>,
-        #[arg(long)] project: Option<String>,
-        #[arg(long, name = "type")] task_type: Option<String>,
-        #[arg(long)] agent: Option<String>,
-        #[arg(long, default_value = "50")] limit: u32,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long, name = "type")]
+        task_type: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long, default_value = "50")]
+        limit: u32,
     },
     /// Show a task
     Get { id: String },
     /// Create a task
     Create {
-        #[arg(long)] title: String,
-        #[arg(long)] description: Option<String>,
-        #[arg(long)] project: Option<String>,
-        #[arg(long, default_value = "2")] priority: i64,
-        #[arg(long, name = "type", default_value = "work")] task_type: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long, default_value = "2")]
+        priority: i64,
+        #[arg(long, name = "type", default_value = "work")]
+        task_type: String,
     },
     /// Mark a task complete
     Complete {
         id: String,
-        #[arg(long)] output: Option<String>,
+        #[arg(long)]
+        output: Option<String>,
     },
     /// Cancel a task
     Cancel { id: String },
     /// Claim a task for an agent
     Claim {
         id: String,
-        #[arg(long)] agent: String,
+        #[arg(long)]
+        agent: String,
     },
     /// Release a claimed task
     Unclaim { id: String },
@@ -117,22 +129,29 @@ enum TaskCmd {
 enum ProjectCmd {
     /// List projects
     List {
-        #[arg(long)] status: Option<String>,
-        #[arg(long)] q: Option<String>,
-        #[arg(long, default_value = "50")] limit: u32,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        q: Option<String>,
+        #[arg(long, default_value = "50")]
+        limit: u32,
     },
     /// Show a project
     Get { id: String },
     /// Create a project
     Create {
-        #[arg(long)] name: String,
-        #[arg(long)] description: Option<String>,
-        #[arg(long)] repo: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        repo: Option<String>,
     },
     /// Archive or delete a project
     Delete {
         id: String,
-        #[arg(long)] hard: bool,
+        #[arg(long)]
+        hard: bool,
     },
 }
 
@@ -140,7 +159,8 @@ enum ProjectCmd {
 enum AgentCmd {
     /// List agents
     List {
-        #[arg(long)] online: bool,
+        #[arg(long)]
+        online: bool,
     },
     /// Show an agent
     Get { name: String },
@@ -157,14 +177,18 @@ enum BusCmd {
     /// Send a message to the bus
     Send {
         /// Message type
-        #[arg(long, name = "type")] msg_type: String,
+        #[arg(long, name = "type")]
+        msg_type: String,
         /// Optional JSON body (merged with type)
-        #[arg(long)] body: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
     },
     /// Query recent messages
     Messages {
-        #[arg(long)] msg_type: Option<String>,
-        #[arg(long, default_value = "50")] limit: u32,
+        #[arg(long)]
+        msg_type: Option<String>,
+        #[arg(long, default_value = "50")]
+        limit: u32,
     },
 }
 
@@ -192,7 +216,10 @@ fn print_task(t: &Task) {
         .filter(|s| !s.is_empty())
         .map(|a| format!(" [{a}]"))
         .unwrap_or_default();
-    println!("{id}  {typ}  p{}  {stat}  {}{agent_part}", t.priority, t.title);
+    println!(
+        "{id}  {typ}  p{}  {stat}  {}{agent_part}",
+        t.priority, t.title
+    );
 }
 
 fn print_task_detail(t: &Task) {
@@ -284,16 +311,24 @@ fn print_agent(a: &Agent) {
         .or_else(|| a.host.clone())
         .unwrap_or_default();
     let node = format!("{:<20}", node);
-    let status = if a.online.unwrap_or(false) { "online " } else { "offline" };
+    let status = if a.online.unwrap_or(false) {
+        "online "
+    } else {
+        "offline"
+    };
     println!("{name}  {status}  {node}");
 }
 
 fn print_bus_message(m: &BusMsg) {
-    let ts = m
-        .ts
-        .map(|t| t.to_rfc3339())
-        .or_else(|| m.extra.get("created_at").and_then(|v| v.as_str()).map(String::from))
-        .unwrap_or_default();
+    let ts =
+        m.ts.map(|t| t.to_rfc3339())
+            .or_else(|| {
+                m.extra
+                    .get("created_at")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_default();
     let ts = if ts.len() > 19 { &ts[..19] } else { &ts };
     let typ = format!("{:<30}", m.kind.as_deref().unwrap_or(""));
     // Brief hint: first couple of meaningful fields from the payload.
@@ -308,7 +343,11 @@ fn print_bus_message(m: &BusMsg) {
             .as_str()
             .map(String::from)
             .unwrap_or_else(|| body.to_string());
-        let b = if as_str.len() > 40 { format!("{}…", &as_str[..40]) } else { as_str };
+        let b = if as_str.len() > 40 {
+            format!("{}…", &as_str[..40])
+        } else {
+            as_str
+        };
         hint.push_str(&format!("body={b}  "));
         count += 1;
     }
@@ -319,8 +358,15 @@ fn print_bus_message(m: &BusMsg) {
         if k == "ts" || k == "seq" || k == "id" || k == "created_at" {
             continue;
         }
-        let val = v.as_str().map(String::from).unwrap_or_else(|| v.to_string());
-        let val = if val.len() > 40 { format!("{}…", &val[..40]) } else { val };
+        let val = v
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| v.to_string());
+        let val = if val.len() > 40 {
+            format!("{}…", &val[..40])
+        } else {
+            val
+        };
         hint.push_str(&format!("{k}={val}  "));
         count += 1;
     }
@@ -360,13 +406,23 @@ async fn main() -> Result<()> {
 
 async fn run_tasks(c: &Client, sub: TaskCmd, json_out: bool) -> Result<()> {
     match sub {
-        TaskCmd::List { status, project, task_type, agent, limit } => {
+        TaskCmd::List {
+            status,
+            project,
+            task_type,
+            agent,
+            limit,
+        } => {
             let mut b = c.tasks().list().limit(limit);
             if let Some(s) = status {
-                b = b.status(TaskStatus::from_str(&s).with_context(|| format!("invalid --status {s}"))?);
+                b = b.status(
+                    TaskStatus::from_str(&s).with_context(|| format!("invalid --status {s}"))?,
+                );
             }
             if let Some(t) = task_type {
-                b = b.task_type(TaskType::from_str(&t).with_context(|| format!("invalid --type {t}"))?);
+                b = b.task_type(
+                    TaskType::from_str(&t).with_context(|| format!("invalid --type {t}"))?,
+                );
             }
             if let Some(p) = project {
                 b = b.project(p);
@@ -380,41 +436,76 @@ async fn run_tasks(c: &Client, sub: TaskCmd, json_out: bool) -> Result<()> {
             } else if tasks.is_empty() {
                 println!("(no tasks)");
             } else {
-                for t in &tasks { print_task(t); }
+                for t in &tasks {
+                    print_task(t);
+                }
                 println!("\n{} task(s)", tasks.len());
             }
         }
         TaskCmd::Get { id } => {
             let task = c.tasks().get(&id).await?;
-            if json_out { print_json(&task)?; } else { print_task_detail(&task); }
+            if json_out {
+                print_json(&task)?;
+            } else {
+                print_task_detail(&task);
+            }
         }
-        TaskCmd::Create { title, description, project, priority, task_type } => {
+        TaskCmd::Create {
+            title,
+            description,
+            project,
+            priority,
+            task_type,
+        } => {
             let req = CreateTaskRequest {
                 project_id: project.unwrap_or_default(),
                 title,
                 description,
                 priority: Some(priority),
-                task_type: Some(TaskType::from_str(&task_type).with_context(|| format!("invalid --type {task_type}"))?),
+                task_type: Some(
+                    TaskType::from_str(&task_type)
+                        .with_context(|| format!("invalid --type {task_type}"))?,
+                ),
                 ..Default::default()
             };
             let task = c.tasks().create(&req).await?;
-            if json_out { print_json(&task)?; } else { println!("created {}", task.id); }
+            if json_out {
+                print_json(&task)?;
+            } else {
+                println!("created {}", task.id);
+            }
         }
         TaskCmd::Complete { id, output } => {
             c.tasks().complete(&id, None, output.as_deref()).await?;
-            if json_out { print_json(&json!({"ok": true, "id": id}))?; } else { println!("completed {id}"); }
+            if json_out {
+                print_json(&json!({"ok": true, "id": id}))?;
+            } else {
+                println!("completed {id}");
+            }
         }
         TaskCmd::Cancel { id } => {
             c.tasks().cancel(&id).await?;
-            if json_out { print_json(&json!({"ok": true, "id": id}))?; } else { println!("cancelled {id}"); }
+            if json_out {
+                print_json(&json!({"ok": true, "id": id}))?;
+            } else {
+                println!("cancelled {id}");
+            }
         }
         TaskCmd::Claim { id, agent } => {
             let task = c.tasks().claim(&id, &agent).await?;
-            if json_out { print_json(&task)?; } else { println!("claimed {id} by {agent}"); }
+            if json_out {
+                print_json(&task)?;
+            } else {
+                println!("claimed {id} by {agent}");
+            }
         }
         TaskCmd::Unclaim { id } => {
             c.tasks().unclaim(&id, None).await?;
-            if json_out { print_json(&json!({"ok": true, "id": id}))?; } else { println!("unclaimed {id}"); }
+            if json_out {
+                print_json(&json!({"ok": true, "id": id}))?;
+            } else {
+                println!("unclaimed {id}");
+            }
         }
     }
     Ok(())
@@ -426,15 +517,21 @@ async fn run_projects(c: &Client, sub: ProjectCmd, json_out: bool) -> Result<()>
     match sub {
         ProjectCmd::List { status, q, limit } => {
             let mut b = c.projects().list().limit(limit);
-            if let Some(s) = status { b = b.status(s); }
-            if let Some(s) = q { b = b.query(s); }
+            if let Some(s) = status {
+                b = b.status(s);
+            }
+            if let Some(s) = q {
+                b = b.query(s);
+            }
             let projects = b.send().await?;
             if json_out {
                 print_json(&json!({ "projects": projects, "count": projects.len() }))?;
             } else if projects.is_empty() {
                 println!("(no projects)");
             } else {
-                for p in &projects { print_project(p); }
+                for p in &projects {
+                    print_project(p);
+                }
                 println!("\n{} project(s)", projects.len());
             }
         }
@@ -446,27 +543,52 @@ async fn run_projects(c: &Client, sub: ProjectCmd, json_out: bool) -> Result<()>
                 println!("id:      {}", p.id);
                 println!("name:    {}", p.name);
                 if let Some(s) = p.status {
-                    println!("status:  {}", match s {
-                        acc_model::ProjectStatus::Active => "active",
-                        acc_model::ProjectStatus::Archived => "archived",
-                    });
+                    println!(
+                        "status:  {}",
+                        match s {
+                            acc_model::ProjectStatus::Active => "active",
+                            acc_model::ProjectStatus::Archived => "archived",
+                        }
+                    );
                 }
-                if let Some(r) = p.repo_url.as_deref().or_else(|| p.extra.get("repo").and_then(|v| v.as_str())) {
+                if let Some(r) = p
+                    .repo_url
+                    .as_deref()
+                    .or_else(|| p.extra.get("repo").and_then(|v| v.as_str()))
+                {
                     println!("repo:    {r}");
                 }
                 if let Some(d) = &p.description {
-                    if !d.is_empty() { println!("\n{d}"); }
+                    if !d.is_empty() {
+                        println!("\n{d}");
+                    }
                 }
             }
         }
-        ProjectCmd::Create { name, description, repo } => {
-            let req = CreateProjectRequest { name, description, repo };
+        ProjectCmd::Create {
+            name,
+            description,
+            repo,
+        } => {
+            let req = CreateProjectRequest {
+                name,
+                description,
+                repo,
+            };
             let p = c.projects().create(&req).await?;
-            if json_out { print_json(&p)?; } else { println!("created {}", p.id); }
+            if json_out {
+                print_json(&p)?;
+            } else {
+                println!("created {}", p.id);
+            }
         }
         ProjectCmd::Delete { id, hard } => {
             c.projects().delete(&id, hard).await?;
-            if json_out { print_json(&json!({"ok": true, "id": id}))?; } else { println!("deleted {id}"); }
+            if json_out {
+                print_json(&json!({"ok": true, "id": id}))?;
+            } else {
+                println!("deleted {id}");
+            }
         }
     }
     Ok(())
@@ -478,14 +600,18 @@ async fn run_agents(c: &Client, sub: AgentCmd, json_out: bool) -> Result<()> {
     match sub {
         AgentCmd::List { online } => {
             let mut b = c.agents().list();
-            if online { b = b.online(true); }
+            if online {
+                b = b.online(true);
+            }
             let agents = b.send().await?;
             if json_out {
                 print_json(&json!({ "agents": agents, "count": agents.len() }))?;
             } else if agents.is_empty() {
                 println!("(no agents)");
             } else {
-                for a in &agents { print_agent(a); }
+                for a in &agents {
+                    print_agent(a);
+                }
                 println!("\n{} agent(s)", agents.len());
             }
         }
@@ -495,9 +621,17 @@ async fn run_agents(c: &Client, sub: AgentCmd, json_out: bool) -> Result<()> {
                 print_json(&a)?;
             } else {
                 println!("name:       {}", a.name);
-                let status = if a.online.unwrap_or(false) { "online" } else { "offline" };
+                let status = if a.online.unwrap_or(false) {
+                    "online"
+                } else {
+                    "offline"
+                };
                 println!("status:     {status}");
-                let node = a.extra.get("node").and_then(|v| v.as_str()).map(String::from)
+                let node = a
+                    .extra
+                    .get("node")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
                     .or_else(|| a.host.clone())
                     .unwrap_or_default();
                 println!("node:       {node}");
@@ -529,7 +663,9 @@ async fn run_bus(c: &Client, sub: BusCmd, json_out: bool) -> Result<()> {
                 let msg = msg?;
                 let kind = msg.kind.as_deref().unwrap_or("");
                 if let Some(f) = &filter {
-                    if !kind.contains(f.as_str()) { continue; }
+                    if !kind.contains(f.as_str()) {
+                        continue;
+                    }
                 }
                 if json_out {
                     println!("{}", serde_json::to_string(&msg)?);
@@ -547,9 +683,17 @@ async fn run_bus(c: &Client, sub: BusCmd, json_out: bool) -> Result<()> {
             } else {
                 Default::default()
             };
-            let req = BusSendRequest { kind: msg_type, extra, ..Default::default() };
+            let req = BusSendRequest {
+                kind: msg_type,
+                extra,
+                ..Default::default()
+            };
             c.bus().send(&req).await?;
-            if json_out { print_json(&json!({"ok": true}))?; } else { println!("sent"); }
+            if json_out {
+                print_json(&json!({"ok": true}))?;
+            } else {
+                println!("sent");
+            }
         }
         BusCmd::Messages { msg_type, limit } => {
             let msgs = c.bus().messages(Some(limit), msg_type.as_deref()).await?;
@@ -558,7 +702,9 @@ async fn run_bus(c: &Client, sub: BusCmd, json_out: bool) -> Result<()> {
             } else if msgs.is_empty() {
                 println!("(no messages)");
             } else {
-                for m in &msgs { print_bus_message(m); }
+                for m in &msgs {
+                    print_bus_message(m);
+                }
                 println!("\n{} message(s)", msgs.len());
             }
         }
@@ -577,7 +723,9 @@ async fn run_queue(c: &Client, sub: QueueCmd, json_out: bool) -> Result<()> {
             } else if items.is_empty() {
                 println!("(empty queue)");
             } else {
-                for item in &items { print_queue_item(item); }
+                for item in &items {
+                    print_queue_item(item);
+                }
                 println!("\n{} item(s)", items.len());
             }
         }
@@ -594,7 +742,9 @@ async fn run_queue(c: &Client, sub: QueueCmd, json_out: bool) -> Result<()> {
                     .or_else(|| item.extra.get("task").and_then(|v| v.as_str()))
                     .unwrap_or("");
                 println!("title:   {title}");
-                if let Some(c) = item.created { println!("created: {}", c.to_rfc3339()); }
+                if let Some(c) = item.created {
+                    println!("created: {}", c.to_rfc3339());
+                }
             }
         }
     }

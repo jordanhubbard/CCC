@@ -11,19 +11,19 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/bus/blobs/upload",        post(blob_upload))
-        .route("/api/bus/blobs",               get(blob_list))
-        .route("/api/bus/blobs/:id",           get(blob_meta))
-        .route("/api/bus/blobs/:id",           delete(blob_delete))
-        .route("/api/bus/blobs/:id/download",  get(blob_download))
-        .route("/api/bus/dlq",                 get(dlq_list).post(dlq_append))
-        .route("/api/bus/dlq/redeliver",       post(dlq_redeliver))
+        .route("/api/bus/blobs/upload", post(blob_upload))
+        .route("/api/bus/blobs", get(blob_list))
+        .route("/api/bus/blobs/:id", get(blob_meta))
+        .route("/api/bus/blobs/:id", delete(blob_delete))
+        .route("/api/bus/blobs/:id/download", get(blob_download))
+        .route("/api/bus/dlq", get(dlq_list).post(dlq_append))
+        .route("/api/bus/dlq/redeliver", post(dlq_redeliver))
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -46,84 +46,133 @@ async fn blob_upload(
     Json(body): Json<UploadBody>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     let mime_str = match body.mime_type {
         Some(m) => m,
-        None => return (StatusCode::UNPROCESSABLE_ENTITY,
-                        Json(json!({"error":"mime_type required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error":"mime_type required"})),
+            )
+                .into_response()
+        }
     };
     let mime: MediaType = mime_str.parse().unwrap_or_else(|_| unreachable!());
     if !mime.is_known() {
-        return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({
-            "error": "unknown_media_type",
-            "mime_type": mime_str,
-            "known_types": MediaType::all_known(),
-        }))).into_response();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "unknown_media_type",
+                "mime_type": mime_str,
+                "known_types": MediaType::all_known(),
+            })),
+        )
+            .into_response();
     }
 
     let enc = body.enc.as_deref().unwrap_or("none");
     if mime.is_binary() && enc != "base64" {
-        return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({
-            "error": "binary_type_requires_base64_enc",
-            "mime_type": mime_str,
-        }))).into_response();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "binary_type_requires_base64_enc",
+                "mime_type": mime_str,
+            })),
+        )
+            .into_response();
     }
 
     let data_str = match body.data {
         Some(d) => d,
-        None => return (StatusCode::UNPROCESSABLE_ENTITY,
-                        Json(json!({"error":"data required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error":"data required"})),
+            )
+                .into_response()
+        }
     };
 
-    let chunk_index  = body.chunk_index.unwrap_or(0) as usize;
+    let chunk_index = body.chunk_index.unwrap_or(0) as usize;
     let total_chunks = body.total_chunks.unwrap_or(1) as usize;
 
     let chunk_bytes: Vec<u8> = if enc == "base64" {
         match b64_decode(&data_str) {
             Ok(b) => b,
-            Err(_) => return (StatusCode::UNPROCESSABLE_ENTITY,
-                               Json(json!({"error":"invalid_base64"}))).into_response(),
+            Err(_) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({"error":"invalid_base64"})),
+                )
+                    .into_response()
+            }
         }
     } else {
         data_str.into_bytes()
     };
 
-    let blob_id = body.blob_id.unwrap_or_else(|| format!("blob-{}", uuid::Uuid::new_v4()));
-    let ttl_s   = body.ttl_seconds.unwrap_or(86400);
+    let blob_id = body
+        .blob_id
+        .unwrap_or_else(|| format!("blob-{}", uuid::Uuid::new_v4()));
+    let ttl_s = body.ttl_seconds.unwrap_or(86400);
     let allowed = body.allowed_agents.unwrap_or_default();
     let uploaded_by = extract_token(&headers);
 
     // Write chunk to disk
-    let blob_dir  = std::path::Path::new(&state.blobs_path).join(&blob_id);
+    let blob_dir = std::path::Path::new(&state.blobs_path).join(&blob_id);
     let data_path = blob_dir.join("data");
     if let Err(e) = tokio::fs::create_dir_all(&blob_dir).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("storage: {e}")}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("storage: {e}")})),
+        )
+            .into_response();
     }
 
     if chunk_index == 0 {
         if let Err(e) = tokio::fs::write(&data_path, &chunk_bytes).await {
-            return (StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("write: {e}")}))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("write: {e}")})),
+            )
+                .into_response();
         }
     } else {
-        let mut f = match tokio::fs::OpenOptions::new().append(true).open(&data_path).await {
+        let mut f = match tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&data_path)
+            .await
+        {
             Ok(f) => f,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
-                               Json(json!({"error": format!("append open: {e}")}))).into_response(),
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("append open: {e}")})),
+                )
+                    .into_response()
+            }
         };
         if let Err(e) = f.write_all(&chunk_bytes).await {
-            return (StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("append write: {e}")}))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("append write: {e}")})),
+            )
+                .into_response();
         }
     }
 
     let now = chrono::Utc::now();
     let expires_at = if ttl_s > 0 {
         Some((now + chrono::Duration::seconds(ttl_s as i64)).to_rfc3339())
-    } else { None };
+    } else {
+        None
+    };
 
     let (complete, meta) = {
         let mut store = state.blob_store.write().await;
@@ -156,34 +205,42 @@ async fn blob_upload(
             "blob_id": blob_id,
             "mime_type": mime_str,
             "size_bytes": meta.size_bytes,
-        })).unwrap_or_default();
+        }))
+        .unwrap_or_default();
         let _ = state.bus_tx.send(event.clone());
         let _ = append_line(&state.bus_log_path, &format!("{}\n", event)).await;
     }
 
-    (StatusCode::OK, Json(json!({
-        "ok": true,
-        "blob_id": blob_id,
-        "complete": complete,
-        "chunks_received": meta.chunks_received,
-        "total_chunks": total_chunks,
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ok": true,
+            "blob_id": blob_id,
+            "complete": complete,
+            "chunks_received": meta.chunks_received,
+            "total_chunks": total_chunks,
+        })),
+    )
+        .into_response()
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
-async fn blob_list(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn blob_list(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let now = chrono::Utc::now();
     let store = state.blob_store.read().await;
-    let blobs: Vec<Value> = store.values()
+    let blobs: Vec<Value> = store
+        .values()
         .filter(|m| {
-            m.expires_at.as_ref()
+            m.expires_at
+                .as_ref()
                 .and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok())
                 .map(|e| e > now)
                 .unwrap_or(true)
@@ -201,11 +258,19 @@ async fn blob_meta(
     Path(blob_id): Path<String>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let store = state.blob_store.read().await;
     match store.get(&blob_id) {
-        Some(m) => (StatusCode::OK, Json(serde_json::to_value(m).unwrap_or(Value::Null))).into_response(),
+        Some(m) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(m).unwrap_or(Value::Null)),
+        )
+            .into_response(),
         None => (StatusCode::NOT_FOUND, Json(json!({"error":"not_found"}))).into_response(),
     }
 }
@@ -218,7 +283,11 @@ async fn blob_delete(
     Path(blob_id): Path<String>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let removed = state.blob_store.write().await.remove(&blob_id).is_some();
     if removed {
@@ -244,7 +313,11 @@ async fn blob_download(
     Query(q): Query<DownloadQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     // Lazy TTL expiry
@@ -257,7 +330,8 @@ async fn blob_download(
                         let path = std::path::Path::new(&state.blobs_path).join(&blob_id);
                         let _ = tokio::fs::remove_dir_all(&path).await;
                         store.remove(&blob_id);
-                        return (StatusCode::GONE, Json(json!({"error":"blob_expired"}))).into_response();
+                        return (StatusCode::GONE, Json(json!({"error":"blob_expired"})))
+                            .into_response();
                     }
                 }
             }
@@ -268,10 +342,16 @@ async fn blob_download(
         let store = state.blob_store.read().await;
         match store.get(&blob_id) {
             Some(m) if m.complete => m.clone(),
-            Some(_) => return (StatusCode::CONFLICT,
-                                Json(json!({"error":"upload_incomplete"}))).into_response(),
-            None => return (StatusCode::NOT_FOUND,
-                             Json(json!({"error":"not_found"}))).into_response(),
+            Some(_) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({"error":"upload_incomplete"})),
+                )
+                    .into_response()
+            }
+            None => {
+                return (StatusCode::NOT_FOUND, Json(json!({"error":"not_found"}))).into_response()
+            }
         }
     };
 
@@ -279,7 +359,11 @@ async fn blob_download(
     if !meta.allowed_agents.is_empty() {
         let req_agent = q.agent.as_deref().unwrap_or("");
         if !meta.allowed_agents.iter().any(|a| a == req_agent) {
-            return (StatusCode::FORBIDDEN, Json(json!({"error":"access_denied"}))).into_response();
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error":"access_denied"})),
+            )
+                .into_response();
         }
     }
 
@@ -288,15 +372,23 @@ async fn blob_download(
         .join("data");
 
     match tokio::fs::read(&data_path).await {
-        Ok(bytes) => (StatusCode::OK, Json(json!({
-            "ok": true,
-            "blob_id": blob_id,
-            "mime_type": meta.mime_type.as_str(),
-            "enc": "base64",
-            "size_bytes": meta.size_bytes,
-            "data": b64_encode(&bytes),
-        }))).into_response(),
-        Err(_) => (StatusCode::NOT_FOUND, Json(json!({"error":"data_not_found"}))).into_response(),
+        Ok(bytes) => (
+            StatusCode::OK,
+            Json(json!({
+                "ok": true,
+                "blob_id": blob_id,
+                "mime_type": meta.mime_type.as_str(),
+                "enc": "base64",
+                "size_bytes": meta.size_bytes,
+                "data": b64_encode(&bytes),
+            })),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error":"data_not_found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -308,19 +400,30 @@ async fn dlq_append(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let entry = DlqEntry {
         id: format!("dlq-{}", uuid::Uuid::new_v4()),
         ts: chrono::Utc::now().to_rfc3339(),
-        error: body.get("error").and_then(|e| e.as_str()).unwrap_or("unknown").to_string(),
+        error: body
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
         message: body.get("message").cloned().unwrap_or(body.clone()),
         retry_count: 0,
     };
     let line = format!("{}\n", serde_json::to_string(&entry).unwrap_or_default());
     if let Err(e) = append_line(&state.dlq_path, &line).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("dlq write: {e}")}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("dlq write: {e}")})),
+        )
+            .into_response();
     }
     (StatusCode::OK, Json(json!({"ok":true,"id":entry.id}))).into_response()
 }
@@ -338,11 +441,18 @@ async fn dlq_list(
     Query(q): Query<DlqQuery>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
-    let content = tokio::fs::read_to_string(&state.dlq_path).await.unwrap_or_default();
+    let content = tokio::fs::read_to_string(&state.dlq_path)
+        .await
+        .unwrap_or_default();
     let now = chrono::Utc::now();
-    let entries: Vec<Value> = content.lines()
+    let entries: Vec<Value> = content
+        .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<DlqEntry>(l).ok())
         .filter(|e| {
@@ -366,24 +476,42 @@ async fn dlq_redeliver(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let dlq_id = match body.get("dlq_id").and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
-        None => return (StatusCode::UNPROCESSABLE_ENTITY,
-                        Json(json!({"error":"dlq_id required"}))).into_response(),
+        None => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error":"dlq_id required"})),
+            )
+                .into_response()
+        }
     };
 
     // Find entry in DLQ file
-    let content = tokio::fs::read_to_string(&state.dlq_path).await.unwrap_or_default();
-    let entry: Option<DlqEntry> = content.lines()
+    let content = tokio::fs::read_to_string(&state.dlq_path)
+        .await
+        .unwrap_or_default();
+    let entry: Option<DlqEntry> = content
+        .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<DlqEntry>(l).ok())
         .find(|e| e.id == dlq_id);
 
     let entry = match entry {
         Some(e) => e,
-        None => return (StatusCode::NOT_FOUND, Json(json!({"error":"dlq_entry_not_found"}))).into_response(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"dlq_entry_not_found"})),
+            )
+                .into_response()
+        }
     };
 
     // Re-send message to bus
@@ -401,7 +529,11 @@ async fn dlq_redeliver(
     let _ = state.bus_tx.send(msg_str.clone());
     let _ = append_line(&state.bus_log_path, &format!("{}\n", msg_str)).await;
 
-    (StatusCode::OK, Json(json!({"ok":true,"redelivered":true,"seq":seq}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({"ok":true,"redelivered":true,"seq":seq})),
+    )
+        .into_response()
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -431,7 +563,9 @@ async fn append_line(path: &str, line: &str) -> std::io::Result<()> {
         tokio::fs::create_dir_all(parent).await?;
     }
     let mut f = tokio::fs::OpenOptions::new()
-        .create(true).append(true)
-        .open(path).await?;
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
     f.write_all(line.as_bytes()).await
 }

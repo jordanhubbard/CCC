@@ -44,7 +44,11 @@ pub fn resolve_hostname() -> String {
         return format!("{}.local", short);
     }
 
-    if short.is_empty() { "unknown".into() } else { short }
+    if short.is_empty() {
+        "unknown".into()
+    } else {
+        short
+    }
 }
 
 impl Config {
@@ -63,8 +67,7 @@ impl Config {
             .trim_end_matches('/')
             .to_string();
 
-        let acc_token = std::env::var("ACC_AGENT_TOKEN")
-            .unwrap_or_default();
+        let acc_token = std::env::var("ACC_AGENT_TOKEN").unwrap_or_default();
 
         let agent_name = std::env::var("AGENT_NAME").unwrap_or_default();
 

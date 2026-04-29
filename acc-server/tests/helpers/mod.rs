@@ -22,7 +22,11 @@ impl TestServer {
         let tmp = tempfile::tempdir().expect("tempdir");
         let state = make_state(&tmp).await;
         let app = build_app(state);
-        TestServer { app, token: TEST_TOKEN, tmp }
+        TestServer {
+            app,
+            token: TEST_TOKEN,
+            tmp,
+        }
     }
 
     pub fn auth_header(&self) -> String {
@@ -34,9 +38,8 @@ pub async fn make_state(tmp: &TempDir) -> Arc<AppState> {
     let dir = tmp.path();
 
     let auth_conn = db::open_auth(":memory:").expect("open auth db");
-    let initial_hashes: HashSet<String> = db::auth_all_token_hashes(&auth_conn)
-        .into_iter()
-        .collect();
+    let initial_hashes: HashSet<String> =
+        db::auth_all_token_hashes(&auth_conn).into_iter().collect();
     let auth_db = Arc::new(tokio::sync::Mutex::new(auth_conn));
 
     let fleet_db = db::open_fleet(":memory:").expect("open fleet db");
@@ -47,21 +50,21 @@ pub async fn make_state(tmp: &TempDir) -> Arc<AppState> {
         user_token_hashes: std::sync::RwLock::new(initial_hashes),
         auth_db,
         fleet_db,
-        queue:    RwLock::new(state::QueueData::default()),
-        agents:   RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
-        secrets:  RwLock::new(serde_json::Map::new()),
-        vault:    acc_server::vault::Vault::new(false),
+        queue: RwLock::new(state::QueueData::default()),
+        agents: RwLock::new(serde_json::Value::Object(serde_json::Map::new())),
+        secrets: RwLock::new(serde_json::Map::new()),
+        vault: acc_server::vault::Vault::new(false),
         projects: tokio::sync::RwLock::new(Vec::new()),
-        brain:    Arc::new(brain::BrainQueue::new()),
-        bus_tx:   tokio::sync::broadcast::channel(256).0,
-        bus_seq:  std::sync::atomic::AtomicU64::new(0),
+        brain: Arc::new(brain::BrainQueue::new()),
+        bus_tx: tokio::sync::broadcast::channel(256).0,
+        bus_seq: std::sync::atomic::AtomicU64::new(0),
         start_time: std::time::SystemTime::now(),
-        fs_root:  dir.join("fs").to_string_lossy().into_owned(),
+        fs_root: dir.join("fs").to_string_lossy().into_owned(),
         supervisor: None,
         soul_store: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         blob_store: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         blobs_path: dir.join("blobs").to_string_lossy().into_owned(),
-        dlq_path:   dir.join("bus-dlq.jsonl").to_string_lossy().into_owned(),
+        dlq_path: dir.join("bus-dlq.jsonl").to_string_lossy().into_owned(),
         bus_log_path: dir.join("bus.jsonl").to_string_lossy().into_owned(),
         user_token_roles: std::sync::RwLock::new(std::collections::HashMap::new()),
         watchdog: acc_server::routes::watchdog::WatchdogState::new(),
@@ -77,7 +80,11 @@ pub async fn call(app: &Router, req: Request<Body>) -> Response<Body> {
 /// Read response body bytes.
 pub async fn body_bytes(resp: Response<Body>) -> Bytes {
     use http_body_util::BodyExt;
-    resp.into_body().collect().await.expect("body read").to_bytes()
+    resp.into_body()
+        .collect()
+        .await
+        .expect("body read")
+        .to_bytes()
 }
 
 /// Read response body as JSON.

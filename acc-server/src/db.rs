@@ -6,7 +6,7 @@
 ///
 /// Schema version is tracked in the `schema_version` table.
 /// Migrations are additive — run in order, each runs exactly once.
-use rusqlite::{Connection, Result, params};
+use rusqlite::{params, Connection, Result};
 use serde_json::Value;
 use std::path::Path;
 
@@ -275,18 +275,19 @@ fn init_schema(conn: &Connection) -> Result<()> {
 }
 
 fn get_schema_version(conn: &Connection) -> i64 {
-    conn.query_row(
-        "SELECT MAX(version) FROM schema_version",
-        [],
-        |row| row.get::<_, Option<i64>>(0),
-    )
+    conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+        row.get::<_, Option<i64>>(0)
+    })
     .unwrap_or(None)
     .unwrap_or(0)
 }
 
 fn set_schema_version(conn: &Connection, version: i64) -> Result<()> {
     conn.execute("DELETE FROM schema_version", [])?;
-    conn.execute("INSERT INTO schema_version (version) VALUES (?1)", params![version])?;
+    conn.execute(
+        "INSERT INTO schema_version (version) VALUES (?1)",
+        params![version],
+    )?;
     Ok(())
 }
 
@@ -297,7 +298,11 @@ fn run_migrations(conn: &Connection) -> Result<()> {
     }
 
     // Migration v1: initial schema is already created by init_schema.
-    tracing::info!("Database schema at version {} (current: {})", version, CURRENT_VERSION);
+    tracing::info!(
+        "Database schema at version {} (current: {})",
+        version,
+        CURRENT_VERSION
+    );
 
     if version < 2 {
         conn.execute_batch("
@@ -326,7 +331,8 @@ fn run_migrations(conn: &Connection) -> Result<()> {
     }
 
     if version < 3 {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS requests (
                 id TEXT PRIMARY KEY,
                 body TEXT NOT NULL DEFAULT '',
@@ -342,23 +348,30 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             );
             CREATE INDEX IF NOT EXISTS idx_requests_status  ON requests(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_requests_claimed ON requests(claimed_by, status);
-        ")?;
+        ",
+        )?;
         set_schema_version(conn, 3)?;
     }
 
     if version < 4 {
-        let col_exists: bool = conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name='task_type'",
-            [], |r| r.get::<_, i64>(0),
-        ).unwrap_or(0) > 0;
+        let col_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name='task_type'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
         if !col_exists {
-            conn.execute_batch("
+            conn.execute_batch(
+                "
                 ALTER TABLE fleet_tasks ADD COLUMN task_type TEXT NOT NULL DEFAULT 'work';
                 ALTER TABLE fleet_tasks ADD COLUMN review_of TEXT;
                 ALTER TABLE fleet_tasks ADD COLUMN phase TEXT;
                 ALTER TABLE fleet_tasks ADD COLUMN blocked_by TEXT NOT NULL DEFAULT '[]';
                 ALTER TABLE fleet_tasks ADD COLUMN review_result TEXT;
-            ")?;
+            ",
+            )?;
         }
         // Always ensure the phase index exists (idempotent)
         conn.execute_batch(
@@ -371,17 +384,21 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         // v4 migration had a bug: if task_type already existed it skipped blocked_by/review_result.
         // v5 adds them individually with existence checks so it's always safe to run.
         for (col, def) in &[
-            ("blocked_by",    "TEXT NOT NULL DEFAULT '[]'"),
+            ("blocked_by", "TEXT NOT NULL DEFAULT '[]'"),
             ("review_result", "TEXT"),
         ] {
-            let exists: bool = conn.query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name=?1",
-                rusqlite::params![col],
-                |r| r.get::<_, i64>(0),
-            ).unwrap_or(0) > 0;
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name=?1",
+                    rusqlite::params![col],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
             if !exists {
                 conn.execute_batch(&format!(
-                    "ALTER TABLE fleet_tasks ADD COLUMN {} {};", col, def
+                    "ALTER TABLE fleet_tasks ADD COLUMN {} {};",
+                    col, def
                 ))?;
             }
         }
@@ -390,23 +407,25 @@ fn run_migrations(conn: &Connection) -> Result<()> {
 
     if version < 6 {
         // Add output and inputs columns to fleet_tasks (idempotent)
-        for (col, def) in &[
-            ("output", "TEXT"),
-            ("inputs", "TEXT NOT NULL DEFAULT '{}'"),
-        ] {
-            let exists: bool = conn.query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name=?1",
-                rusqlite::params![col],
-                |r| r.get::<_, i64>(0),
-            ).unwrap_or(0) > 0;
+        for (col, def) in &[("output", "TEXT"), ("inputs", "TEXT NOT NULL DEFAULT '{}'")] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name=?1",
+                    rusqlite::params![col],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
             if !exists {
                 conn.execute_batch(&format!(
-                    "ALTER TABLE fleet_tasks ADD COLUMN {} {};", col, def
+                    "ALTER TABLE fleet_tasks ADD COLUMN {} {};",
+                    col, def
                 ))?;
             }
         }
         // Create conversations table and index
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS conversations (
                 task_id    TEXT NOT NULL,
                 turn_index INTEGER NOT NULL,
@@ -419,31 +438,39 @@ fn run_migrations(conn: &Connection) -> Result<()> {
                 PRIMARY KEY (task_id, turn_index)
             );
             CREATE INDEX IF NOT EXISTS idx_conversations_task ON conversations(task_id, turn_index);
-        ")?;
+        ",
+        )?;
         set_schema_version(conn, 6)?;
     }
 
     if version < 7 {
         // Add source column to fleet_tasks for unified task model
-        let has_source: bool = conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name='source'",
-            [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap_or(0) > 0;
+        let has_source: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('fleet_tasks') WHERE name='source'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
         if !has_source {
             conn.execute_batch(
-                "ALTER TABLE fleet_tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'fleet';"
+                "ALTER TABLE fleet_tasks ADD COLUMN source TEXT NOT NULL DEFAULT 'fleet';",
             )?;
             conn.execute_batch(
-                "CREATE INDEX IF NOT EXISTS idx_fleet_tasks_source ON fleet_tasks(source, status);"
+                "CREATE INDEX IF NOT EXISTS idx_fleet_tasks_source ON fleet_tasks(source, status);",
             )?;
         }
-        conn.execute("INSERT INTO schema_version (version) VALUES (?1)", params![7])?;
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            params![7],
+        )?;
         tracing::info!("Migration v7 applied: source column on fleet_tasks");
     }
 
     if version < 8 {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS vault_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -453,12 +480,14 @@ fn run_migrations(conn: &Connection) -> Result<()> {
                 value_b64  TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             );
-        ")?;
+        ",
+        )?;
         tracing::info!("Migration v8 applied: vault_meta and vault_secrets tables");
     }
 
     if version < 9 {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS conversation_chains (
                 id            TEXT PRIMARY KEY,
                 source        TEXT NOT NULL,
@@ -537,7 +566,8 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             );
             CREATE INDEX IF NOT EXISTS idx_conversation_chain_tasks_task
                 ON conversation_chain_tasks(task_id);
-        ")?;
+        ",
+        )?;
         tracing::info!("Migration v9 applied: conversation chain tables");
     }
 
@@ -562,7 +592,10 @@ pub fn migrate_from_json(
     let p = migrate_projects(conn, projects_path);
     tracing::info!(
         "JSON→SQLite migration: {} queue items, {} agents, {} secrets, {} projects",
-        q, a, s, p
+        q,
+        a,
+        s,
+        p
     );
     (q, a, s, p)
 }
@@ -583,28 +616,46 @@ fn migrate_queue(conn: &Connection, path: &str) -> usize {
     if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
         for item in items {
             let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+            let status = item
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("pending");
             let priority = item.get("priority").and_then(|v| v.as_i64()).unwrap_or(0);
-            let created_at = item.get("created_at").and_then(|v| v.as_str()).unwrap_or(&now);
-            let updated_at = item.get("updated_at").and_then(|v| v.as_str()).unwrap_or(&now);
+            let created_at = item
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&now);
+            let updated_at = item
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&now);
             let blob = item.to_string();
 
-            if id.is_empty() { continue; }
+            if id.is_empty() {
+                continue;
+            }
             let r = conn.execute(
                 "INSERT OR IGNORE INTO queue_items (id, status, priority, created_at, updated_at, data)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![id, status, priority, created_at, updated_at, blob],
             );
-            if r.is_ok() { count += 1; }
+            if r.is_ok() {
+                count += 1;
+            }
         }
     }
 
     if let Some(completed) = data.get("completed").and_then(|v| v.as_array()) {
         for item in completed {
             let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let completed_at = item.get("completed_at").and_then(|v| v.as_str()).unwrap_or(&now);
+            let completed_at = item
+                .get("completed_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&now);
             let blob = item.to_string();
-            if id.is_empty() { continue; }
+            if id.is_empty() {
+                continue;
+            }
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO queue_completed (id, completed_at, data) VALUES (?1, ?2, ?3)",
                 params![id, completed_at, blob],
@@ -638,16 +689,23 @@ fn migrate_agents(conn: &Connection, path: &str) -> usize {
 
     for agent in entries {
         let name = agent.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        if name.is_empty() { continue; }
+        if name.is_empty() {
+            continue;
+        }
         let host = agent.get("host").and_then(|v| v.as_str()).unwrap_or("");
-        let status = agent.get("status").and_then(|v| v.as_str()).unwrap_or("offline");
+        let status = agent
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("offline");
         let blob = agent.to_string();
 
         let r = conn.execute(
             "INSERT OR IGNORE INTO agents (name, host, status, data) VALUES (?1, ?2, ?3, ?4)",
             params![name, host, status, blob],
         );
-        if r.is_ok() { count += 1; }
+        if r.is_ok() {
+            count += 1;
+        }
     }
 
     count
@@ -667,12 +725,17 @@ fn migrate_secrets(conn: &Connection, path: &str) -> usize {
     let now = chrono::Utc::now().to_rfc3339();
 
     for (key, value) in &data {
-        let val_str = value.as_str().map(|s| s.to_string()).unwrap_or_else(|| value.to_string());
+        let val_str = value
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| value.to_string());
         let r = conn.execute(
             "INSERT OR IGNORE INTO secrets (key, value, updated_at) VALUES (?1, ?2, ?3)",
             params![key, val_str, now],
         );
-        if r.is_ok() { count += 1; }
+        if r.is_ok() {
+            count += 1;
+        }
     }
 
     count
@@ -691,19 +754,28 @@ fn migrate_projects(conn: &Connection, path: &str) -> usize {
     let mut count = 0;
 
     for project in &data {
-        let id = project.get("id").and_then(|v| v.as_str())
+        let id = project
+            .get("id")
+            .and_then(|v| v.as_str())
             .or_else(|| project.get("full_name").and_then(|v| v.as_str()))
             .unwrap_or("");
-        if id.is_empty() { continue; }
+        if id.is_empty() {
+            continue;
+        }
         let name = project.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let full_name = project.get("full_name").and_then(|v| v.as_str()).unwrap_or("");
+        let full_name = project
+            .get("full_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let blob = project.to_string();
 
         let r = conn.execute(
             "INSERT OR IGNORE INTO projects (id, name, full_name, data) VALUES (?1, ?2, ?3, ?4)",
             params![id, name, full_name, blob],
         );
-        if r.is_ok() { count += 1; }
+        if r.is_ok() {
+            count += 1;
+        }
     }
 
     count
@@ -746,9 +818,9 @@ pub fn db_load_queue_items(conn: &Connection) -> Vec<Value> {
 
 pub fn db_load_queue_completed(conn: &Connection) -> Vec<Value> {
     let mut completed = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT data FROM queue_completed ORDER BY completed_at DESC LIMIT 500",
-    ) {
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT data FROM queue_completed ORDER BY completed_at DESC LIMIT 500")
+    {
         if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
             for row in rows.flatten() {
                 if let Ok(v) = serde_json::from_str::<Value>(&row) {
@@ -763,13 +835,13 @@ pub fn db_load_queue_completed(conn: &Connection) -> Vec<Value> {
 pub fn db_load_secrets(conn: &Connection) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM secrets") {
-        if let Ok(rows) =
-            stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-        {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             for row in rows.flatten() {
                 let (key, val) = row;
-                let json_val = serde_json::from_str::<Value>(&val)
-                    .unwrap_or_else(|_| Value::String(val));
+                let json_val =
+                    serde_json::from_str::<Value>(&val).unwrap_or_else(|_| Value::String(val));
                 map.insert(key, json_val);
             }
         }
@@ -805,7 +877,10 @@ pub fn db_upsert_agent(conn: &Connection, data: &Value) -> Result<()> {
     } else {
         "online"
     };
-    let last_heartbeat = data.get("lastSeen").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let last_heartbeat = data
+        .get("lastSeen")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let blob = data.to_string();
     conn.execute(
         "INSERT OR REPLACE INTO agents (name, host, status, last_heartbeat, data) \
@@ -822,7 +897,10 @@ pub fn db_delete_agent(conn: &Connection, name: &str) -> Result<()> {
 
 pub fn db_upsert_queue_item(conn: &Connection, item: &Value) -> Result<()> {
     let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-    let status = item.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+    let status = item
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pending");
     let priority = item.get("priority").and_then(|v| v.as_i64()).unwrap_or(0);
     let now = chrono::Utc::now().to_rfc3339();
     let created_at = item
@@ -877,7 +955,10 @@ pub fn db_upsert_project(conn: &Connection, project: &Value) -> Result<()> {
         .or_else(|| project.get("full_name").and_then(|v| v.as_str()))
         .unwrap_or("");
     let name = project.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let full_name = project.get("full_name").and_then(|v| v.as_str()).unwrap_or("");
+    let full_name = project
+        .get("full_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let blob = project.to_string();
     conn.execute(
         "INSERT OR REPLACE INTO projects (id, name, full_name, data) VALUES (?1, ?2, ?3, ?4)",
@@ -913,8 +994,10 @@ pub fn insert_bus_message(conn: &Connection, msg: &Value) -> Result<()> {
          (id, seq, ts, msg_type, from_agent, to_agent, subject, topic, body,
           thread_id, target, emoji, action, data)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-        params![id, seq, ts, msg_type, from, to, subject, topic, body,
-                thread_id, target, emoji, action, blob],
+        params![
+            id, seq, ts, msg_type, from, to, subject, topic, body, thread_id, target, emoji,
+            action, blob
+        ],
     )?;
     Ok(())
 }
@@ -929,7 +1012,8 @@ pub fn open_auth(path: &str) -> Result<Connection> {
     }
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS users (
             id          TEXT PRIMARY KEY,
             username    TEXT NOT NULL UNIQUE,
@@ -937,7 +1021,8 @@ pub fn open_auth(path: &str) -> Result<Connection> {
             created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
             last_seen   TEXT
         );
-    ")?;
+    ",
+    )?;
     tracing::info!("Auth database opened: {}", path);
     Ok(conn)
 }
@@ -967,22 +1052,24 @@ pub fn auth_all_token_hashes(conn: &Connection) -> Vec<String> {
 pub fn db_all_blocked_by(conn: &Connection) -> std::collections::HashMap<String, Vec<String>> {
     let mut stmt = match conn.prepare(
         "SELECT id, blocked_by FROM fleet_tasks \
-         WHERE blocked_by IS NOT NULL AND blocked_by != '[]'"
+         WHERE blocked_by IS NOT NULL AND blocked_by != '[]'",
     ) {
         Ok(s) => s,
         Err(_) => return std::collections::HashMap::new(),
     };
     let mut map = std::collections::HashMap::new();
-    let _ = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }).map(|rows| {
-        for (id, bj) in rows.flatten() {
-            let blockers: Vec<String> = serde_json::from_str(&bj).unwrap_or_default();
-            if !blockers.is_empty() {
-                map.insert(id, blockers);
+    let _ = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map(|rows| {
+            for (id, bj) in rows.flatten() {
+                let blockers: Vec<String> = serde_json::from_str(&bj).unwrap_or_default();
+                if !blockers.is_empty() {
+                    map.insert(id, blockers);
+                }
             }
-        }
-    });
+        });
     map
 }
 
@@ -997,7 +1084,7 @@ pub fn db_find_newly_unblocked(conn: &Connection, completed_id: &str) -> Vec<Str
     // task IDs never contain embedded quotes.
     let pattern = format!("%\"{completed_id}\"%");
     let mut stmt = match conn.prepare(
-        "SELECT id, blocked_by FROM fleet_tasks WHERE status='open' AND blocked_by LIKE ?1"
+        "SELECT id, blocked_by FROM fleet_tasks WHERE status='open' AND blocked_by LIKE ?1",
     ) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
@@ -1033,7 +1120,8 @@ pub fn db_find_newly_unblocked(conn: &Connection, completed_id: &str) -> Vec<Str
                     params![blocker_id],
                     |row| row.get::<_, i64>(0),
                 )
-                .unwrap_or(0) > 0
+                .unwrap_or(0)
+                    > 0
             })
         })
         .map(|(id, _)| id)
@@ -1055,7 +1143,15 @@ pub fn db_save_turn(
         "INSERT OR REPLACE INTO conversations \
          (task_id, turn_index, role, content, input_tokens, output_tokens, stop_reason) \
          VALUES (?1,?2,?3,?4,?5,?6,?7)",
-        rusqlite::params![task_id, turn_index, role, content, input_tokens, output_tokens, stop_reason],
+        rusqlite::params![
+            task_id,
+            turn_index,
+            role,
+            content,
+            input_tokens,
+            output_tokens,
+            stop_reason
+        ],
     )?;
     Ok(())
 }
@@ -1127,11 +1223,7 @@ pub fn db_fleet_sync_complete(
 /// Mirror a queue item failure into the corresponding fleet_task (source='queue').
 /// If attempts < max_attempts the queue item goes back to pending (unclaimed);
 /// if blocked (max attempts exceeded) we set fleet_task to 'failed'.
-pub fn db_fleet_sync_fail(
-    conn: &rusqlite::Connection,
-    item_id: &str,
-    blocked: bool,
-) {
+pub fn db_fleet_sync_fail(conn: &rusqlite::Connection, item_id: &str, blocked: bool) {
     let status = if blocked { "failed" } else { "open" };
     let _ = conn.execute(
         "UPDATE fleet_tasks SET status=?1, claimed_by=NULL, claimed_at=NULL,
@@ -1165,12 +1257,12 @@ pub fn db_create_fleet_task_from_queue(
     // Map queue priority string to integer
     let priority_int: i64 = match priority_str {
         "critical" => 0,
-        "high"     => 1,
-        "medium"   => 2,
-        "normal"   => 2,
-        "low"      => 3,
-        "idea"     => 4,
-        _          => 2,
+        "high" => 1,
+        "medium" => 2,
+        "normal" => 2,
+        "low" => 3,
+        "idea" => 4,
+        _ => 2,
     };
     let meta_str = metadata.to_string();
     conn.execute(
@@ -1268,9 +1360,8 @@ pub fn db_flush_vault_blobs(conn: &Connection, blobs: &std::collections::HashMap
 // ── Gateway session helpers ───────────────────────────────────────────────────
 
 pub fn get_session(conn: &Connection, key: &str) -> Result<Option<Vec<serde_json::Value>>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT messages_json FROM gateway_sessions WHERE session_key = ?1"
-    )?;
+    let mut stmt =
+        conn.prepare_cached("SELECT messages_json FROM gateway_sessions WHERE session_key = ?1")?;
     let mut rows = stmt.query(rusqlite::params![key])?;
     if let Some(row) = rows.next()? {
         let json: String = row.get(0)?;
@@ -1281,7 +1372,13 @@ pub fn get_session(conn: &Connection, key: &str) -> Result<Option<Vec<serde_json
     }
 }
 
-pub fn put_session(conn: &Connection, key: &str, agent: &str, workspace: &str, messages: &[serde_json::Value]) -> Result<()> {
+pub fn put_session(
+    conn: &Connection,
+    key: &str,
+    agent: &str,
+    workspace: &str,
+    messages: &[serde_json::Value],
+) -> Result<()> {
     let json = serde_json::to_string(messages).unwrap_or_else(|_| "[]".to_string());
     conn.execute(
         "INSERT INTO gateway_sessions (session_key, agent_name, workspace, messages_json, updated_at)
@@ -1297,7 +1394,10 @@ pub fn put_session(conn: &Connection, key: &str, agent: &str, workspace: &str, m
 }
 
 pub fn delete_session(conn: &Connection, key: &str) -> Result<()> {
-    conn.execute("DELETE FROM gateway_sessions WHERE session_key = ?1", rusqlite::params![key])?;
+    conn.execute(
+        "DELETE FROM gateway_sessions WHERE session_key = ?1",
+        rusqlite::params![key],
+    )?;
     Ok(())
 }
 
@@ -1319,8 +1419,13 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init_schema(&conn).unwrap();
         // Should not panic on missing files
-        let (q, a, s, p) = migrate_from_json(&conn, "/nonexistent/q.json", "/nonexistent/a.json",
-                                              "/nonexistent/s.json", "/nonexistent/p.json");
+        let (q, a, s, p) = migrate_from_json(
+            &conn,
+            "/nonexistent/q.json",
+            "/nonexistent/a.json",
+            "/nonexistent/s.json",
+            "/nonexistent/p.json",
+        );
         assert_eq!((q, a, s, p), (0, 0, 0, 0));
     }
 
@@ -1334,7 +1439,8 @@ mod tests {
             "INSERT INTO fleet_tasks (id, project_id, title, description, status, priority, source)
              VALUES (?1, 'queue', 'Test task', '', 'open', 2, 'queue')",
             params![item_id],
-        ).unwrap();
+        )
+        .unwrap();
         conn
     }
 
@@ -1342,11 +1448,13 @@ mod tests {
     fn test_fleet_sync_claim_updates_status() {
         let conn = make_test_conn_with_queue_task("wq-test-001");
         db_fleet_sync_claim(&conn, "wq-test-001", "hermes", "2026-04-26T00:00:00Z");
-        let (status, claimed_by): (String, String) = conn.query_row(
-            "SELECT status, claimed_by FROM fleet_tasks WHERE id='wq-test-001'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
+        let (status, claimed_by): (String, String) = conn
+            .query_row(
+                "SELECT status, claimed_by FROM fleet_tasks WHERE id='wq-test-001'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(status, "claimed");
         assert_eq!(claimed_by, "hermes");
     }
@@ -1355,11 +1463,19 @@ mod tests {
     fn test_fleet_sync_complete_updates_status() {
         let conn = make_test_conn_with_queue_task("wq-test-002");
         db_fleet_sync_complete(&conn, "wq-test-002", "hermes", "done");
-        let (status, completed_by, output): (String, String, String) = conn.query_row(
-            "SELECT status, completed_by, output FROM fleet_tasks WHERE id='wq-test-002'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, Option<String>>(2)?.unwrap_or_default())),
-        ).unwrap();
+        let (status, completed_by, output): (String, String, String) = conn
+            .query_row(
+                "SELECT status, completed_by, output FROM fleet_tasks WHERE id='wq-test-002'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    ))
+                },
+            )
+            .unwrap();
         assert_eq!(status, "completed");
         assert_eq!(completed_by, "hermes");
         assert_eq!(output, "done");
@@ -1372,11 +1488,13 @@ mod tests {
         db_fleet_sync_claim(&conn, "wq-test-003", "hermes", "2026-04-26T00:00:00Z");
         // Then fail with blocked=true
         db_fleet_sync_fail(&conn, "wq-test-003", true);
-        let (status, claimed_by): (String, Option<String>) = conn.query_row(
-            "SELECT status, claimed_by FROM fleet_tasks WHERE id='wq-test-003'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
+        let (status, claimed_by): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, claimed_by FROM fleet_tasks WHERE id='wq-test-003'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(status, "failed");
         assert!(claimed_by.is_none());
     }
@@ -1386,11 +1504,13 @@ mod tests {
         let conn = make_test_conn_with_queue_task("wq-test-004");
         db_fleet_sync_claim(&conn, "wq-test-004", "hermes", "2026-04-26T00:00:00Z");
         db_fleet_sync_fail(&conn, "wq-test-004", false);
-        let status: String = conn.query_row(
-            "SELECT status FROM fleet_tasks WHERE id='wq-test-004'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM fleet_tasks WHERE id='wq-test-004'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "open");
     }
 
@@ -1400,11 +1520,13 @@ mod tests {
         db_fleet_sync_claim(&conn, "wq-test-005", "hermes", "2026-04-26T00:00:00Z");
         db_fleet_sync_keepalive(&conn, "wq-test-005");
         // Just verify it doesn't error and the row still exists
-        let status: String = conn.query_row(
-            "SELECT status FROM fleet_tasks WHERE id='wq-test-005'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM fleet_tasks WHERE id='wq-test-005'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "claimed");
     }
 
@@ -1417,11 +1539,13 @@ mod tests {
         db_fleet_sync_fail(&conn, "wq-NONEXISTENT", false);
         db_fleet_sync_keepalive(&conn, "wq-NONEXISTENT");
         // The real row should be unchanged
-        let status: String = conn.query_row(
-            "SELECT status FROM fleet_tasks WHERE id='wq-test-006'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM fleet_tasks WHERE id='wq-test-006'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "open");
     }
 }

@@ -7,12 +7,20 @@ async fn create_project(ts: &helpers::TestServer, name: &str) -> serde_json::Val
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/projects", &json!({"name": name})),
-    ).await;
-    assert_eq!(resp.status(), StatusCode::CREATED, "create_project({name}) failed");
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::CREATED,
+        "create_project({name}) failed"
+    );
     helpers::body_json(resp).await["project"].clone()
 }
 
-async fn create_project_with(ts: &helpers::TestServer, body: serde_json::Value) -> serde_json::Value {
+async fn create_project_with(
+    ts: &helpers::TestServer,
+    body: serde_json::Value,
+) -> serde_json::Value {
     let resp = helpers::call(&ts.app, helpers::post_json("/api/projects", &body)).await;
     assert_eq!(resp.status(), StatusCode::CREATED);
     helpers::body_json(resp).await["project"].clone()
@@ -64,8 +72,16 @@ async fn test_list_filter_by_status() {
 #[tokio::test]
 async fn test_list_filter_by_tag() {
     let ts = helpers::TestServer::new().await;
-    create_project_with(&ts, json!({"name": "Rust project", "tags": ["rust", "backend"]})).await;
-    create_project_with(&ts, json!({"name": "Frontend app", "tags": ["js", "frontend"]})).await;
+    create_project_with(
+        &ts,
+        json!({"name": "Rust project", "tags": ["rust", "backend"]}),
+    )
+    .await;
+    create_project_with(
+        &ts,
+        json!({"name": "Frontend app", "tags": ["js", "frontend"]}),
+    )
+    .await;
 
     let resp = helpers::call(&ts.app, helpers::get("/api/projects?tag=rust")).await;
     let body = helpers::body_json(resp).await;
@@ -132,20 +148,21 @@ async fn test_create_project_requires_auth() {
     use axum::body::Body;
     use axum::http::Request;
     let req = Request::builder()
-        .method("POST").uri("/api/projects")
+        .method("POST")
+        .uri("/api/projects")
         .header("Content-Type", "application/json")
         .body(Body::from(json!({"name": "Test"}).to_string()))
         .unwrap();
-    assert_eq!(helpers::call(&ts.app, req).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        helpers::call(&ts.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
 async fn test_create_project_name_required() {
     let ts = helpers::TestServer::new().await;
-    let resp = helpers::call(
-        &ts.app,
-        helpers::post_json("/api/projects", &json!({})),
-    ).await;
+    let resp = helpers::call(&ts.app, helpers::post_json("/api/projects", &json!({}))).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -175,8 +192,12 @@ async fn test_update_project() {
 
     let resp = helpers::call(
         &ts.app,
-        helpers::patch_json(&format!("/api/projects/{id}"), &json!({"description": "Updated!"})),
-    ).await;
+        helpers::patch_json(
+            &format!("/api/projects/{id}"),
+            &json!({"description": "Updated!"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -189,7 +210,8 @@ async fn test_update_project_not_found() {
     let resp = helpers::call(
         &ts.app,
         helpers::patch_json("/api/projects/no-such-id", &json!({"description": "nope"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -231,7 +253,8 @@ async fn test_hard_delete_removes_project() {
     let resp = helpers::call(
         &ts.app,
         helpers::delete(&format!("/api/projects/{id}?hard=true")),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -249,6 +272,7 @@ async fn test_hard_delete_not_found() {
     let resp = helpers::call(
         &ts.app,
         helpers::delete("/api/projects/no-such-id?hard=true"),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

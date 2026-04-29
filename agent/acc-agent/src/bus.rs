@@ -19,9 +19,9 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use tokio::time::sleep;
 
-use acc_client::Client;
 use crate::config::Config;
 use crate::exec_registry;
+use acc_client::Client;
 
 #[derive(Debug, Deserialize)]
 struct BusMessage {
@@ -83,17 +83,20 @@ pub async fn run(args: &[String]) {
 
     let _ = std::fs::create_dir_all(cfg.acc_dir.join("logs"));
 
-    log(&cfg, &format!(
-        "Starting (agent={}, hub={})",
-        cfg.agent_name, cfg.acc_url
-    ));
+    log(
+        &cfg,
+        &format!("Starting (agent={}, hub={})", cfg.agent_name, cfg.acc_url),
+    );
 
     let client = build_client(&cfg);
     let mut retry_delay = Duration::from_secs(5);
 
     loop {
         listen_once(&cfg, &client).await;
-        log(&cfg, &format!("SSE disconnected — reconnecting in {retry_delay:?}"));
+        log(
+            &cfg,
+            &format!("SSE disconnected — reconnecting in {retry_delay:?}"),
+        );
         sleep(retry_delay).await;
         retry_delay = (retry_delay * 2).min(Duration::from_secs(120));
     }
@@ -151,7 +154,10 @@ async fn dispatch(cfg: &Config, client: &Client, raw_json: &str) {
             log(cfg, &format!("ping from {from}"));
         }
         "project.arrived" | "queue.item.created" | "work.available" => {
-            log(cfg, &format!("work signal: {msg_type} (handled by queue worker's SSE subscriber)"));
+            log(
+                cfg,
+                &format!("work signal: {msg_type} (handled by queue worker's SSE subscriber)"),
+            );
         }
         "bus.blob_ready" => handle_blob_ready(cfg, &msg),
         "heartbeat" | "queue_sync" | "pong" | "handoff" | "blob" | "status-response" => {}
@@ -164,7 +170,8 @@ async fn dispatch(cfg: &Config, client: &Client, raw_json: &str) {
 
 async fn handle_user_request(cfg: &Config, client: &Client, msg: &BusMessage) {
     let body = msg.body.as_ref().cloned().unwrap_or_default();
-    let request_id = body.get("request_id")
+    let request_id = body
+        .get("request_id")
         .or_else(|| body.get("id"))
         .and_then(|v| v.as_str())
         .unwrap_or_default()
@@ -176,16 +183,26 @@ async fn handle_user_request(cfg: &Config, client: &Client, msg: &BusMessage) {
     }
 
     if try_claim_request(cfg, client, &request_id).await {
-        log(cfg, &format!("user.request {request_id}: claimed — handling"));
+        log(
+            cfg,
+            &format!("user.request {request_id}: claimed — handling"),
+        );
     } else {
-        log(cfg, &format!("user.request {request_id}: already claimed by peer — backing off"));
+        log(
+            cfg,
+            &format!("user.request {request_id}: already claimed by peer — backing off"),
+        );
     }
 }
 
 async fn try_claim_request(cfg: &Config, client: &Client, request_id: &str) -> bool {
     let body = json!({"agent": cfg.agent_name});
     client
-        .request_json("POST", &format!("/api/requests/{request_id}/claim"), Some(&body))
+        .request_json(
+            "POST",
+            &format!("/api/requests/{request_id}/claim"),
+            Some(&body),
+        )
         .await
         .is_ok()
 }
@@ -216,11 +233,17 @@ async fn handle_update(cfg: &Config, msg: &BusMessage) {
         match &fetch {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                log(cfg, &format!("WARNING: git fetch failed (exit {s}) — aborting update"));
+                log(
+                    cfg,
+                    &format!("WARNING: git fetch failed (exit {s}) — aborting update"),
+                );
                 return;
             }
             Err(e) => {
-                log(cfg, &format!("WARNING: git fetch error: {e} — aborting update"));
+                log(
+                    cfg,
+                    &format!("WARNING: git fetch error: {e} — aborting update"),
+                );
                 return;
             }
         }
@@ -231,25 +254,35 @@ async fn handle_update(cfg: &Config, msg: &BusMessage) {
             .output()
             .await;
         let current_branch = match branch_out {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout).trim().to_string()
-            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
             _ => "main".to_string(),
         };
 
         // 3. git merge --ff-only origin/<branch> --quiet
         let merge = tokio::process::Command::new("git")
-            .args(["-C", ws, "merge", "--ff-only", &format!("origin/{current_branch}"), "--quiet"])
+            .args([
+                "-C",
+                ws,
+                "merge",
+                "--ff-only",
+                &format!("origin/{current_branch}"),
+                "--quiet",
+            ])
             .status()
             .await;
         match &merge {
-            Ok(s) if s.success() => log(cfg, &format!("git pull complete (branch={current_branch})")),
+            Ok(s) if s.success() => {
+                log(cfg, &format!("git pull complete (branch={current_branch})"))
+            }
             Ok(s) => {
                 log(cfg, &format!("WARNING: git merge --ff-only failed (exit {s}) — local changes? Skipping upgrade."));
                 return;
             }
             Err(e) => {
-                log(cfg, &format!("WARNING: git merge error: {e} — skipping upgrade"));
+                log(
+                    cfg,
+                    &format!("WARNING: git merge error: {e} — skipping upgrade"),
+                );
                 return;
             }
         }
@@ -272,7 +305,10 @@ fn handle_quench(cfg: &Config, msg: &BusMessage) {
 
     let until = chrono::Utc::now() + chrono::Duration::minutes(minutes as i64);
     let until_str = until.to_rfc3339();
-    log(cfg, &format!("acc.quench: pausing {minutes}min until {until_str} — {reason}"));
+    log(
+        cfg,
+        &format!("acc.quench: pausing {minutes}min until {until_str} — {reason}"),
+    );
     let _ = std::fs::write(cfg.quench_file(), &until_str);
 }
 
@@ -284,7 +320,8 @@ async fn handle_exec(cfg: &Config, client: &Client, msg: &BusMessage) {
         None => Value::Null,
     };
 
-    let exec_id = body.get("execId")
+    let exec_id = body
+        .get("execId")
         .or_else(|| body.get("id"))
         .and_then(|v| v.as_str())
         .unwrap_or_default()
@@ -299,7 +336,10 @@ async fn handle_exec(cfg: &Config, client: &Client, msg: &BusMessage) {
     if !cfg.agentbus_token.is_empty() {
         let sig = body.get("sig").and_then(|v| v.as_str()).unwrap_or_default();
         if sig.is_empty() {
-            log(cfg, &format!("acc.exec {exec_id}: missing HMAC sig — rejecting"));
+            log(
+                cfg,
+                &format!("acc.exec {exec_id}: missing HMAC sig — rejecting"),
+            );
             return;
         }
         let mut payload = body.clone();
@@ -308,20 +348,31 @@ async fn handle_exec(cfg: &Config, client: &Client, msg: &BusMessage) {
         }
         let expected = hmac_sign(&payload, &cfg.agentbus_token);
         if !bool::from(sig.as_bytes().ct_eq(expected.as_bytes())) {
-            log(cfg, &format!("acc.exec {exec_id}: HMAC mismatch — rejecting"));
+            log(
+                cfg,
+                &format!("acc.exec {exec_id}: HMAC mismatch — rejecting"),
+            );
             return;
         }
     }
 
-    let timeout_ms: u64 = body.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(30_000);
+    let timeout_ms: u64 = body
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30_000);
     let timeout_secs = (timeout_ms / 1000).max(1);
 
     // Target filter: body.targets must include our name or "all"
-    let targeted = body.get("targets")
+    let targeted = body
+        .get("targets")
         .and_then(|t| t.as_array())
-        .map(|arr| arr.iter().any(|v| {
-            v.as_str().map(|s| s == "all" || s == cfg.agent_name.as_str()).unwrap_or(false)
-        }))
+        .map(|arr| {
+            arr.iter().any(|v| {
+                v.as_str()
+                    .map(|s| s == "all" || s == cfg.agent_name.as_str())
+                    .unwrap_or(false)
+            })
+        })
         .unwrap_or(true);
 
     if !targeted {
@@ -337,26 +388,46 @@ async fn handle_exec(cfg: &Config, client: &Client, msg: &BusMessage) {
         let cmd = match registry.find(&cmd_name) {
             Some(c) => c.clone(),
             None => {
-                log(cfg, &format!("acc.exec {exec_id}: unknown command '{cmd_name}' — available: {:?}", registry.names()));
-                post_exec_result(client, cfg, &exec_id, &format!("unknown command: {cmd_name}"), 1).await;
+                log(
+                    cfg,
+                    &format!(
+                        "acc.exec {exec_id}: unknown command '{cmd_name}' — available: {:?}",
+                        registry.names()
+                    ),
+                );
+                post_exec_result(
+                    client,
+                    cfg,
+                    &exec_id,
+                    &format!("unknown command: {cmd_name}"),
+                    1,
+                )
+                .await;
                 return;
             }
         };
 
-        log(cfg, &format!("acc.exec {exec_id}: command={cmd_name} timeout={timeout_ms}ms"));
+        log(
+            cfg,
+            &format!("acc.exec {exec_id}: command={cmd_name} timeout={timeout_ms}ms"),
+        );
 
         let acc_dir = cfg.acc_dir.clone();
         let agent_name = cfg.agent_name.clone();
         let client = client.clone();
 
         tokio::spawn(async move {
-            let (output, exit_code) = exec_registry::execute(&cmd, &params, &acc_dir, timeout_secs).await;
+            let (output, exit_code) =
+                exec_registry::execute(&cmd, &params, &acc_dir, timeout_secs).await;
             post_result(&client, &exec_id, &agent_name, &output, exit_code).await;
         });
     } else if let Some(code) = body.get("code").and_then(|v| v.as_str()) {
-        log(cfg, &format!(
+        log(
+            cfg,
+            &format!(
             "acc.exec {exec_id}: DEPRECATED shell mode — migrate caller to use command registry"
-        ));
+        ),
+        );
         let code = code.to_string();
         let agent_name = cfg.agent_name.clone();
         let client = client.clone();
@@ -366,11 +437,20 @@ async fn handle_exec(cfg: &Config, client: &Client, msg: &BusMessage) {
             post_result(&client, &exec_id, &agent_name, &output, exit_code).await;
         });
     } else {
-        log(cfg, &format!("acc.exec {exec_id}: neither 'command' nor 'code' field present — skipping"));
+        log(
+            cfg,
+            &format!("acc.exec {exec_id}: neither 'command' nor 'code' field present — skipping"),
+        );
     }
 }
 
-async fn post_exec_result(client: &Client, cfg: &Config, exec_id: &str, output: &str, exit_code: i32) {
+async fn post_exec_result(
+    client: &Client,
+    cfg: &Config,
+    exec_id: &str,
+    output: &str,
+    exit_code: i32,
+) {
     post_result(client, exec_id, &cfg.agent_name, output, exit_code).await;
 }
 
@@ -424,8 +504,10 @@ async fn handle_soul_export(cfg: &Config, client: &Client) {
     // Build tar excluding large runtime dirs
     let tar_out = tokio::process::Command::new("tar")
         .args([
-            "-czf", &tar_path,
-            "-C", &home,
+            "-czf",
+            &tar_path,
+            "-C",
+            &home,
             "--exclude=.acc/workspace",
             "--exclude=.acc/logs",
             "--exclude=.acc/bin",
@@ -435,13 +517,23 @@ async fn handle_soul_export(cfg: &Config, client: &Client) {
             "--exclude=.ccc/bin",
         ])
         .arg(".hermes")
-        .arg(if std::path::Path::new(&format!("{home}/.acc")).exists() { ".acc" } else { ".ccc" })
+        .arg(if std::path::Path::new(&format!("{home}/.acc")).exists() {
+            ".acc"
+        } else {
+            ".ccc"
+        })
         .output()
         .await;
 
     match tar_out {
         Ok(o) if !o.status.success() => {
-            log(cfg, &format!("soul.export: tar failed: {}", String::from_utf8_lossy(&o.stderr)));
+            log(
+                cfg,
+                &format!(
+                    "soul.export: tar failed: {}",
+                    String::from_utf8_lossy(&o.stderr)
+                ),
+            );
             return;
         }
         Err(e) => {
@@ -453,7 +545,10 @@ async fn handle_soul_export(cfg: &Config, client: &Client) {
 
     let data = match tokio::fs::read(&tar_path).await {
         Ok(d) => d,
-        Err(e) => { log(cfg, &format!("soul.export: read failed: {e}")); return; }
+        Err(e) => {
+            log(cfg, &format!("soul.export: read failed: {e}"));
+            return;
+        }
     };
     let _ = tokio::fs::remove_file(&tar_path).await;
 
@@ -479,12 +574,25 @@ async fn handle_soul_import(cfg: &Config, msg: &BusMessage) {
     let body = msg.body.as_ref().cloned().unwrap_or_default();
     let new_name = match body.get("new_name").and_then(|v| v.as_str()) {
         Some(n) => n.to_string(),
-        None => { log(cfg, "soul.import: missing new_name"); return; }
+        None => {
+            log(cfg, "soul.import: missing new_name");
+            return;
+        }
     };
-    let new_token = body.get("new_token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let tar_hex = body.get("tar_gz_hex").and_then(|v| v.as_str()).unwrap_or("");
+    let new_token = body
+        .get("new_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let tar_hex = body
+        .get("tar_gz_hex")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
-    log(cfg, &format!("soul.import: receiving identity '{new_name}'"));
+    log(
+        cfg,
+        &format!("soul.import: receiving identity '{new_name}'"),
+    );
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
 
@@ -495,9 +603,14 @@ async fn handle_soul_import(cfg: &Config, msg: &BusMessage) {
                 let tar_path = format!("/tmp/acc-soul-import-{new_name}.tar.gz");
                 if tokio::fs::write(&tar_path, &tar_bytes).await.is_ok() {
                     let status = tokio::process::Command::new("tar")
-                        .args(["-xzf", &tar_path, "-C", &home,
-                               "--exclude=.acc/.env",  // we rewrite this below
-                               "--exclude=.ccc/.env"])
+                        .args([
+                            "-xzf",
+                            &tar_path,
+                            "-C",
+                            &home,
+                            "--exclude=.acc/.env", // we rewrite this below
+                            "--exclude=.ccc/.env",
+                        ])
                         .status()
                         .await;
                     let _ = tokio::fs::remove_file(&tar_path).await;
@@ -521,21 +634,31 @@ async fn handle_soul_import(cfg: &Config, msg: &BusMessage) {
     let env_path = format!("{acc_dir}/.env");
 
     if let Ok(current_env) = std::fs::read_to_string(&env_path) {
-        let updated: String = current_env.lines().map(|line| {
-            if line.starts_with("AGENT_NAME=") {
-                format!("AGENT_NAME={new_name}")
-            } else if !new_token.is_empty() &&
-                (line.starts_with("ACC_AGENT_TOKEN=") || line.starts_with("CCC_AGENT_TOKEN=")) {
-                let key = line.split('=').next().unwrap_or("ACC_AGENT_TOKEN");
-                format!("{key}={new_token}")
-            } else {
-                line.to_string()
-            }
-        }).collect::<Vec<_>>().join("\n") + "\n";
+        let updated: String = current_env
+            .lines()
+            .map(|line| {
+                if line.starts_with("AGENT_NAME=") {
+                    format!("AGENT_NAME={new_name}")
+                } else if !new_token.is_empty()
+                    && (line.starts_with("ACC_AGENT_TOKEN=")
+                        || line.starts_with("CCC_AGENT_TOKEN="))
+                {
+                    let key = line.split('=').next().unwrap_or("ACC_AGENT_TOKEN");
+                    format!("{key}={new_token}")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
         if let Err(e) = std::fs::write(&env_path, &updated) {
             log(cfg, &format!("soul.import: failed to write .env: {e}"));
         } else {
-            log(cfg, &format!("soul.import: updated .env (AGENT_NAME={new_name})"));
+            log(
+                cfg,
+                &format!("soul.import: updated .env (AGENT_NAME={new_name})"),
+            );
         }
     }
 
@@ -550,10 +673,14 @@ async fn handle_soul_import(cfg: &Config, msg: &BusMessage) {
         }
     }
 
-    log(cfg, &format!("soul.import: complete — restarting as '{new_name}'"));
+    log(
+        cfg,
+        &format!("soul.import: complete — restarting as '{new_name}'"),
+    );
 
     // Restart: exec the current binary with the same args so it re-reads .env
-    let current_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("acc-agent"));
+    let current_exe =
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("acc-agent"));
     let args: Vec<String> = std::env::args().collect();
     let _ = std::process::Command::new(&current_exe)
         .args(&args[1..])
@@ -563,7 +690,9 @@ async fn handle_soul_import(cfg: &Config, msg: &BusMessage) {
 
 /// The source agent received confirmation it has been moved — exit cleanly.
 fn handle_soul_decommission(cfg: &Config, msg: &BusMessage) {
-    let reason = msg.body.as_ref()
+    let reason = msg
+        .body
+        .as_ref()
         .and_then(|b| b.get("reason"))
         .and_then(|v| v.as_str())
         .unwrap_or("no reason given");
@@ -574,7 +703,10 @@ fn handle_soul_decommission(cfg: &Config, msg: &BusMessage) {
 fn handle_blob_ready(cfg: &Config, msg: &BusMessage) {
     let blob_id = msg.blob_id.as_deref().unwrap_or("?");
     let mime = msg.mime.as_deref().unwrap_or("unknown");
-    log(cfg, &format!("bus.blob_ready: blob_id={blob_id} mime={mime}"));
+    log(
+        cfg,
+        &format!("bus.blob_ready: blob_id={blob_id} mime={mime}"),
+    );
 }
 
 /// Decode a message payload, handling base64 for binary types.
@@ -584,15 +716,17 @@ fn decode_payload(msg: &BusMessage) -> Option<Vec<u8>> {
     let payload = msg.payload.as_deref()?;
     if msg.enc.as_deref() == Some("base64") {
         use base64::Engine;
-        base64::engine::general_purpose::STANDARD.decode(payload).ok()
+        base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .ok()
     } else {
         Some(payload.as_bytes().to_vec())
     }
 }
 
 fn hmac_sign(payload: &Value, secret: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key size");
     mac.update(payload.to_string().as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -727,7 +861,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = test_cfg_in_dir(dir.path(), "http://unused");
         let client = Client::new("http://unused", "test-tok").unwrap();
-        dispatch(&cfg, &client, &mk_event_body("acc.quench", "all", r#"{"minutes":5}"#)).await;
+        dispatch(
+            &cfg,
+            &client,
+            &mk_event_body("acc.quench", "all", r#"{"minutes":5}"#),
+        )
+        .await;
         assert!(cfg.quench_file().exists(), "quench file must be written");
     }
 
@@ -772,7 +911,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mock = crate::hub_mock::HubMock::with_sse(vec![
             serde_json::json!({"type":"ping","from":"hub","to":"all"}).to_string(),
-        ]).await;
+        ])
+        .await;
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = build_client(&cfg);
         listen_once(&cfg, &client).await;
@@ -788,7 +928,10 @@ mod tests {
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = build_client(&cfg);
         listen_once(&cfg, &client).await;
-        assert!(cfg.quench_file().exists(), "quench file must exist after acc.quench event");
+        assert!(
+            cfg.quench_file().exists(),
+            "quench file must exist after acc.quench event"
+        );
     }
 
     #[tokio::test]
@@ -796,7 +939,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mock = crate::hub_mock::HubMock::with_sse(vec![
             serde_json::json!({"type":"work.available","to":"all"}).to_string(),
-        ]).await;
+        ])
+        .await;
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = build_client(&cfg);
         listen_once(&cfg, &client).await;
@@ -809,7 +953,8 @@ mod tests {
         let mock = crate::hub_mock::HubMock::with_sse(vec![
             serde_json::json!({"type":"acc.quench","to":"all","body":{"minutes":5}}).to_string(),
             serde_json::json!({"type":"work.available","to":"all"}).to_string(),
-        ]).await;
+        ])
+        .await;
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = build_client(&cfg);
         listen_once(&cfg, &client).await;
@@ -821,7 +966,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mock = crate::hub_mock::HubMock::with_sse(vec![
             serde_json::json!({"type":"work.available","to":"boris"}).to_string(),
-        ]).await;
+        ])
+        .await;
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = build_client(&cfg);
         // must not panic; nothing observable for a message directed at another agent
@@ -834,7 +980,8 @@ mod tests {
         let mock = crate::hub_mock::HubMock::with_sse(vec![
             "not valid json at all".to_string(),
             serde_json::json!({"type":"work.available","to":"all"}).to_string(),
-        ]).await;
+        ])
+        .await;
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = build_client(&cfg);
         // must not panic on bad JSON; valid event after bad one is still processed
@@ -856,9 +1003,11 @@ mod tests {
     #[tokio::test]
     async fn test_try_claim_request_conflict() {
         use crate::hub_mock::HubState;
-        let mock = crate::hub_mock::HubMock::with_state(
-            HubState { request_claim_status: 409, ..Default::default() }
-        ).await;
+        let mock = crate::hub_mock::HubMock::with_state(HubState {
+            request_claim_status: 409,
+            ..Default::default()
+        })
+        .await;
         let client = Client::new(&mock.url, "test-tok").unwrap();
         let cfg = test_cfg_in_dir(&tempfile::tempdir().unwrap().into_path(), &mock.url);
         let claimed = try_claim_request(&cfg, &client, "req-abc").await;
@@ -872,19 +1021,31 @@ mod tests {
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = Client::new(&mock.url, "test-tok").unwrap();
         // Claim succeeds — bus daemon logs; queue worker's SSE subscriber handles the wakeup.
-        dispatch(&cfg, &client, r#"{"type":"user.request","to":"all","body":{"request_id":"req-123"}}"#).await;
+        dispatch(
+            &cfg,
+            &client,
+            r#"{"type":"user.request","to":"all","body":{"request_id":"req-123"}}"#,
+        )
+        .await;
     }
 
     #[tokio::test]
     async fn test_dispatch_user_request_409_no_panic() {
         use crate::hub_mock::HubState;
         let dir = tempfile::tempdir().unwrap();
-        let mock = crate::hub_mock::HubMock::with_state(
-            HubState { request_claim_status: 409, ..Default::default() }
-        ).await;
+        let mock = crate::hub_mock::HubMock::with_state(HubState {
+            request_claim_status: 409,
+            ..Default::default()
+        })
+        .await;
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = Client::new(&mock.url, "test-tok").unwrap();
-        dispatch(&cfg, &client, r#"{"type":"user.request","to":"all","body":{"request_id":"req-456"}}"#).await;
+        dispatch(
+            &cfg,
+            &client,
+            r#"{"type":"user.request","to":"all","body":{"request_id":"req-456"}}"#,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -894,7 +1055,12 @@ mod tests {
         let cfg = test_cfg_in_dir(dir.path(), &mock.url);
         let client = Client::new(&mock.url, "test-tok").unwrap();
         // body without request_id — should log and return silently
-        dispatch(&cfg, &client, r#"{"type":"user.request","to":"all","body":{}}"#).await;
+        dispatch(
+            &cfg,
+            &client,
+            r#"{"type":"user.request","to":"all","body":{}}"#,
+        )
+        .await;
     }
 
     // ── post_result hub mock tests ────────────────────────────────────────────

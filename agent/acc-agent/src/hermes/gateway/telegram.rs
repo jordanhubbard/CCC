@@ -1,11 +1,11 @@
+use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tracing::Instrument;
 
-use super::session::SessionStore;
 use super::super::agent::HermesAgent;
+use super::session::SessionStore;
 use acc_client::Client;
 
 fn new_trace_id() -> String {
@@ -44,7 +44,9 @@ impl TelegramAdapter {
         client: Client,
     ) -> Option<Self> {
         let token = std::env::var("TELEGRAM_BOT_TOKEN").ok()?;
-        if token.is_empty() { return None; }
+        if token.is_empty() {
+            return None;
+        }
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -57,8 +59,12 @@ impl TelegramAdapter {
         tracing::info!("[telegram] connected as @{bot_username}");
 
         Some(Self {
-            token, bot_username, http, client,
-            sessions, agent,
+            token,
+            bot_username,
+            http,
+            client,
+            sessions,
+            agent,
             active: Arc::new(Mutex::new(std::collections::HashMap::new())),
         })
     }
@@ -92,7 +98,8 @@ impl TelegramAdapter {
     }
 
     async fn poll(&self, offset: i64) -> Result<Vec<Value>, String> {
-        let resp = self.http
+        let resp = self
+            .http
             .get(self.api_url("getUpdates"))
             .query(&[("timeout", "30"), ("offset", &offset.to_string())])
             .timeout(std::time::Duration::from_secs(35))
@@ -101,7 +108,10 @@ impl TelegramAdapter {
             .map_err(|e| e.to_string())?;
         let body: Value = resp.json().await.map_err(|e| e.to_string())?;
         if !body["ok"].as_bool().unwrap_or(false) {
-            return Err(format!("telegram error: {}", body["description"].as_str().unwrap_or("?")));
+            return Err(format!(
+                "telegram error: {}",
+                body["description"].as_str().unwrap_or("?")
+            ));
         }
         Ok(body["result"].as_array().cloned().unwrap_or_default())
     }
@@ -173,13 +183,17 @@ impl TelegramAdapter {
                 (false, String::new())
             }
         };
-        if !should_respond || text_clean.is_empty() { return; }
+        if !should_respond || text_clean.is_empty() {
+            return;
+        }
 
         // Handle /reset command.
         if text_clean.trim() == "/reset" || text_clean.trim() == "/start" {
             let key = session_key(chat_id, from_id, chat_type);
             self.sessions.clear(&key).await;
-            let _ = self.send_message(chat_id, None, "Conversation reset.").await;
+            let _ = self
+                .send_message(chat_id, None, "Conversation reset.")
+                .await;
             self.record_chain_event(
                 &chain_id,
                 json!({"id": chain_id, "source": "telegram", "workspace": "telegram", "channel_id": chat_id.to_string(), "thread_id": root_id.to_string()}),
@@ -200,7 +214,9 @@ impl TelegramAdapter {
         // Serialize turns per session.
         let lock = {
             let mut map = self.active.lock().await;
-            map.entry(session_key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+            map.entry(session_key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
         };
         let _guard = lock.lock().await;
 
@@ -213,7 +229,8 @@ impl TelegramAdapter {
         );
 
         let mut history = self.sessions.load_history(&session_key).await;
-        let response = self.agent
+        let response = self
+            .agent
             .run_gateway_turn(&mut history, &text_clean, GATEWAY_SYSTEM)
             .instrument(span)
             .await;
@@ -248,7 +265,9 @@ impl TelegramAdapter {
         };
         let message_id = reaction["message_id"].as_i64().unwrap_or(0);
         let user_id = reaction["user"]["id"].as_i64().unwrap_or(0);
-        if message_id == 0 || user_id == 0 { return; }
+        if message_id == 0 || user_id == 0 {
+            return;
+        }
         let chain_id = telegram_chain_id(chat_id, message_id);
         let emoji = reaction["new_reaction"]
             .as_array()
@@ -278,7 +297,8 @@ impl TelegramAdapter {
                     "emoji": emoji
                 }
             }),
-        ).await;
+        )
+        .await;
     }
 
     async fn record_chain_event(&self, chain_id: &str, chain: Value, event: Value) {
@@ -291,7 +311,12 @@ impl TelegramAdapter {
         }
     }
 
-    async fn send_message(&self, chat_id: i64, reply_to: Option<i64>, text: &str) -> Result<(), String> {
+    async fn send_message(
+        &self,
+        chat_id: i64,
+        reply_to: Option<i64>,
+        text: &str,
+    ) -> Result<(), String> {
         let mut body = serde_json::json!({
             "chat_id": chat_id,
             "text": text,
@@ -300,7 +325,8 @@ impl TelegramAdapter {
         if let Some(id) = reply_to {
             body["reply_to_message_id"] = serde_json::json!(id);
         }
-        let resp = self.http
+        let resp = self
+            .http
             .post(self.api_url("sendMessage"))
             .json(&body)
             .send()
@@ -309,12 +335,25 @@ impl TelegramAdapter {
         let result: Value = resp.json().await.map_err(|e| e.to_string())?;
         if !result["ok"].as_bool().unwrap_or(false) {
             // If Markdown fails, retry as plain text.
-            if result["description"].as_str().map_or(false, |d| d.contains("parse")) {
+            if result["description"]
+                .as_str()
+                .map_or(false, |d| d.contains("parse"))
+            {
                 let mut plain = body.clone();
-                if let Some(obj) = plain.as_object_mut() { obj.remove("parse_mode"); }
-                let _ = self.http.post(self.api_url("sendMessage")).json(&plain).send().await;
+                if let Some(obj) = plain.as_object_mut() {
+                    obj.remove("parse_mode");
+                }
+                let _ = self
+                    .http
+                    .post(self.api_url("sendMessage"))
+                    .json(&plain)
+                    .send()
+                    .await;
             }
-            return Err(format!("telegram send error: {}", result["description"].as_str().unwrap_or("?")));
+            return Err(format!(
+                "telegram send error: {}",
+                result["description"].as_str().unwrap_or("?")
+            ));
         }
         Ok(())
     }
@@ -379,7 +418,8 @@ fn split_message(text: &str, limit: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut remaining = text;
     while remaining.len() > limit {
-        let split_at = remaining[..limit].rfind("\n\n")
+        let split_at = remaining[..limit]
+            .rfind("\n\n")
             .or_else(|| remaining[..limit].rfind('\n'))
             .or_else(|| remaining[..limit].rfind(". "))
             .unwrap_or(limit);

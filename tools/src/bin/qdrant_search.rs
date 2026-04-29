@@ -42,8 +42,7 @@ async fn main() {
     let qdrant_url =
         std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
     let api_key = acc_tools::resolve_qdrant_api_key();
-    let qdrant =
-        QdrantClient::new(&qdrant_url, api_key.as_deref()).expect("qdrant client");
+    let qdrant = QdrantClient::new(&qdrant_url, api_key.as_deref()).expect("qdrant client");
 
     if args.stats {
         show_stats(&qdrant).await;

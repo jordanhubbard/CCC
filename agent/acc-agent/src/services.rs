@@ -78,7 +78,10 @@ pub async fn restart(def: &ServiceDef, log: impl Fn(&str)) -> Result<(), String>
             .unwrap_or_else(|_| "501".to_string());
         let uid = uid_out.trim();
         let target = format!("gui/{}/{}", uid, def.macos_label);
-        log(&format!("restarting {} via launchctl kickstart -k {}", def.name, target));
+        log(&format!(
+            "restarting {} via launchctl kickstart -k {}",
+            def.name, target
+        ));
         let result = tokio::time::timeout(
             timeout,
             tokio::process::Command::new("launchctl")
@@ -97,7 +100,10 @@ pub async fn restart(def: &ServiceDef, log: impl Fn(&str)) -> Result<(), String>
     #[cfg(not(target_os = "macos"))]
     {
         // Linux: systemctl restart <unit>
-        log(&format!("restarting {} via systemctl restart {}", def.name, def.linux_unit));
+        log(&format!(
+            "restarting {} via systemctl restart {}",
+            def.name, def.linux_unit
+        ));
         let result = tokio::time::timeout(
             timeout,
             tokio::process::Command::new("systemctl")

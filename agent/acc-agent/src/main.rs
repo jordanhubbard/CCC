@@ -2,11 +2,11 @@ mod agent;
 mod bus;
 mod cli_sanity;
 mod cli_tmux_adapter;
-#[cfg(test)]
-mod hub_mock;
 mod config;
 mod exec_registry;
 mod hermes;
+#[cfg(test)]
+mod hub_mock;
 mod json;
 mod log_init;
 mod migrate;
@@ -14,9 +14,9 @@ mod peers;
 mod proxy;
 mod queue;
 mod sdk;
+mod services;
 mod session_discovery;
 mod session_registry;
-mod services;
 mod slack_ingest;
 mod supervise;
 mod tasks;
@@ -77,7 +77,9 @@ fn print_help() {
     eprintln!("  acc-agent hermes  (hermes session driver)");
     eprintln!("  acc-agent proxy   (long-running daemon: NVIDIA header-strip proxy)");
     eprintln!("  acc-agent tasks     [--max=N]    (long-running daemon: fleet task worker)");
-    eprintln!("  acc-agent slack-ingest [--once]  (long-running daemon: Slack→Qdrant memory ingest)");
+    eprintln!(
+        "  acc-agent slack-ingest [--once]  (long-running daemon: Slack→Qdrant memory ingest)"
+    );
     eprintln!("  acc-agent supervise [--dry-run]  (master supervisor: spawns all children)");
     eprintln!();
     eprintln!("MIGRATE:");

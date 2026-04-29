@@ -4,9 +4,9 @@
 //! Calls /v1/messages via reqwest, loops on tool_use until end_turn,
 //! implementing bash and str_replace_editor tool execution in-process.
 
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use serde_json::{json, Value};
 
 const MAX_TURNS: u32 = 60;
 const BASH_TIMEOUT_DEFAULT: u64 = 60;
@@ -25,14 +25,17 @@ pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String>
         .map_err(|e| format!("http client: {e}"))?;
     let api_base = std::env::var("ANTHROPIC_BASE_URL")
         .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
-    let api_base = api_base.trim_end_matches('/').trim_end_matches("/v1").to_string();
+    let api_base = api_base
+        .trim_end_matches('/')
+        .trim_end_matches("/v1")
+        .to_string();
 
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .or_else(|_| std::env::var("NVIDIA_API_KEY"))
         .unwrap_or_default();
 
-    let model = std::env::var("CLAUDE_CODE_DEFAULT_MODEL")
-        .unwrap_or_else(|_| MODEL_DEFAULT.to_string());
+    let model =
+        std::env::var("CLAUDE_CODE_DEFAULT_MODEL").unwrap_or_else(|_| MODEL_DEFAULT.to_string());
 
     let ws_str = workspace.display().to_string();
     let system = format!(
@@ -107,10 +110,15 @@ pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String>
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("API error {status}: {}", &text[..text.len().min(400)]));
+            return Err(format!(
+                "API error {status}: {}",
+                &text[..text.len().min(400)]
+            ));
         }
 
-        let response: Value = resp.json().await
+        let response: Value = resp
+            .json()
+            .await
             .map_err(|e| format!("response parse error: {e}"))?;
 
         let stop_reason = response["stop_reason"].as_str().unwrap_or("").to_string();
@@ -177,7 +185,7 @@ pub async fn run_agent(prompt: &str, workspace: &Path) -> Result<String, String>
             let tool_started = std::time::Instant::now();
             let (content, is_error) = match dispatch_tool(name, input, workspace).await {
                 Ok(out) => (out, false),
-                Err(e)  => (e,   true),
+                Err(e) => (e, true),
             };
             let tool_ms = tool_started.elapsed().as_millis();
             if is_error {
@@ -231,9 +239,9 @@ fn log_run_done(
 
 async fn dispatch_tool(name: &str, input: &Value, workspace: &Path) -> Result<String, String> {
     match name {
-        "bash"              => run_bash(input, workspace).await,
+        "bash" => run_bash(input, workspace).await,
         "str_replace_editor" => run_editor(input, workspace),
-        _                  => Err(format!("unknown tool '{name}'")),
+        _ => Err(format!("unknown tool '{name}'")),
     }
 }
 
@@ -258,13 +266,21 @@ async fn run_bash(input: &Value, workspace: &Path) -> Result<String, String> {
     let code = result.status.code().unwrap_or(-1);
 
     let mut out = String::new();
-    if !stdout.is_empty() { out.push_str(&stdout); }
+    if !stdout.is_empty() {
+        out.push_str(&stdout);
+    }
     if !stderr.is_empty() {
-        if !out.is_empty() { out.push('\n'); }
+        if !out.is_empty() {
+            out.push('\n');
+        }
         out.push_str(&stderr);
     }
-    if out.is_empty() { out.push_str("(no output)"); }
-    if code != 0 { out.push_str(&format!("\n[exit {code}]")); }
+    if out.is_empty() {
+        out.push_str("(no output)");
+    }
+    if code != 0 {
+        out.push_str(&format!("\n[exit {code}]"));
+    }
     Ok(out)
 }
 
@@ -284,7 +300,7 @@ fn run_editor(input: &Value, workspace: &Path) -> Result<String, String> {
                 .map_err(|e| format!("cannot read '{rel_path}': {e}"))?;
             if let Some(range) = input["view_range"].as_array() {
                 let start = range.first().and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-                let end   = range.get(1).and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
+                let end = range.get(1).and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as usize;
                 let lines: Vec<&str> = content.lines().collect();
                 let s = start.saturating_sub(1);
                 let e = end.min(lines.len());
@@ -296,11 +312,9 @@ fn run_editor(input: &Value, workspace: &Path) -> Result<String, String> {
         "create" => {
             let text = input["file_text"].as_str().unwrap_or("");
             if let Some(parent) = abs.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("mkdir failed: {e}"))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("mkdir failed: {e}"))?;
             }
-            std::fs::write(&abs, text)
-                .map_err(|e| format!("write failed: {e}"))?;
+            std::fs::write(&abs, text).map_err(|e| format!("write failed: {e}"))?;
             Ok(format!("Created '{rel_path}'"))
         }
         "str_replace" => {
@@ -316,19 +330,20 @@ fn run_editor(input: &Value, workspace: &Path) -> Result<String, String> {
                         .map_err(|e| format!("write failed: {e}"))?;
                     Ok(format!("Replaced in '{rel_path}'"))
                 }
-                n => Err(format!("{n} matches in '{rel_path}' — make old_str more specific")),
+                n => Err(format!(
+                    "{n} matches in '{rel_path}' — make old_str more specific"
+                )),
             }
         }
         "insert" => {
             let line_num = input["insert_line"].as_u64().unwrap_or(0) as usize;
-            let new_str  = input["new_str_insert"].as_str().unwrap_or("");
-            let content  = std::fs::read_to_string(&abs)
+            let new_str = input["new_str_insert"].as_str().unwrap_or("");
+            let content = std::fs::read_to_string(&abs)
                 .map_err(|e| format!("cannot read '{rel_path}': {e}"))?;
             let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
             let at = line_num.min(lines.len());
             lines.insert(at, new_str.to_string());
-            std::fs::write(&abs, lines.join("\n"))
-                .map_err(|e| format!("write failed: {e}"))?;
+            std::fs::write(&abs, lines.join("\n")).map_err(|e| format!("write failed: {e}"))?;
             Ok(format!("Inserted at line {at} in '{rel_path}'"))
         }
         "undo_edit" => Ok("undo_edit not supported; use str_replace to correct the file".into()),

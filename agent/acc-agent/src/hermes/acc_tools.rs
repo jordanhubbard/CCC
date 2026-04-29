@@ -246,11 +246,7 @@ impl Tool for AccTasksMineTool {
         input: Value,
     ) -> Pin<Box<dyn Future<Output = ToolResult> + Send + 'a>> {
         Box::pin(async move {
-            let mut b = self
-                .client
-                .tasks()
-                .list()
-                .agent(self.agent_name.clone());
+            let mut b = self.client.tasks().list().agent(self.agent_name.clone());
             if let Some(s) = input["status"].as_str().filter(|s| !s.is_empty()) {
                 b = b.status(parse_status(s)?);
             }

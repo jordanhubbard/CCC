@@ -121,7 +121,7 @@ impl AppState {
         // Check user tokens (SHA-256 hash of the bearer token)
         let token = self.bearer_token(headers);
         if !token.is_empty() {
-            use sha2::{Sha256, Digest};
+            use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
             hasher.update(token.as_bytes());
             let hash = hex::encode(hasher.finalize());
@@ -142,7 +142,7 @@ impl AppState {
 /// Load all in-memory state from fleet_db (SQLite single source of truth).
 pub async fn load_all(state: &Arc<AppState>) {
     let conn = state.fleet_db.lock().await;
-    *state.agents.write().await  = crate::db::db_load_agents(&conn);
+    *state.agents.write().await = crate::db::db_load_agents(&conn);
     let mut items = crate::db::db_load_queue_items(&conn);
     let completed = crate::db::db_load_queue_completed(&conn);
 
@@ -180,12 +180,12 @@ pub async fn load_all(state: &Arc<AppState>) {
         }
     }
 
-    *state.queue.write().await   = QueueData { items, completed };
+    *state.queue.write().await = QueueData { items, completed };
     *state.secrets.write().await = crate::db::db_load_secrets(&conn);
     *state.projects.write().await = crate::db::db_load_projects(&conn);
 
     // Load vault persistence data (salt + encrypted blobs).
-    let vault_salt  = crate::db::db_load_vault_salt(&conn);
+    let vault_salt = crate::db::db_load_vault_salt(&conn);
     let vault_blobs = crate::db::db_load_vault_blobs(&conn);
     drop(conn);
 

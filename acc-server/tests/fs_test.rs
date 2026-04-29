@@ -1,11 +1,15 @@
 mod helpers;
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::json;
 
 fn no_auth_get(path: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(path).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap()
 }
 
 fn no_auth_post_json(path: &str, body: &serde_json::Value) -> Request<Body> {
@@ -18,14 +22,19 @@ fn no_auth_post_json(path: &str, body: &serde_json::Value) -> Request<Body> {
 }
 
 fn head_req(path: &str) -> Request<Body> {
-    Request::builder().method("HEAD").uri(path).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("HEAD")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap()
 }
 
 async fn write_file(srv: &helpers::TestServer, path: &str, content: &str) {
     let resp = helpers::call(
         &srv.app,
         no_auth_post_json("/api/fs/write", &json!({"path": path, "content": content})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK, "write_file({path}) failed");
 }
 
@@ -47,11 +56,15 @@ async fn test_write_creates_parent_dirs() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        no_auth_post_json("/api/fs/write", &json!({
-            "path": "deep/nested/dir/file.txt",
-            "content": "nested"
-        })),
-    ).await;
+        no_auth_post_json(
+            "/api/fs/write",
+            &json!({
+                "path": "deep/nested/dir/file.txt",
+                "content": "nested"
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -64,8 +77,12 @@ async fn test_write_returns_size() {
     let content = "twelve bytes";
     let resp = helpers::call(
         &ts.app,
-        no_auth_post_json("/api/fs/write", &json!({"path": "size.txt", "content": content})),
-    ).await;
+        no_auth_post_json(
+            "/api/fs/write",
+            &json!({"path": "size.txt", "content": content}),
+        ),
+    )
+    .await;
     let body = helpers::body_json(resp).await;
     assert_eq!(body["size"], content.len() as i64);
 }
@@ -91,8 +108,12 @@ async fn test_write_dotdot_rejected() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        no_auth_post_json("/api/fs/write", &json!({"path": "../escape.txt", "content": "evil"})),
-    ).await;
+        no_auth_post_json(
+            "/api/fs/write",
+            &json!({"path": "../escape.txt", "content": "evil"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -101,15 +122,23 @@ async fn test_write_absolute_path_rejected() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        no_auth_post_json("/api/fs/write", &json!({"path": "/tmp/escape.txt", "content": "evil"})),
-    ).await;
+        no_auth_post_json(
+            "/api/fs/write",
+            &json!({"path": "/tmp/escape.txt", "content": "evil"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
 async fn test_delete_dotdot_rejected() {
     let ts = helpers::TestServer::new().await;
-    let resp = helpers::call(&ts.app, helpers::delete("/api/fs/delete?path=../etc/passwd")).await;
+    let resp = helpers::call(
+        &ts.app,
+        helpers::delete("/api/fs/delete?path=../etc/passwd"),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -257,7 +286,11 @@ async fn test_delete_with_auth_removes_file() {
     let ts = helpers::TestServer::new().await;
     write_file(&ts, "deletable.txt", "bye").await;
 
-    let resp = helpers::call(&ts.app, helpers::delete("/api/fs/delete?path=deletable.txt")).await;
+    let resp = helpers::call(
+        &ts.app,
+        helpers::delete("/api/fs/delete?path=deletable.txt"),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(helpers::body_json(resp).await["ok"], true);
 

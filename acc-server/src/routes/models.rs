@@ -1,3 +1,4 @@
+use crate::AppState;
 /// /routes/models.rs — Model deployment orchestration API
 ///
 /// POST /api/models/deploy
@@ -10,7 +11,6 @@
 ///
 /// GET /api/models/current
 ///   Returns current model running on each Sweden node (via their tunnels).
-
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -24,7 +24,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use crate::AppState;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -82,7 +81,11 @@ async fn trigger_deploy(
     Json(body): Json<DeployRequest>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     // Validate model_id is non-empty and looks like a HF model path
@@ -105,22 +108,22 @@ async fn trigger_deploy(
     let dry_run = body.dry_run.unwrap_or(false);
 
     // Generate deploy ID
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     let deploy_id = format!("deploy-{}", ts);
 
     // Find the model-deploy.mjs script
-    let script_path = std::env::var("DEPLOY_SCRIPT")
-        .unwrap_or_else(|_| {
-            // Try relative paths from common locations
-            let candidates = [
-                "../scripts/model-deploy.mjs",
-                "./scripts/model-deploy.mjs",
-            ];
-            candidates.iter()
-                .find(|p| std::path::Path::new(p).exists())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "..ccc/scripts/model-deploy.mjs".to_string())
-        });
+    let script_path = std::env::var("DEPLOY_SCRIPT").unwrap_or_else(|_| {
+        // Try relative paths from common locations
+        let candidates = ["../scripts/model-deploy.mjs", "./scripts/model-deploy.mjs"];
+        candidates
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "..ccc/scripts/model-deploy.mjs".to_string())
+    });
 
     // Build args
     let mut args = vec![
@@ -135,12 +138,22 @@ async fn trigger_deploy(
     }
 
     // Spawn the orchestration script in background
-    let env_token = state.secrets.read().await
-        .get("ACC_AGENT_TOKEN").cloned()
-        .map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_else(|| std::env::var("ACC_AGENT_TOKEN").unwrap_or_default());
-    let hf_token = state.secrets.read().await
-        .get("HF_TOKEN").cloned()
-        .map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_else(|| std::env::var("HF_TOKEN").unwrap_or_default());
+    let env_token = state
+        .secrets
+        .read()
+        .await
+        .get("ACC_AGENT_TOKEN")
+        .cloned()
+        .map(|v| v.as_str().unwrap_or("").to_string())
+        .unwrap_or_else(|| std::env::var("ACC_AGENT_TOKEN").unwrap_or_default());
+    let hf_token = state
+        .secrets
+        .read()
+        .await
+        .get("HF_TOKEN")
+        .cloned()
+        .map(|v| v.as_str().unwrap_or("").to_string())
+        .unwrap_or_else(|| std::env::var("HF_TOKEN").unwrap_or_default());
 
     let log_path = format!("/tmp/model-deploy-{}.log", deploy_id);
     let log_path_clone = log_path.clone();
@@ -161,13 +174,20 @@ async fn trigger_deploy(
             .env("ACC_AGENT_TOKEN", &env_token)
             .env("HF_TOKEN", &hf_token)
             .env("DEPLOY_ITEM_ID", "")
-            .env("ACC_URL", std::env::var("ACC_URL").unwrap_or_else(|_| "http://localhost:8789".to_string()))
+            .env(
+                "ACC_URL",
+                std::env::var("ACC_URL").unwrap_or_else(|_| "http://localhost:8789".to_string()),
+            )
             .stdout(stdio)
             .stderr(std::process::Stdio::null());
 
         match cmd.spawn() {
             Ok(mut child) => {
-                tracing::info!("model-deploy: spawned pid={:?} for deploy_id={}", child.id(), deploy_id_clone);
+                tracing::info!(
+                    "model-deploy: spawned pid={:?} for deploy_id={}",
+                    child.id(),
+                    deploy_id_clone
+                );
                 let _ = child.wait().await;
             }
             Err(e) => {
@@ -189,7 +209,8 @@ async fn trigger_deploy(
             "Deploy started. Follow with: GET /api/models/deploy/{}. Log: {}",
             deploy_id, log_path
         )
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// GET /api/models/deploy/:id
@@ -200,7 +221,11 @@ async fn get_deploy_status(
     Path(deploy_id): Path<String>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     let log_path = format!("/tmp/model-deploy-{}.log", deploy_id);
@@ -232,7 +257,8 @@ async fn get_deploy_status(
         "log_lines": lines.len(),
         "log_tail": lines.iter().rev().take(20).rev().collect::<Vec<_>>(),
         "log_path": log_path,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// GET /api/models/current
@@ -242,15 +268,19 @@ async fn current_models(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     let agents = [
-        ("boris",   18080u16),
+        ("boris", 18080u16),
         ("peabody", 18081),
         ("sherman", 18082),
         ("snidely", 18083),
-        ("dudley",  18084),
+        ("dudley", 18084),
     ];
 
     let client = reqwest::Client::builder()
@@ -262,17 +292,20 @@ async fn current_models(
     for (name, port) in &agents {
         let url = format!("http://127.0.0.1:{}/v1/models", port);
         let entry = match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<Value>().await {
-                    Ok(data) => {
-                        let models: Vec<String> = data["data"].as_array()
-                            .map(|a| a.iter().filter_map(|m| m["id"].as_str().map(String::from)).collect())
-                            .unwrap_or_default();
-                        json!({ "agent": name, "port": port, "status": "ok", "models": models })
-                    }
-                    Err(_) => json!({ "agent": name, "port": port, "status": "error", "models": [] }),
+            Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
+                Ok(data) => {
+                    let models: Vec<String> = data["data"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|m| m["id"].as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    json!({ "agent": name, "port": port, "status": "ok", "models": models })
                 }
-            }
+                Err(_) => json!({ "agent": name, "port": port, "status": "error", "models": [] }),
+            },
             _ => json!({ "agent": name, "port": port, "status": "unreachable", "models": [] }),
         };
         results.push(entry);

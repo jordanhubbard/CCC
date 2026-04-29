@@ -48,14 +48,14 @@ impl LlmConfig {
             "LLM_KEY",
         ];
         Self {
-            base_url:           resolve(&text, &["OPENAI_BASE_URL", "LLM_URL", "HERMES_BACKEND_URL"]),
-            api_key:            resolve(&text, &["OPENAI_API_KEY", "LLM_KEY"]),
-            anthropic_key:      resolve(&text, &["ANTHROPIC_API_KEY"]),
+            base_url: resolve(&text, &["OPENAI_BASE_URL", "LLM_URL", "HERMES_BACKEND_URL"]),
+            api_key: resolve(&text, &["OPENAI_API_KEY", "LLM_KEY"]),
+            anthropic_key: resolve(&text, &["ANTHROPIC_API_KEY"]),
             anthropic_base_url: resolve(&text, &["ANTHROPIC_BASE_URL"]),
-            model:              resolve(&text, &["OPENAI_MODEL", "HERMES_MODEL"]),
-            embed_url:          resolve(&text, &["NVIDIA_EMBED_URL", "EMBED_URL"]),
-            embed_key:          resolve(&text, embed_key_candidates),
-            embed_model:        resolve(&text, &["NVIDIA_EMBED_MODEL", "EMBED_MODEL"]),
+            model: resolve(&text, &["OPENAI_MODEL", "HERMES_MODEL"]),
+            embed_url: resolve(&text, &["NVIDIA_EMBED_URL", "EMBED_URL"]),
+            embed_key: resolve(&text, embed_key_candidates),
+            embed_model: resolve(&text, &["NVIDIA_EMBED_MODEL", "EMBED_MODEL"]),
         }
     }
 
@@ -134,7 +134,10 @@ mod tests {
         std::env::remove_var("_TEST_FIRST");
         std::env::set_var("_TEST_SECOND", "second-wins");
         let text = "";
-        assert_eq!(resolve(text, &["_TEST_FIRST", "_TEST_SECOND"]), "second-wins");
+        assert_eq!(
+            resolve(text, &["_TEST_FIRST", "_TEST_SECOND"]),
+            "second-wins"
+        );
         std::env::remove_var("_TEST_SECOND");
     }
 }

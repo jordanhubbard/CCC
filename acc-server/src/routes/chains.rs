@@ -43,7 +43,13 @@ fn authed(state: &AppState, headers: &HeaderMap) -> Option<axum::response::Respo
     if state.is_authed(headers) {
         None
     } else {
-        Some((StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response())
+        Some(
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error":"Unauthorized"})),
+            )
+                .into_response(),
+        )
     }
 }
 
@@ -115,8 +121,16 @@ async fn upsert_chain(
     let db = state.fleet_db.lock().await;
     match upsert_chain_from_body(&db, &body) {
         Ok(id) => match load_chain_full(&db, &id) {
-            Ok(Some(chain)) => (StatusCode::CREATED, Json(json!({"ok": true, "chain": chain}))).into_response(),
-            Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error":"chain not found"}))).into_response(),
+            Ok(Some(chain)) => (
+                StatusCode::CREATED,
+                Json(json!({"ok": true, "chain": chain})),
+            )
+                .into_response(),
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"chain not found"})),
+            )
+                .into_response(),
             Err(e) => server_error(e).into_response(),
         },
         Err(e) => server_error(e).into_response(),
@@ -135,7 +149,11 @@ async fn get_chain(
     let db = state.fleet_db.lock().await;
     match load_chain_full(&db, &id) {
         Ok(Some(chain)) => Json(chain).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error":"chain not found"}))).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error":"chain not found"})),
+        )
+            .into_response(),
         Err(e) => server_error(e).into_response(),
     }
 }
@@ -152,7 +170,11 @@ async fn patch_chain(
 
     let db = state.fleet_db.lock().await;
     if !chain_exists(&db, &id).unwrap_or(false) {
-        return (StatusCode::NOT_FOUND, Json(json!({"error":"chain not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error":"chain not found"})),
+        )
+            .into_response();
     }
 
     let now = now_ts();
@@ -183,7 +205,11 @@ async fn patch_chain(
     match result {
         Ok(_) => match load_chain_full(&db, &id) {
             Ok(Some(chain)) => Json(json!({"ok": true, "chain": chain})).into_response(),
-            Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error":"chain not found"}))).into_response(),
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"chain not found"})),
+            )
+                .into_response(),
             Err(e) => server_error(e).into_response(),
         },
         Err(e) => server_error(e).into_response(),
@@ -202,18 +228,24 @@ async fn append_event(
 
     let event_type = match string_field(&body, &["event_type", "type"]) {
         Some(v) if !v.is_empty() => v,
-        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error":"event_type required"}))).into_response(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"event_type required"})),
+            )
+                .into_response()
+        }
     };
 
     let db = state.fleet_db.lock().await;
     if !chain_exists(&db, &chain_id).unwrap_or(false) {
-        let mut chain_body = body
-            .get("chain")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+        let mut chain_body = body.get("chain").cloned().unwrap_or_else(|| json!({}));
         chain_body["id"] = json!(chain_id);
         if chain_body.get("source").is_none() {
-            chain_body["source"] = body.get("source").cloned().unwrap_or_else(|| json!("gateway"));
+            chain_body["source"] = body
+                .get("source")
+                .cloned()
+                .unwrap_or_else(|| json!("gateway"));
         }
         if let Err(e) = upsert_chain_from_body(&db, &chain_body) {
             return server_error(e).into_response();
@@ -222,8 +254,14 @@ async fn append_event(
 
     match append_event_inner(&db, &chain_id, &event_type, &body) {
         Ok(event) => match load_chain_full(&db, &chain_id) {
-            Ok(Some(chain)) => Json(json!({"ok": true, "event": event, "chain": chain})).into_response(),
-            Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error":"chain not found"}))).into_response(),
+            Ok(Some(chain)) => {
+                Json(json!({"ok": true, "event": event, "chain": chain})).into_response()
+            }
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"chain not found"})),
+            )
+                .into_response(),
             Err(e) => server_error(e).into_response(),
         },
         Err(e) => server_error(e).into_response(),
@@ -241,9 +279,16 @@ async fn link_task(
     }
     let task_id = match string_field(&body, &["task_id", "taskId"]) {
         Some(v) if !v.is_empty() => v,
-        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error":"task_id required"}))).into_response(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"task_id required"})),
+            )
+                .into_response()
+        }
     };
-    let relationship = string_field(&body, &["relationship"]).unwrap_or_else(|| "spawned".to_string());
+    let relationship =
+        string_field(&body, &["relationship"]).unwrap_or_else(|| "spawned".to_string());
     let metadata = body.get("metadata").cloned().unwrap_or_else(|| json!({}));
 
     let db = state.fleet_db.lock().await;
@@ -253,7 +298,11 @@ async fn link_task(
     match link_task_to_chain(&db, &chain_id, &task_id, &relationship, &metadata) {
         Ok(()) => match load_chain_full(&db, &chain_id) {
             Ok(Some(chain)) => Json(json!({"ok": true, "chain": chain})).into_response(),
-            Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error":"chain not found"}))).into_response(),
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error":"chain not found"})),
+            )
+                .into_response(),
             Err(e) => server_error(e).into_response(),
         },
         Err(e) => server_error(e).into_response(),
@@ -300,9 +349,8 @@ pub(crate) fn mark_task_status(
     status: &str,
 ) -> rusqlite::Result<()> {
     let now = now_ts();
-    let mut stmt = conn.prepare(
-        "SELECT chain_id, metadata FROM conversation_chain_tasks WHERE task_id=?1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT chain_id, metadata FROM conversation_chain_tasks WHERE task_id=?1")?;
     let rows = stmt.query_map(params![task_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -316,11 +364,12 @@ pub(crate) fn mark_task_status(
         }
         meta["last_task_status"] = json!(status);
         meta["last_task_status_at"] = json!(now.clone());
-        let resolved_at: Option<String> = if matches!(status, "completed" | "cancelled" | "rejected") {
-            Some(now.clone())
-        } else {
-            None
-        };
+        let resolved_at: Option<String> =
+            if matches!(status, "completed" | "cancelled" | "rejected") {
+                Some(now.clone())
+            } else {
+                None
+            };
         conn.execute(
             "UPDATE conversation_chain_tasks
              SET metadata=?1,
@@ -416,8 +465,10 @@ fn append_event_inner(
     let id = string_field(body, &["id"]).unwrap_or_else(|| chain_uuid("evt"));
     let actor_id = string_field(body, &["actor_id", "actorId"])
         .or_else(|| body.get("actor").and_then(|a| string_field(a, &["id"])));
-    let actor_name = string_field(body, &["actor_name", "actorName"])
-        .or_else(|| body.get("actor").and_then(|a| string_field(a, &["name", "display_name"])));
+    let actor_name = string_field(body, &["actor_name", "actorName"]).or_else(|| {
+        body.get("actor")
+            .and_then(|a| string_field(a, &["name", "display_name"]))
+    });
     let actor_kind = string_field(body, &["actor_kind", "actorKind"])
         .or_else(|| body.get("actor").and_then(|a| string_field(a, &["kind"])));
     let text = string_field(body, &["text", "body"]);
@@ -469,10 +520,23 @@ fn append_event_inner(
         }
     }
     if let Some(task_id) = string_field(body, &["task_id", "taskId"]) {
-        link_task_to_chain(conn, chain_id, &task_id, "mentioned", &json!({"event_type": event_type}))?;
+        link_task_to_chain(
+            conn,
+            chain_id,
+            &task_id,
+            "mentioned",
+            &json!({"event_type": event_type}),
+        )?;
     }
 
-    update_chain_from_event(conn, chain_id, event_type, body, text.as_deref(), &occurred_at)?;
+    update_chain_from_event(
+        conn,
+        chain_id,
+        event_type,
+        body,
+        text.as_deref(),
+        &occurred_at,
+    )?;
     Ok(event)
 }
 
@@ -712,15 +776,30 @@ fn upsert_participant_value(
             &json!({}),
         ),
         Value::Object(_) => {
-            let id = string_field(participant, &["id", "participant_id", "user_id"]).unwrap_or_default();
+            let id =
+                string_field(participant, &["id", "participant_id", "user_id"]).unwrap_or_default();
             if id.is_empty() {
                 return Ok(());
             }
-            let platform = string_field(participant, &["platform"]).unwrap_or_else(|| default_platform.to_string());
+            let platform = string_field(participant, &["platform"])
+                .unwrap_or_else(|| default_platform.to_string());
             let name = string_field(participant, &["name", "display_name"]);
-            let kind = string_field(participant, &["kind", "participant_kind"]).unwrap_or_else(|| "human".to_string());
-            let metadata = participant.get("metadata").cloned().unwrap_or_else(|| json!({}));
-            upsert_participant(conn, chain_id, &platform, &id, name, kind, &now_ts(), &metadata)
+            let kind = string_field(participant, &["kind", "participant_kind"])
+                .unwrap_or_else(|| "human".to_string());
+            let metadata = participant
+                .get("metadata")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            upsert_participant(
+                conn,
+                chain_id,
+                &platform,
+                &id,
+                name,
+                kind,
+                &now_ts(),
+                &metadata,
+            )
         }
         _ => Ok(()),
     }
@@ -765,16 +844,33 @@ fn upsert_entity_value(
     entity: &Value,
 ) -> rusqlite::Result<()> {
     match entity {
-        Value::String(id) => upsert_entity(conn, chain_id, "tag", id, Some(id.clone()), &now_ts(), &json!({})),
+        Value::String(id) => upsert_entity(
+            conn,
+            chain_id,
+            "tag",
+            id,
+            Some(id.clone()),
+            &now_ts(),
+            &json!({}),
+        ),
         Value::Object(_) => {
-            let entity_type = string_field(entity, &["type", "entity_type"]).unwrap_or_else(|| "tag".to_string());
+            let entity_type =
+                string_field(entity, &["type", "entity_type"]).unwrap_or_else(|| "tag".to_string());
             let entity_id = string_field(entity, &["id", "entity_id"]).unwrap_or_default();
             if entity_id.is_empty() {
                 return Ok(());
             }
             let label = string_field(entity, &["label", "name"]);
             let metadata = entity.get("metadata").cloned().unwrap_or_else(|| json!({}));
-            upsert_entity(conn, chain_id, &entity_type, &entity_id, label, &now_ts(), &metadata)
+            upsert_entity(
+                conn,
+                chain_id,
+                &entity_type,
+                &entity_id,
+                label,
+                &now_ts(),
+                &metadata,
+            )
         }
         _ => Ok(()),
     }
@@ -797,7 +893,14 @@ fn upsert_entity(
              label=COALESCE(excluded.label, label),
              last_seen_at=excluded.last_seen_at,
              metadata=CASE WHEN excluded.metadata != '{}' THEN excluded.metadata ELSE metadata END",
-        params![chain_id, entity_type, entity_id, label, seen_at, json_string(metadata)],
+        params![
+            chain_id,
+            entity_type,
+            entity_id,
+            label,
+            seen_at,
+            json_string(metadata)
+        ],
     )?;
     Ok(())
 }
@@ -837,7 +940,11 @@ fn is_terminal_status(status: &str) -> bool {
 }
 
 fn chain_uuid(prefix: &str) -> String {
-    format!("{}-{}", prefix, uuid::Uuid::new_v4().to_string().replace('-', ""))
+    format!(
+        "{}-{}",
+        prefix,
+        uuid::Uuid::new_v4().to_string().replace('-', "")
+    )
 }
 
 fn now_ts() -> String {

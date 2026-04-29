@@ -6,12 +6,7 @@ use serde_json::{json, Value};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-async fn upload(
-    srv: &TestServer,
-    mime: &str,
-    data: &[u8],
-    binary: bool,
-) -> (u16, Value) {
+async fn upload(srv: &TestServer, mime: &str, data: &[u8], binary: bool) -> (u16, Value) {
     let body = json!({
         "mime_type": mime,
         "enc":       if binary { "base64" } else { "none" },
@@ -24,7 +19,11 @@ async fn upload(
 }
 
 async fn download(srv: &TestServer, blob_id: &str) -> (u16, Value) {
-    let resp = call(&srv.app, get(&format!("/api/bus/blobs/{}/download", blob_id))).await;
+    let resp = call(
+        &srv.app,
+        get(&format!("/api/bus/blobs/{}/download", blob_id)),
+    )
+    .await;
     let status = resp.status().as_u16();
     (status, body_json(resp).await)
 }
@@ -146,7 +145,13 @@ async fn test_image_webp_round_trip() {
 #[tokio::test]
 async fn test_application_octet_stream_round_trip() {
     let srv = TestServer::new().await;
-    round_trip(&srv, "application/octet-stream", b"\x00\x01\x02\x03\xff", true).await;
+    round_trip(
+        &srv,
+        "application/octet-stream",
+        b"\x00\x01\x02\x03\xff",
+        true,
+    )
+    .await;
 }
 
 // ── Upload / download round-trips for 3-D model types ────────────────────────
@@ -154,7 +159,13 @@ async fn test_application_octet_stream_round_trip() {
 #[tokio::test]
 async fn test_model_gltf_json_round_trip() {
     let srv = TestServer::new().await;
-    round_trip(&srv, "model/gltf+json", br#"{"asset":{"version":"2.0"}}"#, false).await;
+    round_trip(
+        &srv,
+        "model/gltf+json",
+        br#"{"asset":{"version":"2.0"}}"#,
+        false,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -189,7 +200,13 @@ async fn test_model_stl_round_trip() {
 #[tokio::test]
 async fn test_model_ply_round_trip() {
     let srv = TestServer::new().await;
-    round_trip(&srv, "model/ply", b"ply\nformat binary_little_endian 1.0\nend_header\n", true).await;
+    round_trip(
+        &srv,
+        "model/ply",
+        b"ply\nformat binary_little_endian 1.0\nend_header\n",
+        true,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -219,7 +236,10 @@ async fn test_binary_type_without_base64_enc_returns_422() {
     let resp = call(&srv.app, post_json("/api/bus/blobs/upload", &body)).await;
     assert_eq!(resp.status().as_u16(), 422);
     let j = body_json(resp).await;
-    assert_eq!(j["error"].as_str().unwrap(), "binary_type_requires_base64_enc");
+    assert_eq!(
+        j["error"].as_str().unwrap(),
+        "binary_type_requires_base64_enc"
+    );
 }
 
 #[tokio::test]
@@ -320,7 +340,11 @@ async fn test_blob_delete_removes_blob() {
     let meta = call(&srv.app, get(&format!("/api/bus/blobs/{}", blob_id))).await;
     assert_eq!(meta.status().as_u16(), 404);
 
-    let dl = call(&srv.app, get(&format!("/api/bus/blobs/{}/download", blob_id))).await;
+    let dl = call(
+        &srv.app,
+        get(&format!("/api/bus/blobs/{}/download", blob_id)),
+    )
+    .await;
     assert_eq!(dl.status().as_u16(), 404);
 }
 
@@ -351,7 +375,10 @@ async fn test_blob_expired_returns_410() {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     let (status, dl) = download(&srv, &blob_id).await;
-    assert_eq!(status, 410, "expected 410 Gone for expired blob, got {status}: {dl}");
+    assert_eq!(
+        status, 410,
+        "expected 410 Gone for expired blob, got {status}: {dl}"
+    );
     assert_eq!(dl["error"].as_str().unwrap(), "blob_expired");
 }
 
@@ -391,11 +418,19 @@ async fn test_blob_access_control_denies_unknown_agent() {
     let blob_id = j["blob_id"].as_str().unwrap().to_string();
 
     // Download without ?agent= → 403
-    let no_agent = call(&srv.app, get(&format!("/api/bus/blobs/{}/download", blob_id))).await;
+    let no_agent = call(
+        &srv.app,
+        get(&format!("/api/bus/blobs/{}/download", blob_id)),
+    )
+    .await;
     assert_eq!(no_agent.status().as_u16(), 403);
 
     // Download with wrong agent → 403
-    let wrong = call(&srv.app, get(&format!("/api/bus/blobs/{}/download?agent=boris", blob_id))).await;
+    let wrong = call(
+        &srv.app,
+        get(&format!("/api/bus/blobs/{}/download?agent=boris", blob_id)),
+    )
+    .await;
     assert_eq!(wrong.status().as_u16(), 403);
 }
 
@@ -413,7 +448,14 @@ async fn test_blob_access_control_allows_listed_agent() {
     let j = body_json(resp).await;
     let blob_id = j["blob_id"].as_str().unwrap().to_string();
 
-    let ok = call(&srv.app, get(&format!("/api/bus/blobs/{}/download?agent=natasha", blob_id))).await;
+    let ok = call(
+        &srv.app,
+        get(&format!(
+            "/api/bus/blobs/{}/download?agent=natasha",
+            blob_id
+        )),
+    )
+    .await;
     assert_eq!(ok.status().as_u16(), 200);
 }
 
@@ -432,7 +474,11 @@ async fn test_blob_empty_allowed_agents_is_public() {
     let blob_id = j["blob_id"].as_str().unwrap().to_string();
 
     // Any agent or no agent can download
-    let ok = call(&srv.app, get(&format!("/api/bus/blobs/{}/download", blob_id))).await;
+    let ok = call(
+        &srv.app,
+        get(&format!("/api/bus/blobs/{}/download", blob_id)),
+    )
+    .await;
     assert_eq!(ok.status().as_u16(), 200);
 }
 
@@ -443,7 +489,11 @@ async fn test_multi_chunk_blob_upload() {
     let srv = TestServer::new().await;
     let data_part1 = b"chunk-one-";
     let data_part2 = b"chunk-two";
-    let full_data: Vec<u8> = data_part1.iter().chain(data_part2.iter()).copied().collect();
+    let full_data: Vec<u8> = data_part1
+        .iter()
+        .chain(data_part2.iter())
+        .copied()
+        .collect();
     let blob_id = "multi-chunk-test-blob";
 
     // Chunk 0
@@ -504,10 +554,12 @@ async fn test_blob_ready_event_fired_on_completion() {
     let msgs = body_json(msgs_resp).await;
     let arr = msgs.as_array().unwrap();
     let found = arr.iter().any(|m| {
-        m["type"].as_str() == Some("bus.blob_ready")
-            && m["blob_id"].as_str() == Some(&blob_id)
+        m["type"].as_str() == Some("bus.blob_ready") && m["blob_id"].as_str() == Some(&blob_id)
     });
-    assert!(found, "bus.blob_ready event must appear in bus messages after upload");
+    assert!(
+        found,
+        "bus.blob_ready event must appear in bus messages after upload"
+    );
 }
 
 // ── DLQ ───────────────────────────────────────────────────────────────────────
@@ -548,7 +600,11 @@ async fn test_dlq_redeliver_replays_to_bus() {
 
     // Redeliver
     let redeliver_body = json!({"dlq_id": dlq_id});
-    let rr = call(&srv.app, post_json("/api/bus/dlq/redeliver", &redeliver_body)).await;
+    let rr = call(
+        &srv.app,
+        post_json("/api/bus/dlq/redeliver", &redeliver_body),
+    )
+    .await;
     assert_eq!(rr.status().as_u16(), 200);
     let rj = body_json(rr).await;
     assert_eq!(rj["ok"], json!(true));
@@ -559,8 +615,7 @@ async fn test_dlq_redeliver_replays_to_bus() {
     let msgs = body_json(call(&srv.app, get("/api/bus/messages")).await).await;
     let arr = msgs.as_array().unwrap();
     let found = arr.iter().any(|m| {
-        m["dlq_redelivered"].as_bool() == Some(true)
-            && m["dlq_id"].as_str() == Some(&dlq_id)
+        m["dlq_redelivered"].as_bool() == Some(true) && m["dlq_id"].as_str() == Some(&dlq_id)
     });
     assert!(found, "redelivered message must appear in bus messages");
 }
@@ -611,7 +666,10 @@ async fn test_bus_send_binary_without_enc_returns_422() {
     let resp = call(&srv.app, post_json("/api/bus/send", &body)).await;
     assert_eq!(resp.status().as_u16(), 422);
     let j = body_json(resp).await;
-    assert_eq!(j["error"].as_str().unwrap(), "binary_type_requires_base64_enc");
+    assert_eq!(
+        j["error"].as_str().unwrap(),
+        "binary_type_requires_base64_enc"
+    );
 }
 
 #[tokio::test]
@@ -658,8 +716,8 @@ async fn test_bus_send_no_mime_field_accepted() {
 
 #[tokio::test]
 async fn test_blob_upload_requires_auth() {
-    use axum::http::Request;
     use axum::body::Body;
+    use axum::http::Request;
     let srv = TestServer::new().await;
     let body = json!({
         "mime_type":    "text/plain",
@@ -680,8 +738,8 @@ async fn test_blob_upload_requires_auth() {
 
 #[tokio::test]
 async fn test_blob_download_requires_auth() {
-    use axum::http::Request;
     use axum::body::Body;
+    use axum::http::Request;
     let srv = TestServer::new().await;
     let req = Request::builder()
         .method("GET")

@@ -135,7 +135,11 @@ async fn run_probe(_cfg: &Config, executor: &str, workspace: &Path) -> ProbeResu
         };
     }
 
-    let session_name = format!("acc-probe-{}-{}", executor.replace('_', "-"), std::process::id());
+    let session_name = format!(
+        "acc-probe-{}-{}",
+        executor.replace('_', "-"),
+        std::process::id()
+    );
     let launch = command.render();
     let started = tmux::new_session(&session_name, Some(workspace), &launch).await;
     if let Err(e) = started {
@@ -233,9 +237,8 @@ fn is_supported_executor(executor: &str) -> bool {
 /// Idempotent: re-reads the file first and skips the write when the
 /// content already matches.
 fn ensure_claude_settings() -> std::io::Result<()> {
-    let home = std::env::var_os("HOME").ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "HOME is not set")
-    })?;
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME is not set"))?;
     let dir = PathBuf::from(home).join(".claude");
     let file = dir.join("settings.json");
 
@@ -254,7 +257,11 @@ fn which_bin(name: &str) -> Option<PathBuf> {
     std::env::var("PATH").ok().and_then(|path_var| {
         path_var.split(':').find_map(|dir| {
             let candidate = PathBuf::from(dir).join(name);
-            if candidate.exists() { Some(candidate) } else { None }
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
         })
     })
 }
@@ -276,9 +283,18 @@ impl LaunchCommand {
 
 fn launch_command(executor: &str) -> Option<LaunchCommand> {
     match executor {
-        "claude_cli" => Some(LaunchCommand { binary: "claude", args: &["--dangerously-skip-permissions"] }),
-        "codex_cli" => Some(LaunchCommand { binary: "codex", args: &["--sandbox", "danger-full-access", "--full-auto"] }),
-        "cursor_cli" => Some(LaunchCommand { binary: "cursor", args: &["--headless"] }),
+        "claude_cli" => Some(LaunchCommand {
+            binary: "claude",
+            args: &["--dangerously-skip-permissions"],
+        }),
+        "codex_cli" => Some(LaunchCommand {
+            binary: "codex",
+            args: &["--sandbox", "danger-full-access", "--full-auto"],
+        }),
+        "cursor_cli" => Some(LaunchCommand {
+            binary: "cursor",
+            args: &["--headless"],
+        }),
         _ => None,
     }
 }

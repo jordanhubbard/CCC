@@ -70,7 +70,12 @@ async fn logs_stream(
 
     let identifiers: Vec<String> = q
         .identifier
-        .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+        .map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect()
+        })
         .filter(|v: &Vec<String>| !v.is_empty())
         .unwrap_or_else(|| DEFAULT_IDENTIFIERS.iter().map(|s| s.to_string()).collect());
 

@@ -88,14 +88,15 @@ pub async fn run(workspace: Option<&str>) {
 
     let tools = ToolRegistry::new(tool_list);
 
-    let agent = Arc::new(HermesAgent::new(cfg.clone(), client.clone(), provider, tools));
+    let agent = Arc::new(HermesAgent::new(
+        cfg.clone(),
+        client.clone(),
+        provider,
+        tools,
+    ));
 
     // Sessions are namespaced by workspace so conversations don't bleed across.
-    let sessions_dir = cfg
-        .acc_dir
-        .join("data")
-        .join("sessions")
-        .join(&ws_label);
+    let sessions_dir = cfg.acc_dir.join("data").join("sessions").join(&ws_label);
     let sessions = Arc::new(SessionStore::new(sessions_dir).with_hub(
         Client::new(&cfg.acc_url, &cfg.acc_token).expect("sessions client"),
         cfg.agent_name.clone(),
@@ -139,7 +140,8 @@ pub async fn run(workspace: Option<&str>) {
 
     // Start Telegram if configured (only for default workspace — no per-workspace Telegram).
     if workspace.is_none() {
-        match telegram::TelegramAdapter::new(sessions.clone(), agent.clone(), client.clone()).await {
+        match telegram::TelegramAdapter::new(sessions.clone(), agent.clone(), client.clone()).await
+        {
             Some(adapter) => {
                 eprintln!("[hermes-gateway/default] Telegram adapter started");
                 let adapter = Arc::new(adapter);
@@ -177,7 +179,9 @@ fn build_memory_search_tool() -> Result<Option<Box<dyn Tool>>, String> {
         Some(u) => u,
         None => return Ok(None),
     };
-    let qdrant_key = std::env::var("QDRANT_API_KEY").ok().filter(|s| !s.is_empty());
+    let qdrant_key = std::env::var("QDRANT_API_KEY")
+        .ok()
+        .filter(|s| !s.is_empty());
     let qdrant = QdrantClient::new(&qdrant_url, qdrant_key.as_deref())
         .map_err(|e| format!("qdrant client: {e}"))?;
     let embed = acc_tools::make_embed_client().map_err(|e| format!("embed client: {e}"))?;

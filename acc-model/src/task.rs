@@ -248,11 +248,26 @@ mod tests {
 
     #[test]
     fn task_type_feature_bug_deserialize() {
-        assert_eq!(serde_json::from_str::<TaskType>("\"feature\"").unwrap(), TaskType::Feature);
-        assert_eq!(serde_json::from_str::<TaskType>("\"bug\"").unwrap(), TaskType::Bug);
-        assert_eq!(serde_json::from_str::<TaskType>("\"task\"").unwrap(), TaskType::Task);
-        assert_eq!(serde_json::from_str::<TaskType>("\"epic\"").unwrap(), TaskType::Epic);
-        assert_eq!(serde_json::from_str::<TaskType>("\"totally_new_type\"").unwrap(), TaskType::Unknown);
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"feature\"").unwrap(),
+            TaskType::Feature
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"bug\"").unwrap(),
+            TaskType::Bug
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"task\"").unwrap(),
+            TaskType::Task
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"epic\"").unwrap(),
+            TaskType::Epic
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"totally_new_type\"").unwrap(),
+            TaskType::Unknown
+        );
     }
 
     #[test]
@@ -263,7 +278,9 @@ mod tests {
             {"id":"t-3","status":"claimed","task_type":"work","title":"work"}
         ]}"#;
         #[derive(serde::Deserialize)]
-        struct Envelope { tasks: Vec<Task> }
+        struct Envelope {
+            tasks: Vec<Task>,
+        }
         let e: Envelope = serde_json::from_str(json).unwrap();
         assert_eq!(e.tasks.len(), 3);
         assert_eq!(e.tasks[0].task_type, TaskType::Feature);
@@ -322,6 +339,9 @@ mod tests {
         let json = r#"{"error":"blocked","pending":"task-9"}"#;
         let e: super::super::error::ApiError = serde_json::from_str(json).unwrap();
         assert_eq!(e.error, "blocked");
-        assert_eq!(e.extra.get("pending").and_then(|v| v.as_str()), Some("task-9"));
+        assert_eq!(
+            e.extra.get("pending").and_then(|v| v.as_str()),
+            Some("task-9")
+        );
     }
 }

@@ -1,3 +1,4 @@
+use crate::AppState;
 /// /api/exec — Remote exec dispatch via AgentBus
 ///
 /// POST /api/exec      — sign + broadcast exec via AgentBus, log to exec.jsonl
@@ -8,7 +9,6 @@
 /// "gpu"). Capability labels are resolved to agent names server-side by inspecting the
 /// agents registry, then the bus message is broadcast with `to:"all"` so each agent
 /// self-filters via body.targets.
-
 use axum::{
     extract::{Path, State},
     http::HeaderMap,
@@ -21,7 +21,6 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -38,8 +37,8 @@ fn exec_log_path() -> String {
 }
 
 fn sign_payload(payload: &Value, secret: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key size");
     mac.update(payload.to_string().as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -58,16 +57,26 @@ async fn post_exec(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
 
     // Accept command+params (new) or code+mode (deprecated shell)
-    let (exec_kind, payload_fields) = if let Some(cmd) = body.get("command").and_then(|v| v.as_str()) {
+    let (exec_kind, payload_fields) = if let Some(cmd) =
+        body.get("command").and_then(|v| v.as_str())
+    {
         let params = body.get("params").cloned().unwrap_or_default();
         ("command", json!({"command": cmd, "params": params}))
     } else if let Some(code) = body.get("code").and_then(|v| v.as_str()) {
         if code.is_empty() {
-            return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error":"code must not be empty"}))).into_response();
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error":"code must not be empty"})),
+            )
+                .into_response();
         }
         let mode = body.get("mode").and_then(|v| v.as_str()).unwrap_or("shell");
         ("shell", json!({"code": code, "mode": mode}))
@@ -80,17 +89,26 @@ async fn post_exec(
         .or_else(|_| std::env::var("SQUIRRELBUS_TOKEN"))
         .unwrap_or_default();
     if agentbus_token.is_empty() {
-        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error":"AGENTBUS_TOKEN not configured"}))).into_response();
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error":"AGENTBUS_TOKEN not configured"})),
+        )
+            .into_response();
     }
 
     let exec_id = format!("exec-{}", uuid::Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
-    let timeout_ms = body.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(30_000);
+    let timeout_ms = body
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30_000);
 
     // Collect raw targets (agent names or capability labels)
-    let raw_targets: Vec<String> = if let Some(arr) = body.get("targets").and_then(|v| v.as_array()) {
-        arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+    let raw_targets: Vec<String> = if let Some(arr) = body.get("targets").and_then(|v| v.as_array())
+    {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
     } else if let Some(t) = body.get("target").and_then(|v| v.as_str()) {
         vec![t.to_string()]
     } else {
@@ -111,12 +129,17 @@ async fn post_exec(
     });
     // Merge exec-kind fields (command+params or code+mode)
     if let (Some(p_obj), Some(e_obj)) = (payload.as_object_mut(), payload_fields.as_object()) {
-        for (k, v) in e_obj { p_obj.insert(k.clone(), v.clone()); }
+        for (k, v) in e_obj {
+            p_obj.insert(k.clone(), v.clone());
+        }
     }
 
     let sig = sign_payload(&payload, &agentbus_token);
     let mut envelope = payload.clone();
-    envelope.as_object_mut().unwrap().insert("sig".to_string(), json!(sig));
+    envelope
+        .as_object_mut()
+        .unwrap()
+        .insert("sig".to_string(), json!(sig));
 
     // Fan-out: use `to:"all"` so every agent receives and self-filters via body.targets.
     // For a single named target we can be specific, but "all" is always correct.
@@ -181,11 +204,19 @@ async fn get_exec(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     match read_exec_record(&id).await {
         Some(record) => (axum::http::StatusCode::OK, Json(record)).into_response(),
-        None => (axum::http::StatusCode::NOT_FOUND, Json(json!({"error":"not found"}))).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error":"not found"})),
+        )
+            .into_response(),
     }
 }
 
@@ -198,13 +229,18 @@ async fn post_exec_result(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({"error":"Unauthorized"}))).into_response();
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error":"Unauthorized"})),
+        )
+            .into_response();
     }
     let path = exec_log_path();
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut records: Vec<Value> = match tokio::fs::read_to_string(&path).await {
-        Ok(content) => content.lines()
+        Ok(content) => content
+            .lines()
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect(),
@@ -212,11 +248,19 @@ async fn post_exec_result(
     };
 
     let mut result_entry = body.clone();
-    result_entry.as_object_mut().unwrap().insert("ts".to_string(), json!(now));
+    result_entry
+        .as_object_mut()
+        .unwrap()
+        .insert("ts".to_string(), json!(now));
 
-    match records.iter().position(|r| r.get("execId").and_then(|v| v.as_str()) == Some(&id)) {
+    match records
+        .iter()
+        .position(|r| r.get("execId").and_then(|v| v.as_str()) == Some(&id))
+    {
         Some(i) => {
-            records[i].as_object_mut().unwrap()
+            records[i]
+                .as_object_mut()
+                .unwrap()
                 .entry("results")
                 .or_insert(json!([]))
                 .as_array_mut()
@@ -236,13 +280,19 @@ async fn post_exec_result(
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
-    let content = records.iter()
+    let content = records
+        .iter()
         .filter_map(|r| serde_json::to_string(r).ok())
         .collect::<Vec<_>>()
-        .join("\n") + "\n";
+        .join("\n")
+        + "\n";
     let _ = tokio::fs::write(&path, content).await;
 
-    (axum::http::StatusCode::OK, Json(json!({"ok": true, "execId": id}))).into_response()
+    (
+        axum::http::StatusCode::OK,
+        Json(json!({"ok": true, "execId": id})),
+    )
+        .into_response()
 }
 
 // ── Capability resolution ─────────────────────────────────────────────────
@@ -323,7 +373,12 @@ async fn append_exec_log(record: &Value) {
     }
     if let Ok(mut line) = serde_json::to_string(record) {
         line.push('\n');
-        if let Ok(mut f) = tokio::fs::OpenOptions::new().create(true).append(true).open(&path).await {
+        if let Ok(mut f) = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+        {
             let _ = f.write_all(line.as_bytes()).await;
         }
     }
@@ -332,7 +387,8 @@ async fn append_exec_log(record: &Value) {
 async fn read_exec_record(id: &str) -> Option<Value> {
     let path = exec_log_path();
     let content = tokio::fs::read_to_string(&path).await.ok()?;
-    content.lines()
+    content
+        .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .find(|r| r.get("execId").and_then(|v| v.as_str()) == Some(id))

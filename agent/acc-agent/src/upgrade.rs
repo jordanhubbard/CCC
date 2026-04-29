@@ -35,11 +35,14 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
     let migrations_dir = workspace.join("deploy/migrations");
     let state_path = cfg.acc_dir.join("migrations.json");
 
-    log(cfg, &format!(
-        "upgrade starting (dry_run={}, migrations={})",
-        opts.dry_run,
-        migrations_dir.display()
-    ));
+    log(
+        cfg,
+        &format!(
+            "upgrade starting (dry_run={}, migrations={})",
+            opts.dry_run,
+            migrations_dir.display()
+        ),
+    );
 
     // ── 1. Load migration state ───────────────────────────────────────────────
     let mut state = migrate::load(&state_path);
@@ -56,7 +59,10 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
             v
         }
         Err(e) => {
-            log(cfg, &format!("migrations dir unreadable: {e} — skipping migrations"));
+            log(
+                cfg,
+                &format!("migrations dir unreadable: {e} — skipping migrations"),
+            );
             vec![]
         }
     };
@@ -80,7 +86,10 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
         log(cfg, &format!("running migration: {script_name}"));
 
         if opts.dry_run {
-            log(cfg, &format!("  [dry-run] would run: bash {}", script_path.display()));
+            log(
+                cfg,
+                &format!("  [dry-run] would run: bash {}", script_path.display()),
+            );
             // Still collect any declared restarts so dry-run output is informative
             if let Ok(contents) = std::fs::read_to_string(&script_path) {
                 for svc in parse_restarts_header(&contents) {
@@ -130,7 +139,10 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
                 // Continue — don't stop on failure
             }
             Err(e) => {
-                log(cfg, &format!("migration {script_name}: error starting script: {e}"));
+                log(
+                    cfg,
+                    &format!("migration {script_name}: error starting script: {e}"),
+                );
                 // Continue
             }
         }
@@ -149,14 +161,20 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
 
     for svc_name in &ordered {
         if services::is_self(svc_name) {
-            log(cfg, "acc-bus-listener restart requested — will re-exec after upgrade");
+            log(
+                cfg,
+                "acc-bus-listener restart requested — will re-exec after upgrade",
+            );
             needs_self_restart = true;
             continue;
         }
 
         match services::find(svc_name) {
             None => {
-                log(cfg, &format!("unknown service '{svc_name}' declared in migration — skipping"));
+                log(
+                    cfg,
+                    &format!("unknown service '{svc_name}' declared in migration — skipping"),
+                );
             }
             Some(def) => {
                 if opts.dry_run {
@@ -191,8 +209,8 @@ pub async fn run_upgrade(cfg: &Config, opts: UpgradeOptions) {
         }
         // No supervisor running — fall back to re-exec self
         log(cfg, "no supervisor.pid found — re-execing self");
-        let current_exe = std::env::current_exe()
-            .unwrap_or_else(|_| std::path::PathBuf::from("acc-agent"));
+        let current_exe =
+            std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("acc-agent"));
         let args: Vec<String> = std::env::args().collect();
         let _ = std::process::Command::new(&current_exe)
             .args(&args[1..])

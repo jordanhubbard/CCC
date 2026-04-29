@@ -1,13 +1,13 @@
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
-use futures_util::{SinkExt, StreamExt};
 use tracing::Instrument;
 
-use super::session::SessionStore;
 use super::super::agent::HermesAgent;
+use super::session::SessionStore;
 use acc_client::Client;
 
 fn new_trace_id() -> String {
@@ -64,16 +64,35 @@ impl SlackAdapter {
         let resp: Value = http
             .get("https://slack.com/api/auth.test")
             .bearer_auth(&bot_token)
-            .send().await.ok()?.json().await.ok()?;
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()?;
         if !resp["ok"].as_bool().unwrap_or(false) {
-            tracing::error!("[slack] auth.test failed: {}", resp["error"].as_str().unwrap_or("?"));
+            tracing::error!(
+                "[slack] auth.test failed: {}",
+                resp["error"].as_str().unwrap_or("?")
+            );
             return None;
         }
         let bot_user_id = resp["user_id"].as_str()?.to_string();
-        tracing::info!("[slack] connected as {} ({})", resp["user"].as_str().unwrap_or("?"), bot_user_id);
+        tracing::info!(
+            "[slack] connected as {} ({})",
+            resp["user"].as_str().unwrap_or("?"),
+            bot_user_id
+        );
 
         Some(Self {
-            app_token, bot_token, bot_user_id, http, client, workspace, sessions, agent,
+            app_token,
+            bot_token,
+            bot_user_id,
+            http,
+            client,
+            workspace,
+            sessions,
+            agent,
             active: Arc::new(Mutex::new(std::collections::HashMap::new())),
         })
     }
@@ -148,17 +167,25 @@ impl SlackAdapter {
     }
 
     async fn open_connection(&self) -> Result<String, String> {
-        let resp: Value = self.http
+        let resp: Value = self
+            .http
             .post("https://slack.com/api/apps.connections.open")
             .bearer_auth(&self.app_token)
-            .send().await
+            .send()
+            .await
             .map_err(|e| e.to_string())?
-            .json().await
+            .json()
+            .await
             .map_err(|e| e.to_string())?;
         if !resp["ok"].as_bool().unwrap_or(false) {
-            return Err(format!("apps.connections.open: {}", resp["error"].as_str().unwrap_or("?")));
+            return Err(format!(
+                "apps.connections.open: {}",
+                resp["error"].as_str().unwrap_or("?")
+            ));
         }
-        resp["url"].as_str().map(|s| s.to_string())
+        resp["url"]
+            .as_str()
+            .map(|s| s.to_string())
             .ok_or_else(|| "no url in connections.open response".to_string())
     }
 
@@ -176,9 +203,13 @@ impl SlackAdapter {
 
         // Ignore our own messages. Other bots are recorded as context, but we
         // don't respond to them.
-        if user == self.bot_user_id { return; }
+        if user == self.bot_user_id {
+            return;
+        }
         // Ignore message_changed / message_deleted subtypes.
-        if event["subtype"].is_string() { return; }
+        if event["subtype"].is_string() {
+            return;
+        }
 
         let channel = event["channel"].as_str().unwrap_or("").to_string();
         let thread_ts = event["thread_ts"].as_str().map(|s| s.to_string());
@@ -234,9 +265,12 @@ impl SlackAdapter {
                     "slack_type": event_type
                 }
             }),
-        ).await;
+        )
+        .await;
 
-        if event["bot_id"].is_string() { return; }
+        if event["bot_id"].is_string() {
+            return;
+        }
 
         // Determine if we should respond.
         let (should_respond, clean_text) = match event_type {
@@ -253,13 +287,17 @@ impl SlackAdapter {
             _ => (false, String::new()),
         };
 
-        if !should_respond || clean_text.is_empty() { return; }
+        if !should_respond || clean_text.is_empty() {
+            return;
+        }
 
         // Handle /reset.
         if clean_text.trim() == "/reset" {
             let key = session_key(&channel, user, channel_type);
             self.sessions.clear(&key).await;
-            let _ = self.post_message(&channel, thread_ts.as_deref(), "Conversation reset.").await;
+            let _ = self
+                .post_message(&channel, thread_ts.as_deref(), "Conversation reset.")
+                .await;
             self.record_chain_event(
                 &chain_id,
                 json!({"id": chain_id, "source": "slack", "workspace": self.workspace, "channel_id": channel, "thread_id": root_ts}),
@@ -280,7 +318,9 @@ impl SlackAdapter {
 
         let lock = {
             let mut map = self.active.lock().await;
-            map.entry(key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+            map.entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
         };
         let _guard = lock.lock().await;
 
@@ -295,10 +335,13 @@ impl SlackAdapter {
         // Show a thinking indicator.
         // TODO: capture the returned ts and delete/update this message after the response is ready;
         // currently the "_thinking…_" message remains permanently in the channel.
-        let _ = self.post_message(&channel, reply_thread.as_deref(), "_thinking…_").await;
+        let _ = self
+            .post_message(&channel, reply_thread.as_deref(), "_thinking…_")
+            .await;
 
         let mut history = self.sessions.load_history(&key).await;
-        let response = self.agent
+        let response = self
+            .agent
             .run_gateway_turn(&mut history, &clean_text, GATEWAY_SYSTEM)
             .instrument(span)
             .await;
@@ -306,7 +349,10 @@ impl SlackAdapter {
 
         // Slack limit is 3000 chars per block; split if needed.
         for chunk in split_message(&response, 3000) {
-            if let Err(e) = self.post_message(&channel, reply_thread.as_deref(), &chunk).await {
+            if let Err(e) = self
+                .post_message(&channel, reply_thread.as_deref(), &chunk)
+                .await
+            {
                 tracing::warn!("[slack] post error: {e}");
             }
         }
@@ -328,10 +374,14 @@ impl SlackAdapter {
 
     async fn handle_reaction(&self, event: &Value) {
         let user = event["user"].as_str().unwrap_or("");
-        if user == self.bot_user_id || user.is_empty() { return; }
+        if user == self.bot_user_id || user.is_empty() {
+            return;
+        }
         let channel = event["item"]["channel"].as_str().unwrap_or("");
         let item_ts = event["item"]["ts"].as_str().unwrap_or("");
-        if channel.is_empty() || item_ts.is_empty() { return; }
+        if channel.is_empty() || item_ts.is_empty() {
+            return;
+        }
         let chain_id = slack_chain_id(&self.workspace, channel, item_ts);
         let reaction = event["reaction"].as_str().unwrap_or("");
         self.record_chain_event(
@@ -367,7 +417,8 @@ impl SlackAdapter {
                     "item_type": event["item"]["type"]
                 }
             }),
-        ).await;
+        )
+        .await;
     }
 
     async fn record_chain_event(&self, chain_id: &str, chain: Value, event: Value) {
@@ -380,7 +431,12 @@ impl SlackAdapter {
         }
     }
 
-    async fn post_message(&self, channel: &str, thread_ts: Option<&str>, text: &str) -> Result<Option<String>, String> {
+    async fn post_message(
+        &self,
+        channel: &str,
+        thread_ts: Option<&str>,
+        text: &str,
+    ) -> Result<Option<String>, String> {
         let mut body = json!({
             "channel": channel,
             "text": text,
@@ -389,16 +445,22 @@ impl SlackAdapter {
         if let Some(ts) = thread_ts {
             body["thread_ts"] = json!(ts);
         }
-        let resp: Value = self.http
+        let resp: Value = self
+            .http
             .post("https://slack.com/api/chat.postMessage")
             .bearer_auth(&self.bot_token)
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| e.to_string())?
-            .json().await
+            .json()
+            .await
             .map_err(|e| e.to_string())?;
         if !resp["ok"].as_bool().unwrap_or(false) {
-            return Err(format!("chat.postMessage: {}", resp["error"].as_str().unwrap_or("?")));
+            return Err(format!(
+                "chat.postMessage: {}",
+                resp["error"].as_str().unwrap_or("?")
+            ));
         }
         Ok(resp["ts"].as_str().map(str::to_string))
     }
@@ -453,7 +515,8 @@ fn split_message(text: &str, limit: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut remaining = text;
     while remaining.len() > limit {
-        let split_at = remaining[..limit].rfind("\n\n")
+        let split_at = remaining[..limit]
+            .rfind("\n\n")
             .or_else(|| remaining[..limit].rfind('\n'))
             .or_else(|| remaining[..limit].rfind(". "))
             .unwrap_or(limit);

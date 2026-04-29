@@ -170,11 +170,11 @@ mod tests {
         // 3-D model types
         assert!(!MediaType::ModelGltfJson.is_binary()); // JSON text
         assert!(MediaType::ModelGltfBinary.is_binary());
-        assert!(!MediaType::ModelObj.is_binary());      // OBJ is text
+        assert!(!MediaType::ModelObj.is_binary()); // OBJ is text
         assert!(MediaType::ModelUsdz.is_binary());
         assert!(MediaType::ModelStl.is_binary());
         assert!(MediaType::ModelPly.is_binary());
-        assert!(!MediaType::ModelVrml.is_binary());     // VRML is text
+        assert!(!MediaType::ModelVrml.is_binary()); // VRML is text
         assert!(MediaType::ModelFbx.is_binary());
     }
 

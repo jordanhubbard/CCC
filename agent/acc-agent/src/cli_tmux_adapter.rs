@@ -33,7 +33,8 @@ pub async fn run_task(
     let session_name = ensure_session(cfg, adapter, workspace).await?;
     let pane_id = pane_for_session(&session_name).await?;
 
-    wait_until_idle(&pane_id, BUSY_WAIT_TIMEOUT).await
+    wait_until_idle(&pane_id, BUSY_WAIT_TIMEOUT)
+        .await
         .map_err(|e| format!("session_not_idle:{e}"))?;
 
     let task_prompt = format!(
@@ -75,12 +76,17 @@ async fn ensure_session(
 async fn detect_existing_session(executor: &str, workspace: &Path) -> Option<String> {
     let panes = tmux::list_panes().await.ok()?;
     let workspace = workspace.to_string_lossy();
-    panes.into_iter()
+    panes
+        .into_iter()
         .filter(|pane| !pane.dead)
         .filter(|pane| session_discovery::infer_executor(pane) == Some(executor))
         .min_by_key(|pane| {
             let exact_path = if pane.current_path == workspace { 0 } else { 1 };
-            let active = if pane.active || pane.window_active { 0 } else { 1 };
+            let active = if pane.active || pane.window_active {
+                0
+            } else {
+                1
+            };
             (exact_path, active, pane.session_name.clone())
         })
         .map(|pane| pane.session_name)
@@ -88,7 +94,8 @@ async fn detect_existing_session(executor: &str, workspace: &Path) -> Option<Str
 
 async fn pane_for_session(session_name: &str) -> Result<String, String> {
     let panes = tmux::list_panes().await?;
-    panes.into_iter()
+    panes
+        .into_iter()
         .find(|pane| pane.session_name == session_name && !pane.dead)
         .map(|pane| pane.pane_id)
         .ok_or_else(|| format!("session_not_found:{session_name}"))
@@ -126,7 +133,11 @@ fn render_launch(adapter: &SessionAdapterConfig) -> String {
     if adapter.launch_args.is_empty() {
         adapter.launch_binary.to_string()
     } else {
-        format!("{} {}", adapter.launch_binary, adapter.launch_args.join(" "))
+        format!(
+            "{} {}",
+            adapter.launch_binary,
+            adapter.launch_args.join(" ")
+        )
     }
 }
 
@@ -139,12 +150,17 @@ fn is_idle_prompt_visible(capture: &str) -> bool {
             || trimmed.starts_with("> ")
             || trimmed.contains("? for shortcuts")
     });
-    let has_spinner = last_lines.iter().any(|line| line.chars().any(is_spinner_char));
+    let has_spinner = last_lines
+        .iter()
+        .any(|line| line.chars().any(is_spinner_char));
     has_prompt && !has_spinner
 }
 
 fn is_spinner_char(ch: char) -> bool {
-    matches!(ch, '⠋' | '⠙' | '⠹' | '⠸' | '⠼' | '⠴' | '⠦' | '⠧' | '⠇' | '⠏')
+    matches!(
+        ch,
+        '⠋' | '⠙' | '⠹' | '⠸' | '⠼' | '⠴' | '⠦' | '⠧' | '⠇' | '⠏'
+    )
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -237,9 +253,24 @@ mod tests {
 
     #[test]
     fn adapter_for_executor_maps_known_executors() {
-        assert_eq!(adapter_for_executor("claude_cli").unwrap().default_session_name, "claude-main");
-        assert_eq!(adapter_for_executor("codex_cli").unwrap().default_session_name, "codex-main");
-        assert_eq!(adapter_for_executor("cursor_cli").unwrap().default_session_name, "cursor-main");
+        assert_eq!(
+            adapter_for_executor("claude_cli")
+                .unwrap()
+                .default_session_name,
+            "claude-main"
+        );
+        assert_eq!(
+            adapter_for_executor("codex_cli")
+                .unwrap()
+                .default_session_name,
+            "codex-main"
+        );
+        assert_eq!(
+            adapter_for_executor("cursor_cli")
+                .unwrap()
+                .default_session_name,
+            "cursor-main"
+        );
         assert!(adapter_for_executor("gpu").is_none());
     }
 }

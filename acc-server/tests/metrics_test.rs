@@ -18,7 +18,8 @@ async fn post_metric(
             &format!("/api/projects/{owner}/{repo}/metrics"),
             &json!({"metric": metric, "value": value}),
         ),
-    ).await
+    )
+    .await
 }
 
 // ── Auth guards ───────────────────────────────────────────────────────────────
@@ -26,26 +27,34 @@ async fn post_metric(
 #[tokio::test]
 async fn test_post_metric_requires_auth() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     let req = Request::builder()
-        .method("POST").uri("/api/projects/org/repo/metrics")
+        .method("POST")
+        .uri("/api/projects/org/repo/metrics")
         .header("Content-Type", "application/json")
         .body(Body::from(json!({"metric":"cov","value":80.0}).to_string()))
         .unwrap();
-    assert_eq!(helpers::call(&ts.app, req).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        helpers::call(&ts.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
 async fn test_get_metrics_requires_auth() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     let req = Request::builder()
-        .method("GET").uri("/api/projects/org/repo/metrics")
+        .method("GET")
+        .uri("/api/projects/org/repo/metrics")
         .body(Body::empty())
         .unwrap();
-    assert_eq!(helpers::call(&ts.app, req).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        helpers::call(&ts.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 // ── Input validation ──────────────────────────────────────────────────────────
@@ -56,7 +65,8 @@ async fn test_post_metric_requires_metric_field() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/projects/org/repo/metrics", &json!({"value": 90.0})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -65,8 +75,12 @@ async fn test_post_metric_requires_value_field() {
     let ts = helpers::TestServer::new().await;
     let resp = helpers::call(
         &ts.app,
-        helpers::post_json("/api/projects/org/repo/metrics", &json!({"metric": "coverage_pct"})),
-    ).await;
+        helpers::post_json(
+            "/api/projects/org/repo/metrics",
+            &json!({"metric": "coverage_pct"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -92,13 +106,16 @@ async fn test_get_metrics_for_repo() {
     let resp = helpers::call(
         &ts.app,
         helpers::get("/api/projects/acme/metrics-test-2/metrics"),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     // Response shape: {repo, count, entries, sparklines} — no "ok" field
     assert_eq!(body["repo"], "acme/metrics-test-2");
     let entries = body["entries"].as_array().unwrap();
-    assert!(entries.iter().any(|e| e["metric"] == "test_count" && e["value"] == 42.0));
+    assert!(entries
+        .iter()
+        .any(|e| e["metric"] == "test_count" && e["value"] == 42.0));
 }
 
 #[tokio::test]
@@ -107,7 +124,8 @@ async fn test_get_metrics_empty_for_unknown_repo() {
     let resp = helpers::call(
         &ts.app,
         helpers::get("/api/projects/nobody/totally-unique-empty-repo-xyz/metrics"),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert!(body["entries"].as_array().unwrap().is_empty());

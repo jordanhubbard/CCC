@@ -87,7 +87,10 @@ async fn claim_locked_preserves_pending_field() {
     match err {
         Error::Locked(body) => {
             assert_eq!(body.error, "blocked");
-            assert_eq!(body.extra.get("pending").and_then(|v| v.as_str()), Some("task-1"));
+            assert_eq!(
+                body.extra.get("pending").and_then(|v| v.as_str()),
+                Some("task-1")
+            );
         }
         other => panic!("expected Locked, got {other:?}"),
     }

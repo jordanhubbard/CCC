@@ -13,12 +13,16 @@ async fn create_lesson(
 ) -> serde_json::Value {
     let resp = helpers::call(
         &ts.app,
-        helpers::post_json("/api/lessons", &json!({
-            "domain": domain,
-            "symptom": symptom,
-            "fix": fix,
-        })),
-    ).await;
+        helpers::post_json(
+            "/api/lessons",
+            &json!({
+                "domain": domain,
+                "symptom": symptom,
+                "fix": fix,
+            }),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED, "create_lesson failed");
     helpers::body_json(resp).await["lesson"].clone()
 }
@@ -39,14 +43,20 @@ async fn test_create_lesson_ok() {
 #[tokio::test]
 async fn test_create_lesson_requires_auth() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     let req = Request::builder()
-        .method("POST").uri("/api/lessons")
+        .method("POST")
+        .uri("/api/lessons")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({"domain":"x","symptom":"y","fix":"z"}).to_string()))
+        .body(Body::from(
+            json!({"domain":"x","symptom":"y","fix":"z"}).to_string(),
+        ))
         .unwrap();
-    assert_eq!(helpers::call(&ts.app, req).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        helpers::call(&ts.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
@@ -55,7 +65,8 @@ async fn test_create_lesson_missing_domain() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/lessons", &json!({"symptom": "x", "fix": "y"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -65,7 +76,8 @@ async fn test_create_lesson_missing_fix() {
     let resp = helpers::call(
         &ts.app,
         helpers::post_json("/api/lessons", &json!({"domain": "x", "symptom": "y"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -97,10 +109,17 @@ async fn test_get_lesson_not_found() {
 #[tokio::test]
 async fn test_list_lessons_requires_auth() {
     let ts = helpers::TestServer::new().await;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
-    let req = Request::builder().method("GET").uri("/api/lessons").body(Body::empty()).unwrap();
-    assert_eq!(helpers::call(&ts.app, req).await.status(), StatusCode::UNAUTHORIZED);
+    use axum::http::{Request, StatusCode};
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/lessons")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        helpers::call(&ts.app, req).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]

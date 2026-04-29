@@ -75,7 +75,12 @@ async fn fs_read(State(state): State<Arc<AppState>>, Query(params): Query<ReadQu
     match tokio::fs::read(&full).await {
         Ok(bytes) => {
             let ct = content_type_for(&params.path);
-            (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, ct)], bytes).into_response()
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, ct)],
+                bytes,
+            )
+                .into_response()
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             (StatusCode::NOT_FOUND, Json(json!({"error": "Not found"}))).into_response()
@@ -189,16 +194,18 @@ async fn walk_dir(root: &Path, dir: &Path) -> std::io::Result<Vec<serde_json::Va
             if meta.is_dir() {
                 stack.push(path);
             } else {
-                let key = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+                let key = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
                 let modified = meta
                     .modified()
                     .ok()
                     .and_then(|t| {
                         t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| {
-                            chrono::DateTime::<chrono::Utc>::from(
-                                std::time::UNIX_EPOCH + d,
-                            )
-                            .to_rfc3339()
+                            chrono::DateTime::<chrono::Utc>::from(std::time::UNIX_EPOCH + d)
+                                .to_rfc3339()
                         })
                     })
                     .unwrap_or_default();

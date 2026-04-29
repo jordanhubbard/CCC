@@ -1,13 +1,13 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::time::sleep;
 
-use acc_client::Client;
-use acc_model::{HeartbeatRequest, Task, TaskStatus, TaskType};
 use crate::config::Config;
 use crate::session_registry;
+use acc_client::Client;
+use acc_model::{HeartbeatRequest, Task, TaskStatus, TaskType};
 
 use super::conversation::ConversationHistory;
 use super::provider::LlmProvider;
@@ -54,42 +54,52 @@ impl HermesAgent {
         let shutdown = Arc::new(AtomicBool::new(false));
         let sd = shutdown.clone();
         tokio::spawn(async move {
-            if let Ok(mut sig) = tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::terminate(),
-            ) {
+            if let Ok(mut sig) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            {
                 sig.recv().await;
                 sd.store(true, Ordering::SeqCst);
             }
         });
-        Self { cfg, client, http, provider, tools, shutdown }
+        Self {
+            cfg,
+            client,
+            http,
+            provider,
+            tools,
+            shutdown,
+        }
     }
 
     pub async fn run_queue_item(&self, item_id: String, query: String) {
         self.register_capabilities().await;
-        self.log(&format!("starting item={item_id} query_len={}", query.len()));
+        self.log(&format!(
+            "starting item={item_id} query_len={}",
+            query.len()
+        ));
 
         if !self.claim_queue_item(&item_id).await {
             self.log(&format!("claim rejected for {item_id}"));
             return;
         }
 
-        let workspace_query =
-            if let Ok(ws) = std::env::var("TASK_WORKSPACE_LOCAL") {
-                format!(
-                    "Your task workspace is: {ws}\n\
+        let workspace_query = if let Ok(ws) = std::env::var("TASK_WORKSPACE_LOCAL") {
+            format!(
+                "Your task workspace is: {ws}\n\
                      Work only within this directory. \
                      Do NOT run git commit or git push.\n\n{query}"
-                )
-            } else {
-                query
-            };
+            )
+        } else {
+            query
+        };
 
-        let (ok, output) =
-            self.run_conversation(
+        let (ok, output) = self
+            .run_conversation(
                 Some(item_id.clone()),
                 Some(KeepaliveTarget::QueueItem(item_id.clone())),
                 workspace_query,
-            ).await;
+            )
+            .await;
         if ok {
             self.post_queue_complete(&item_id, &output).await;
         } else {
@@ -107,7 +117,10 @@ impl HermesAgent {
         } else {
             query
         };
-        self.log(&format!("starting task={task_id} query_len={}", query.len()));
+        self.log(&format!(
+            "starting task={task_id} query_len={}",
+            query.len()
+        ));
 
         if !self.claim_task(&task_id).await {
             self.log(&format!("claim rejected for {task_id}"));
@@ -115,11 +128,13 @@ impl HermesAgent {
         }
 
         let workspace_query = self.workspace_query(query);
-        let (ok, output) = self.run_conversation(
-            Some(task_id.clone()),
-            Some(KeepaliveTarget::Task(task_id.clone())),
-            workspace_query,
-        ).await;
+        let (ok, output) = self
+            .run_conversation(
+                Some(task_id.clone()),
+                Some(KeepaliveTarget::Task(task_id.clone())),
+                workspace_query,
+            )
+            .await;
         if ok {
             self.post_task_complete(&task_id, &output).await;
         } else {
@@ -152,11 +167,13 @@ impl HermesAgent {
                     continue;
                 }
                 let query = self.workspace_query(self.task_query(&task));
-                let (ok, output) = self.run_conversation(
-                    Some(id.clone()),
-                    Some(KeepaliveTarget::Task(id.clone())),
-                    query,
-                ).await;
+                let (ok, output) = self
+                    .run_conversation(
+                        Some(id.clone()),
+                        Some(KeepaliveTarget::Task(id.clone())),
+                        query,
+                    )
+                    .await;
                 if ok {
                     self.post_task_complete(&id, &output).await;
                 } else {
@@ -206,7 +223,10 @@ impl HermesAgent {
         let mut history = if let Some(ref id) = item_id {
             let stored_turns = self.load_turns(id).await;
             if !stored_turns.is_empty() {
-                self.log(&format!("resuming from {} stored turns", stored_turns.len()));
+                self.log(&format!(
+                    "resuming from {} stored turns",
+                    stored_turns.len()
+                ));
                 ConversationHistory::from_turns(&stored_turns)
             } else {
                 let mut h = ConversationHistory::new();
@@ -297,7 +317,8 @@ impl HermesAgent {
                     resp.input_tokens,
                     resp.output_tokens,
                     &resp.stop_reason,
-                ).await;
+                )
+                .await;
             }
 
             match resp.stop_reason.as_str() {
@@ -322,13 +343,12 @@ impl HermesAgent {
                             0,
                             0,
                             "tool_results",
-                        ).await;
+                        )
+                        .await;
                     }
                 }
                 "max_tokens" => {
-                    self.log(&format!(
-                        "token budget exhausted at iteration {iteration}"
-                    ));
+                    self.log(&format!("token budget exhausted at iteration {iteration}"));
                     final_output = format!(
                         "Token budget exhausted after {iteration} iterations. Last output: {}",
                         &final_output[..final_output.len().min(500)]
@@ -422,9 +442,13 @@ impl HermesAgent {
 
     pub(crate) async fn register_capabilities(&self) {
         let caps = self.tools.names();
-        let url = format!("{}/api/agents/{}/capabilities", self.cfg.acc_url, self.cfg.agent_name);
+        let url = format!(
+            "{}/api/agents/{}/capabilities",
+            self.cfg.acc_url, self.cfg.agent_name
+        );
         let body = serde_json::json!({"capabilities": caps});
-        let _ = self.http
+        let _ = self
+            .http
             .put(&url)
             .header("Authorization", format!("Bearer {}", self.cfg.acc_token))
             .json(&body)
@@ -435,18 +459,19 @@ impl HermesAgent {
 
     pub(crate) async fn load_turns(&self, task_id: &str) -> Vec<Value> {
         let url = format!("{}/api/tasks/{}/turns", self.cfg.acc_url, task_id);
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.cfg.acc_token))
             .send()
             .await;
         match resp {
-            Ok(r) if r.status().is_success() => {
-                r.json::<Value>().await
-                    .ok()
-                    .and_then(|v| v["turns"].as_array().cloned())
-                    .unwrap_or_default()
-            }
+            Ok(r) if r.status().is_success() => r
+                .json::<Value>()
+                .await
+                .ok()
+                .and_then(|v| v["turns"].as_array().cloned())
+                .unwrap_or_default(),
             _ => vec![],
         }
     }
@@ -470,7 +495,8 @@ impl HermesAgent {
             "output_tokens": output_tokens,
             "stop_reason":   stop_reason,
         });
-        match self.http
+        match self
+            .http
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.cfg.acc_token))
             .json(&body)
@@ -537,9 +563,7 @@ impl HermesAgent {
                 continue;
             }
             let assignee = raw["assignee"].as_str().unwrap_or("");
-            if !assignee.is_empty()
-                && assignee != "all"
-                && assignee != self.cfg.agent_name.as_str()
+            if !assignee.is_empty() && assignee != "all" && assignee != self.cfg.agent_name.as_str()
             {
                 continue;
             }
@@ -548,8 +572,8 @@ impl HermesAgent {
                 .as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
                 .unwrap_or_default();
-            let is_claude_only = preferred == "claude_cli"
-                || tags.iter().any(|t| CLAUDE_ONLY_TAGS.contains(t));
+            let is_claude_only =
+                preferred == "claude_cli" || tags.iter().any(|t| CLAUDE_ONLY_TAGS.contains(t));
             if !is_claude_only {
                 return Some(raw);
             }
@@ -558,8 +582,14 @@ impl HermesAgent {
     }
 
     async fn fetch_task(&self) -> Option<Task> {
-        for task_type in [TaskType::Work, TaskType::Feature, TaskType::Bug, TaskType::Task] {
-            let tasks = self.client
+        for task_type in [
+            TaskType::Work,
+            TaskType::Feature,
+            TaskType::Bug,
+            TaskType::Task,
+        ] {
+            let tasks = self
+                .client
                 .tasks()
                 .list()
                 .status(TaskStatus::Open)
@@ -579,13 +609,29 @@ impl HermesAgent {
         if task.review_of.is_some() {
             return false;
         }
-        if matches!(task.task_type, TaskType::Review | TaskType::Idea | TaskType::Discovery | TaskType::PhaseCommit | TaskType::Epic | TaskType::Unknown) {
+        if matches!(
+            task.task_type,
+            TaskType::Review
+                | TaskType::Idea
+                | TaskType::Discovery
+                | TaskType::PhaseCommit
+                | TaskType::Epic
+                | TaskType::Unknown
+        ) {
             return false;
         }
-        if task.assigned_agent.as_deref().is_some_and(|name| name != self.cfg.agent_name) {
+        if task
+            .assigned_agent
+            .as_deref()
+            .is_some_and(|name| name != self.cfg.agent_name)
+        {
             return false;
         }
-        if task.preferred_agent.as_deref().is_some_and(|name| name != self.cfg.agent_name) {
+        if task
+            .preferred_agent
+            .as_deref()
+            .is_some_and(|name| name != self.cfg.agent_name)
+        {
             return false;
         }
         if let Some(exec) = task.preferred_executor.as_deref() {
@@ -594,7 +640,10 @@ impl HermesAgent {
             }
         }
         if !task.required_executors.is_empty()
-            && !task.required_executors.iter().any(|req| req == "hermes" || req == "llm")
+            && !task
+                .required_executors
+                .iter()
+                .any(|req| req == "hermes" || req == "llm")
         {
             return false;
         }
@@ -626,7 +675,12 @@ impl HermesAgent {
         let _ = self
             .client
             .items()
-            .complete(item_id, &self.cfg.agent_name, Some(truncated), Some(truncated))
+            .complete(
+                item_id,
+                &self.cfg.agent_name,
+                Some(truncated),
+                Some(truncated),
+            )
             .await;
     }
 
@@ -812,7 +866,9 @@ mod tests {
                     })
                 } else {
                     Ok(super::super::provider::LlmResponse {
-                        content: vec![json!({"type": "text", "text": "tool executed successfully"})],
+                        content: vec![
+                            json!({"type": "text", "text": "tool executed successfully"}),
+                        ],
                         stop_reason: "end_turn".to_string(),
                         input_tokens: 20,
                         output_tokens: 10,
@@ -848,7 +904,14 @@ mod tests {
     fn make_agent(url: &str) -> HermesAgent {
         let cfg = test_cfg(url);
         let client = build_client(&cfg);
-        HermesAgent::new(cfg, client, Box::new(EchoProvider { reply: "task done".to_string() }), ToolRegistry::default_tools())
+        HermesAgent::new(
+            cfg,
+            client,
+            Box::new(EchoProvider {
+                reply: "task done".to_string(),
+            }),
+            ToolRegistry::default_tools(),
+        )
     }
 
     // ── run_conversation tests ─────────────────────────────────────────────────
@@ -859,13 +922,24 @@ mod tests {
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
-            Box::new(EchoProvider { reply: "task done".to_string() }),
+            cfg,
+            client,
+            Box::new(EchoProvider {
+                reply: "task done".to_string(),
+            }),
             ToolRegistry::default_tools(),
         );
-        let (ok, output) = agent.run_conversation(None, None, "do the thing".to_string()).await;
-        assert!(ok, "EchoProvider returns end_turn so conversation must succeed");
-        assert_eq!(output, "task done", "output must be the provider's text reply");
+        let (ok, output) = agent
+            .run_conversation(None, None, "do the thing".to_string())
+            .await;
+        assert!(
+            ok,
+            "EchoProvider returns end_turn so conversation must succeed"
+        );
+        assert_eq!(
+            output, "task done",
+            "output must be the provider's text reply"
+        );
     }
 
     #[tokio::test]
@@ -874,14 +948,19 @@ mod tests {
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
-            Box::new(TwoStepProvider { step: Arc::new(AtomicU32::new(0)) }),
+            cfg,
+            client,
+            Box::new(TwoStepProvider {
+                step: Arc::new(AtomicU32::new(0)),
+            }),
             ToolRegistry::default_tools(),
         );
         // Step 1: provider returns tool_use(bash, echo tool_ran)
         // Step 2: agent executes bash, adds result to history, calls provider again
         // Step 3: provider returns end_turn with "tool executed successfully"
-        let (ok, output) = agent.run_conversation(None, None, "run a tool".to_string()).await;
+        let (ok, output) = agent
+            .run_conversation(None, None, "run a tool".to_string())
+            .await;
         assert!(ok, "should succeed after tool execution");
         assert_eq!(output, "tool executed successfully");
     }
@@ -892,11 +971,14 @@ mod tests {
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
+            cfg,
+            client,
             Box::new(MaxTokensProvider),
             ToolRegistry::default_tools(),
         );
-        let (ok, output) = agent.run_conversation(None, None, "a query".to_string()).await;
+        let (ok, output) = agent
+            .run_conversation(None, None, "a query".to_string())
+            .await;
         assert!(!ok, "max_tokens must signal failure");
         assert!(
             output.contains("Token budget exhausted"),
@@ -918,7 +1000,8 @@ mod tests {
         let mock = HubMock::with_queue(vec![json!({
             "id": "wq-c1", "status": "pending", "assignee": "all",
             "tags": ["claude_cli"], "preferred_executor": ""
-        })]).await;
+        })])
+        .await;
         assert!(make_agent(&mock.url).fetch_queue_item().await.is_none());
     }
 
@@ -927,7 +1010,8 @@ mod tests {
         let mock = HubMock::with_queue(vec![json!({
             "id": "wq-c2", "status": "pending", "assignee": "all",
             "tags": [], "preferred_executor": "claude_cli"
-        })]).await;
+        })])
+        .await;
         assert!(make_agent(&mock.url).fetch_queue_item().await.is_none());
     }
 
@@ -936,7 +1020,8 @@ mod tests {
         let mock = HubMock::with_queue(vec![json!({
             "id": "wq-ok", "status": "pending", "assignee": "all",
             "tags": ["gpu"], "preferred_executor": ""
-        })]).await;
+        })])
+        .await;
         let item = make_agent(&mock.url).fetch_queue_item().await;
         assert!(item.is_some());
         assert_eq!(item.unwrap()["id"], "wq-ok");
@@ -960,9 +1045,13 @@ mod tests {
                 "title": "Hermes task",
                 "description": "handle me",
                 "preferred_executor": "hermes"
-            })
-        ]).await;
-        let task = make_agent(&mock.url).fetch_task().await.expect("eligible task");
+            }),
+        ])
+        .await;
+        let task = make_agent(&mock.url)
+            .fetch_task()
+            .await
+            .expect("eligible task");
         assert_eq!(task.id, "task-hermes");
     }
 
@@ -975,7 +1064,8 @@ mod tests {
             "title": "Assigned elsewhere",
             "description": "skip me",
             "assigned_agent": "boris"
-        })]).await;
+        })])
+        .await;
         assert!(make_agent(&mock.url).fetch_task().await.is_none());
     }
 
@@ -1062,7 +1152,11 @@ mod tests {
     #[tokio::test]
     async fn claim_conflict_returns_false() {
         use crate::hub_mock::HubState;
-        let mock = HubMock::with_state(HubState { item_claim_status: 409, ..Default::default() }).await;
+        let mock = HubMock::with_state(HubState {
+            item_claim_status: 409,
+            ..Default::default()
+        })
+        .await;
         assert!(!make_agent(&mock.url).claim_queue_item("wq-clash").await);
     }
 
@@ -1090,18 +1184,25 @@ mod tests {
                 "tags": [], "preferred_executor": ""
             })],
             ..Default::default()
-        }).await;
+        })
+        .await;
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
-            Box::new(EchoProvider { reply: "done".to_string() }),
+            cfg,
+            client,
+            Box::new(EchoProvider {
+                reply: "done".to_string(),
+            }),
             ToolRegistry::default_tools(),
         );
-        agent.run_queue_item("wq-item-1".to_string(), "test task".to_string()).await;
+        agent
+            .run_queue_item("wq-item-1".to_string(), "test task".to_string())
+            .await;
         let log = mock.state.read().await.call_log.lock().await.clone();
         assert!(
-            log.iter().any(|e| e.contains("/api/item/wq-item-1/complete")),
+            log.iter()
+                .any(|e| e.contains("/api/item/wq-item-1/complete")),
             "complete must be called after successful run; log={log:?}"
         );
     }
@@ -1112,11 +1213,14 @@ mod tests {
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
+            cfg,
+            client,
             Box::new(MaxTokensProvider),
             ToolRegistry::default_tools(),
         );
-        agent.run_queue_item("wq-item-2".to_string(), "another task".to_string()).await;
+        agent
+            .run_queue_item("wq-item-2".to_string(), "another task".to_string())
+            .await;
         let log = mock.state.read().await.call_log.lock().await.clone();
         assert!(
             log.iter().any(|e| e.contains("/api/item/wq-item-2/fail")),
@@ -1133,15 +1237,21 @@ mod tests {
             "title": "Hermes task",
             "description": "complete me",
             "preferred_executor": "hermes"
-        })]).await;
+        })])
+        .await;
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
-            Box::new(EchoProvider { reply: "done".to_string() }),
+            cfg,
+            client,
+            Box::new(EchoProvider {
+                reply: "done".to_string(),
+            }),
             ToolRegistry::default_tools(),
         );
-        agent.run_task("task-1".to_string(), "test task".to_string()).await;
+        agent
+            .run_task("task-1".to_string(), "test task".to_string())
+            .await;
         let log = mock.state.read().await.call_log.lock().await.clone();
         assert!(
             log.iter().any(|e| e.contains("/api/tasks/task-1/complete")),
@@ -1158,15 +1268,19 @@ mod tests {
             "title": "Hermes task",
             "description": "fail me",
             "preferred_executor": "hermes"
-        })]).await;
+        })])
+        .await;
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
+            cfg,
+            client,
             Box::new(MaxTokensProvider),
             ToolRegistry::default_tools(),
         );
-        agent.run_task("task-2".to_string(), "another task".to_string()).await;
+        agent
+            .run_task("task-2".to_string(), "another task".to_string())
+            .await;
         let log = mock.state.read().await.call_log.lock().await.clone();
         assert!(
             log.iter().any(|e| e.contains("/api/tasks/task-2/unclaim")),
@@ -1182,20 +1296,25 @@ mod tests {
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
-            Box::new(EchoProvider { reply: "done".to_string() }),
+            cfg,
+            client,
+            Box::new(EchoProvider {
+                reply: "done".to_string(),
+            }),
             ToolRegistry::default_tools(),
         );
         // Save a turn
-        agent.save_turn(
-            "task-abc",
-            0,
-            "assistant",
-            &serde_json::json!([{"type": "text", "text": "hello"}]),
-            10,
-            5,
-            "end_turn",
-        ).await;
+        agent
+            .save_turn(
+                "task-abc",
+                0,
+                "assistant",
+                &serde_json::json!([{"type": "text", "text": "hello"}]),
+                10,
+                5,
+                "end_turn",
+            )
+            .await;
         // Load it back
         let turns = agent.load_turns("task-abc").await;
         assert_eq!(turns.len(), 1, "should have one stored turn");
@@ -1210,16 +1329,31 @@ mod tests {
         let cfg = test_cfg(&mock.url);
         let client = build_client(&cfg);
         let agent = HermesAgent::new(
-            cfg, client,
-            Box::new(EchoProvider { reply: "ok".to_string() }),
+            cfg,
+            client,
+            Box::new(EchoProvider {
+                reply: "ok".to_string(),
+            }),
             ToolRegistry::default_tools(),
         );
         agent.register_capabilities().await;
-        let caps = mock.state.read().await
-            .agent_capabilities.lock().await
-            .get("natasha").cloned()
+        let caps = mock
+            .state
+            .read()
+            .await
+            .agent_capabilities
+            .lock()
+            .await
+            .get("natasha")
+            .cloned()
             .unwrap_or_default();
-        assert!(caps.contains(&"bash".to_string()), "bash must be in registered capabilities");
-        assert!(caps.contains(&"web_fetch".to_string()), "web_fetch must be in registered capabilities");
+        assert!(
+            caps.contains(&"bash".to_string()),
+            "bash must be in registered capabilities"
+        );
+        assert!(
+            caps.contains(&"web_fetch".to_string()),
+            "web_fetch must be in registered capabilities"
+        );
     }
 }

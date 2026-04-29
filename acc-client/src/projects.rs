@@ -11,7 +11,12 @@ pub struct ProjectsApi<'a> {
 
 impl<'a> ProjectsApi<'a> {
     pub fn list(self) -> ListProjectsBuilder<'a> {
-        ListProjectsBuilder { client: self.client, status: None, q: None, limit: None }
+        ListProjectsBuilder {
+            client: self.client,
+            status: None,
+            q: None,
+            limit: None,
+        }
     }
 
     /// GET /api/projects/{id}

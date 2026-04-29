@@ -37,11 +37,7 @@ impl<'a> BusApi<'a> {
     }
 
     /// GET /api/bus/messages — list recent messages.
-    pub async fn messages(
-        self,
-        limit: Option<u32>,
-        kind: Option<&str>,
-    ) -> Result<Vec<BusMsg>> {
+    pub async fn messages(self, limit: Option<u32>, kind: Option<&str>) -> Result<Vec<BusMsg>> {
         let mut q: Vec<(&'static str, String)> = Vec::new();
         if let Some(n) = limit {
             q.push(("limit", n.to_string()));
@@ -105,9 +101,7 @@ impl<'a> BusApi<'a> {
 /// Open the SSE stream, resolving the status-code check before we start
 /// consuming frames. Factored out so the happy-path `resp.bytes_stream()`
 /// and the error-path `resp.bytes()` don't need to share `resp`.
-async fn open_sse(
-    client: &Client,
-) -> Result<impl Stream<Item = reqwest::Result<Bytes>> + 'static> {
+async fn open_sse(client: &Client) -> Result<impl Stream<Item = reqwest::Result<Bytes>> + 'static> {
     let resp = client
         .http()
         .get(client.url("/api/bus/stream"))
@@ -182,7 +176,11 @@ fn extract_sse_data(frame: &[u8]) -> Option<String> {
         }
         // other fields (event:, id:, retry:) — ignored for now
     }
-    if saw_data { Some(out) } else { None }
+    if saw_data {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -207,7 +205,10 @@ mod tests {
     #[test]
     fn extract_data_joins_multiple_data_lines() {
         let frame = b"data: {\"a\":1,\ndata: \"b\":2}\n\n";
-        assert_eq!(extract_sse_data(frame).as_deref(), Some("{\"a\":1,\n\"b\":2}"));
+        assert_eq!(
+            extract_sse_data(frame).as_deref(),
+            Some("{\"a\":1,\n\"b\":2}")
+        );
     }
 
     #[test]

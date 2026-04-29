@@ -10,7 +10,9 @@ pub struct ChainsApi<'a> {
 impl<'a> ChainsApi<'a> {
     /// Create or update a chain. Returns the full chain envelope.
     pub async fn upsert(&self, chain: &Value) -> Result<Value> {
-        self.client.request_json("POST", "/api/chains", Some(chain)).await
+        self.client
+            .request_json("POST", "/api/chains", Some(chain))
+            .await
     }
 
     /// Append one immutable event to a chain. The server idempotently ignores
@@ -21,7 +23,12 @@ impl<'a> ChainsApi<'a> {
     }
 
     /// Link a task back to the chain that requested or discussed it.
-    pub async fn link_task(&self, chain_id: &str, task_id: &str, relationship: &str) -> Result<Value> {
+    pub async fn link_task(
+        &self,
+        chain_id: &str,
+        task_id: &str,
+        relationship: &str,
+    ) -> Result<Value> {
         let path = format!("/api/chains/{}/tasks", urlencoding(chain_id));
         let body = serde_json::json!({
             "task_id": task_id,

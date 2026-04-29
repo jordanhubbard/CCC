@@ -18,20 +18,27 @@ use tokio::process::Command;
 use tokio::sync::Notify;
 use tokio::time::sleep;
 
-use acc_client::Client;
-use acc_model::HeartbeatRequest;
 use crate::cli_sanity;
 use crate::cli_tmux_adapter;
 use crate::config::Config;
 use crate::peers;
 use crate::session_registry;
+use acc_client::Client;
+use acc_model::HeartbeatRequest;
 
 const POLL_INTERVAL_IDLE: Duration = Duration::from_secs(60);
 const POLL_INTERVAL_BUSY: Duration = Duration::from_secs(5);
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25 * 60);
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(7200);
 
-const HERMES_TAGS: &[&str] = &["hermes", "gpu", "render", "simulation", "omniverse", "isaaclab"];
+const HERMES_TAGS: &[&str] = &[
+    "hermes",
+    "gpu",
+    "render",
+    "simulation",
+    "omniverse",
+    "isaaclab",
+];
 
 pub async fn run(args: &[String]) {
     let once = args.iter().any(|a| a == "--once");
@@ -53,10 +60,13 @@ pub async fn run(args: &[String]) {
     let _ = std::fs::create_dir_all(cfg.acc_dir.join("task-workspaces"));
 
     let caps = detect_capabilities();
-    log(&cfg, &format!(
-        "starting (agent={}, hub={}) caps={:?}",
-        cfg.agent_name, cfg.acc_url, caps
-    ));
+    log(
+        &cfg,
+        &format!(
+            "starting (agent={}, hub={}) caps={:?}",
+            cfg.agent_name, cfg.acc_url, caps
+        ),
+    );
 
     let client = build_client(&cfg);
     let active_tasks = Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -97,13 +107,22 @@ pub async fn run(args: &[String]) {
         if let Some(item) = item {
             let item_id = item["id"].as_str().unwrap_or("").to_string();
             let title = item["title"].as_str().unwrap_or("?");
-            log(&cfg, &format!("claiming [{id}] {title}", id = &item_id, title = &title[..title.len().min(60)]));
+            log(
+                &cfg,
+                &format!(
+                    "claiming [{id}] {title}",
+                    id = &item_id,
+                    title = &title[..title.len().min(60)]
+                ),
+            );
 
             if !claim_item(&cfg, &client, &item_id).await {
                 log(&cfg, &format!("[{item_id}] claim rejected"));
                 sleep(POLL_INTERVAL_BUSY).await;
                 poll_interval = POLL_INTERVAL_IDLE;
-                if once { break; }
+                if once {
+                    break;
+                }
                 continue;
             }
 
@@ -114,7 +133,9 @@ pub async fn run(args: &[String]) {
             poll_interval = POLL_INTERVAL_BUSY;
         } else {
             log(&cfg, "no claimable items — sleeping");
-            if once { break; }
+            if once {
+                break;
+            }
             tokio::select! {
                 _ = sleep(poll_interval) => {}
                 _ = nudge.notified() => {
@@ -124,7 +145,9 @@ pub async fn run(args: &[String]) {
             poll_interval = POLL_INTERVAL_IDLE;
         }
 
-        if once { break; }
+        if once {
+            break;
+        }
     }
 }
 
@@ -143,14 +166,22 @@ async fn execute_item(cfg: &Config, client: &Client, item: &serde_json::Value) {
 
     let task_env = build_task_env(&item_id, &workspace_local, &workspace_agentfs);
 
-    post_comment(cfg, client, &item_id, &format!(
-        "{} starting — workspace {}",
-        cfg.agent_name,
-        workspace_local.display()
-    )).await;
+    post_comment(
+        cfg,
+        client,
+        &item_id,
+        &format!(
+            "{} starting — workspace {}",
+            cfg.agent_name,
+            workspace_local.display()
+        ),
+    )
+    .await;
 
     // Execute
-    let preferred_executor = item["preferred_executor"].as_str().filter(|s| !s.is_empty());
+    let preferred_executor = item["preferred_executor"]
+        .as_str()
+        .filter(|s| !s.is_empty());
     let (output, exit_code) = if is_hermes_task(item) {
         log(cfg, &format!("[{item_id}] routing to acc-agent hermes"));
         run_hermes_driver(cfg, item, &item_id, &task_env, &workspace_local).await
@@ -158,13 +189,26 @@ async fn execute_item(cfg: &Config, client: &Client, item: &serde_json::Value) {
         let prompt = build_prompt(item, &workspace_local);
         match cli_sanity::choose_ready_executor(cfg, preferred_executor, &workspace_local).await {
             Some(executor) => {
-                log(cfg, &format!("[{item_id}] running {executor} after readiness probe"));
-                let (output, exit_code) =
-                    run_session_executor(cfg, &executor, &prompt, &item_id, &task_env, &workspace_local).await;
+                log(
+                    cfg,
+                    &format!("[{item_id}] running {executor} after readiness probe"),
+                );
+                let (output, exit_code) = run_session_executor(
+                    cfg,
+                    &executor,
+                    &prompt,
+                    &item_id,
+                    &task_env,
+                    &workspace_local,
+                )
+                .await;
                 if exit_code == 0 {
                     (output, exit_code)
                 } else {
-                    log(cfg, &format!("[{item_id}] {executor} session path failed, falling back to API"));
+                    log(
+                        cfg,
+                        &format!("[{item_id}] {executor} session path failed, falling back to API"),
+                    );
                     run_api_coding(cfg, &prompt, &item_id, &workspace_local).await
                 }
             }
@@ -177,7 +221,8 @@ async fn execute_item(cfg: &Config, client: &Client, item: &serde_json::Value) {
 
     // Finalize
     if exit_code == 0 {
-        let git_result = finalize_workspace(cfg, &item_id, &workspace_local, &workspace_agentfs, &output).await;
+        let git_result =
+            finalize_workspace(cfg, &item_id, &workspace_local, &workspace_agentfs, &output).await;
         let full_result = if git_result.is_empty() {
             output
         } else {
@@ -187,14 +232,26 @@ async fn execute_item(cfg: &Config, client: &Client, item: &serde_json::Value) {
         log(cfg, &format!("[{item_id}] completed OK"));
     } else {
         abandon_workspace(cfg, &item_id, &workspace_local, &workspace_agentfs).await;
-        post_fail(cfg, client, &item_id, &format!("exit_code={exit_code}\n{}", &output[..output.len().min(1000)])).await;
+        post_fail(
+            cfg,
+            client,
+            &item_id,
+            &format!(
+                "exit_code={exit_code}\n{}",
+                &output[..output.len().min(1000)]
+            ),
+        )
+        .await;
         log(cfg, &format!("[{item_id}] failed (exit={exit_code})"));
     }
 }
 
 // ── Workspace ─────────────────────────────────────────────────────────────────
 
-async fn init_workspace(cfg: &Config, item: &serde_json::Value) -> Result<(PathBuf, String), String> {
+async fn init_workspace(
+    cfg: &Config,
+    item: &serde_json::Value,
+) -> Result<(PathBuf, String), String> {
     let item_id = item["id"].as_str().unwrap_or("");
     let workspace_local = std::env::temp_dir().join(format!("acc-workspace-{item_id}"));
     let _ = std::fs::create_dir_all(&workspace_local);
@@ -208,7 +265,15 @@ async fn init_workspace(cfg: &Config, item: &serde_json::Value) -> Result<(PathB
             let repo_url = repo_url_from_item(item);
             let branch = item["branch"].as_str().unwrap_or("main");
             mc_mirror_push(cfg, item_id, &workspace_local, &agentfs_path).await;
-            write_agentfs_meta(cfg, item, &agentfs_path, &repo_url, branch, &workspace_local).await;
+            write_agentfs_meta(
+                cfg,
+                item,
+                &agentfs_path,
+                &repo_url,
+                branch,
+                &workspace_local,
+            )
+            .await;
             return Ok((workspace_local, agentfs_path));
         }
     }
@@ -223,7 +288,15 @@ async fn init_workspace(cfg: &Config, item: &serde_json::Value) -> Result<(PathB
 
     if !agentfs_path.is_empty() {
         mc_mirror_push(cfg, item_id, &workspace_local, &agentfs_path).await;
-        write_agentfs_meta(cfg, item, &agentfs_path, &repo_url, branch, &workspace_local).await;
+        write_agentfs_meta(
+            cfg,
+            item,
+            &agentfs_path,
+            &repo_url,
+            branch,
+            &workspace_local,
+        )
+        .await;
     }
 
     Ok((workspace_local, agentfs_path))
@@ -232,7 +305,14 @@ async fn init_workspace(cfg: &Config, item: &serde_json::Value) -> Result<(PathB
 async fn git_clone(cfg: &Config, item_id: &str, repo_url: &str, branch: &str, dest: &Path) {
     // Try with branch first, fall back to default branch
     let r = Command::new("git")
-        .args(["clone", "--depth=1", "--branch", branch, repo_url, dest.to_str().unwrap_or(".")])
+        .args([
+            "clone",
+            "--depth=1",
+            "--branch",
+            branch,
+            repo_url,
+            dest.to_str().unwrap_or("."),
+        ])
         .output()
         .await;
     if r.map(|o| o.status.success()).unwrap_or(false) {
@@ -279,7 +359,10 @@ async fn finalize_workspace(
 
 async fn abandon_workspace(cfg: &Config, item_id: &str, local: &PathBuf, agentfs: &str) {
     if !agentfs.is_empty() {
-        log(cfg, &format!("[{item_id}] preserving failed workspace in AgentFS"));
+        log(
+            cfg,
+            &format!("[{item_id}] preserving failed workspace in AgentFS"),
+        );
         mc_mirror_push(cfg, item_id, local, agentfs).await;
     }
     cleanup_workspace(cfg, item_id, local).await;
@@ -291,7 +374,12 @@ async fn cleanup_workspace(cfg: &Config, item_id: &str, local: &PathBuf) {
     }
 }
 
-async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_output: &str) -> String {
+async fn git_push_once(
+    cfg: &Config,
+    item_id: &str,
+    workspace: &PathBuf,
+    task_output: &str,
+) -> String {
     let cwd = workspace.to_str().unwrap_or(".");
 
     // Check if anything to commit
@@ -306,18 +394,41 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
     let task_branch = format!("task/{item_id}");
 
     // Create task branch
-    match Command::new("git").args(["-C", cwd, "checkout", "-b", &task_branch]).output().await {
+    match Command::new("git")
+        .args(["-C", cwd, "checkout", "-b", &task_branch])
+        .output()
+        .await
+    {
         Ok(o) if !o.status.success() => {
-            log(cfg, &format!("[{item_id}] git checkout -b failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+            log(
+                cfg,
+                &format!(
+                    "[{item_id}] git checkout -b failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ),
+            );
         }
-        Err(e) => log(cfg, &format!("[{item_id}] git checkout -b spawn failed: {e}")),
+        Err(e) => log(
+            cfg,
+            &format!("[{item_id}] git checkout -b spawn failed: {e}"),
+        ),
         _ => {}
     }
 
     // Stage all
-    match Command::new("git").args(["-C", cwd, "add", "-A"]).output().await {
+    match Command::new("git")
+        .args(["-C", cwd, "add", "-A"])
+        .output()
+        .await
+    {
         Ok(o) if !o.status.success() => {
-            log(cfg, &format!("[{item_id}] git add failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+            log(
+                cfg,
+                &format!(
+                    "[{item_id}] git add failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ),
+            );
             return "git add failed".into();
         }
         Err(e) => {
@@ -335,16 +446,27 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
     );
     match Command::new("git")
         .args([
-            "-C", cwd,
-            "-c", &format!("user.email={}@acc", cfg.agent_name),
-            "-c", &format!("user.name={}", cfg.agent_name),
-            "commit", "-m", &commit_msg,
+            "-C",
+            cwd,
+            "-c",
+            &format!("user.email={}@acc", cfg.agent_name),
+            "-c",
+            &format!("user.name={}", cfg.agent_name),
+            "commit",
+            "-m",
+            &commit_msg,
         ])
         .output()
         .await
     {
         Ok(o) if !o.status.success() => {
-            log(cfg, &format!("[{item_id}] git commit failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+            log(
+                cfg,
+                &format!(
+                    "[{item_id}] git commit failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ),
+            );
         }
         Err(e) => log(cfg, &format!("[{item_id}] git commit spawn failed: {e}")),
         _ => {}
@@ -374,9 +496,18 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
                 .await
             {
                 Ok(o) if !o.status.success() => {
-                    log(cfg, &format!("[{item_id}] git remote set-url failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+                    log(
+                        cfg,
+                        &format!(
+                            "[{item_id}] git remote set-url failed: {}",
+                            String::from_utf8_lossy(&o.stderr).trim()
+                        ),
+                    );
                 }
-                Err(e) => log(cfg, &format!("[{item_id}] git remote set-url spawn failed: {e}")),
+                Err(e) => log(
+                    cfg,
+                    &format!("[{item_id}] git remote set-url spawn failed: {e}"),
+                ),
                 _ => {}
             }
         }
@@ -384,7 +515,14 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
 
     // Push (force-with-lease first, then set-upstream)
     let push = Command::new("git")
-        .args(["-C", cwd, "push", "--force-with-lease", "origin", &task_branch])
+        .args([
+            "-C",
+            cwd,
+            "push",
+            "--force-with-lease",
+            "origin",
+            &task_branch,
+        ])
         .output()
         .await;
     let push_err = match &push {
@@ -396,7 +534,10 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
         return format!("pushed to {task_branch} @ {sha}");
     }
     if let Some(err) = push_err {
-        log(cfg, &format!("[{item_id}] git push --force-with-lease failed: {err}"));
+        log(
+            cfg,
+            &format!("[{item_id}] git push --force-with-lease failed: {err}"),
+        );
     }
 
     let push2 = Command::new("git")
@@ -405,9 +546,18 @@ async fn git_push_once(cfg: &Config, item_id: &str, workspace: &PathBuf, task_ou
         .await;
     match &push2 {
         Ok(o) if !o.status.success() => {
-            log(cfg, &format!("[{item_id}] git push --set-upstream failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+            log(
+                cfg,
+                &format!(
+                    "[{item_id}] git push --set-upstream failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ),
+            );
         }
-        Err(e) => log(cfg, &format!("[{item_id}] git push --set-upstream spawn failed: {e}")),
+        Err(e) => log(
+            cfg,
+            &format!("[{item_id}] git push --set-upstream spawn failed: {e}"),
+        ),
         _ => {}
     }
     if push2.map(|o| o.status.success()).unwrap_or(false) {
@@ -435,13 +585,26 @@ async fn mc_mirror_push(cfg: &Config, item_id: &str, local: &PathBuf, agentfs: &
         .await;
     match r {
         Ok(o) if o.status.success() => log(cfg, &format!("[{item_id}] workspace → AgentFS")),
-        Ok(o) => log(cfg, &format!("[{item_id}] AgentFS push warning: {}", String::from_utf8_lossy(&o.stderr).trim())),
+        Ok(o) => log(
+            cfg,
+            &format!(
+                "[{item_id}] AgentFS push warning: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            ),
+        ),
         Err(e) => log(cfg, &format!("[{item_id}] AgentFS push error: {e}")),
     }
 }
 
-async fn mc_mirror_pull(_cfg: &Config, _item_id: &str, agentfs: &str, local: &PathBuf) -> Result<bool, String> {
-    if which_bin("mc").is_none() { return Ok(false); }
+async fn mc_mirror_pull(
+    _cfg: &Config,
+    _item_id: &str,
+    agentfs: &str,
+    local: &PathBuf,
+) -> Result<bool, String> {
+    if which_bin("mc").is_none() {
+        return Ok(false);
+    }
     let local_str = format!("{}/", local.display());
     let r = Command::new("mc")
         .args(["mirror", "--overwrite", "--quiet", agentfs, &local_str])
@@ -452,8 +615,12 @@ async fn mc_mirror_pull(_cfg: &Config, _item_id: &str, agentfs: &str, local: &Pa
 }
 
 async fn write_agentfs_meta(
-    _cfg: &Config, item: &serde_json::Value, agentfs: &str,
-    repo_url: &str, branch: &str, workspace: &PathBuf,
+    _cfg: &Config,
+    item: &serde_json::Value,
+    agentfs: &str,
+    repo_url: &str,
+    branch: &str,
+    workspace: &PathBuf,
 ) {
     let sha = if workspace.join(".git").exists() {
         Command::new("git")
@@ -467,7 +634,10 @@ async fn write_agentfs_meta(
     };
 
     let parts: Vec<&str> = agentfs.splitn(3, '/').collect();
-    let (mc_alias, bucket) = (parts.first().copied().unwrap_or("ccc-hub"), parts.get(1).copied().unwrap_or("agents"));
+    let (mc_alias, bucket) = (
+        parts.first().copied().unwrap_or("ccc-hub"),
+        parts.get(1).copied().unwrap_or("agents"),
+    );
 
     let meta = serde_json::json!({
         "task_id":      item["id"],
@@ -482,10 +652,13 @@ async fn write_agentfs_meta(
     let item_id = item["id"].as_str().unwrap_or("");
     // Pipe meta JSON via echo to mc
     let _ = Command::new("sh")
-        .args(["-c", &format!(
-            "echo {} | mc pipe {mc_alias}/{bucket}/tasks/{item_id}/meta.json",
-            shlex_quote(&meta_str)
-        )])
+        .args([
+            "-c",
+            &format!(
+                "echo {} | mc pipe {mc_alias}/{bucket}/tasks/{item_id}/meta.json",
+                shlex_quote(&meta_str)
+            ),
+        ])
         .output()
         .await;
 }
@@ -508,10 +681,15 @@ async fn run_session_executor(
         return (format!("unsupported session executor: {executor}"), 1);
     };
 
-    match cli_tmux_adapter::run_task(cfg, &adapter, workspace, item_id, prompt, CLAUDE_TIMEOUT).await {
+    match cli_tmux_adapter::run_task(cfg, &adapter, workspace, item_id, prompt, CLAUDE_TIMEOUT)
+        .await
+    {
         Ok(result) => (result.output, 0),
         Err(e) => {
-            log(cfg, &format!("[{item_id}] {executor} tmux session failed: {e}"));
+            log(
+                cfg,
+                &format!("[{item_id}] {executor} tmux session failed: {e}"),
+            );
             (format!("{executor} tmux session failed: {e}"), 1)
         }
     }
@@ -527,7 +705,10 @@ async fn run_cli_subprocess(
 ) -> (String, i32) {
     let (binary, args): (&str, &[&str]) = match executor {
         "claude_cli" => ("claude", &["-p"]),
-        "codex_cli" => ("codex", &["--sandbox", "danger-full-access", "--full-auto", "--task"]),
+        "codex_cli" => (
+            "codex",
+            &["--sandbox", "danger-full-access", "--full-auto", "--task"],
+        ),
         "cursor_cli" => ("cursor", &["--headless", "--task"]),
         _ => return (format!("unsupported one-shot executor: {executor}"), 1),
     };
@@ -552,17 +733,14 @@ async fn run_cli_subprocess(
         }
     });
 
-    let result = tokio::time::timeout(
-        CLAUDE_TIMEOUT,
-        {
-            let mut cmd = Command::new(&cli_bin);
-            cmd.args(args)
-                .arg(prompt)
+    let result = tokio::time::timeout(CLAUDE_TIMEOUT, {
+        let mut cmd = Command::new(&cli_bin);
+        cmd.args(args)
+            .arg(prompt)
             .envs(task_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-                .current_dir(workspace);
-            cmd.output()
-        },
-    )
+            .current_dir(workspace);
+        cmd.output()
+    })
     .await;
 
     let _ = stop_tx.send(());
@@ -580,7 +758,10 @@ async fn run_cli_subprocess(
             (output, code)
         }
         Ok(Err(e)) => (format!("ERROR: {e}"), 1),
-        Err(_) => (format!("[timed out after {}s]", CLAUDE_TIMEOUT.as_secs()), 124),
+        Err(_) => (
+            format!("[timed out after {}s]", CLAUDE_TIMEOUT.as_secs()),
+            124,
+        ),
     }
 }
 
@@ -620,12 +801,16 @@ async fn run_api_coding(
         }
     });
 
-    let result = tokio::time::timeout(CLAUDE_TIMEOUT, crate::sdk::run_agent(prompt, workspace)).await;
+    let result =
+        tokio::time::timeout(CLAUDE_TIMEOUT, crate::sdk::run_agent(prompt, workspace)).await;
     let _ = stop_tx.send(());
     match result {
         Ok(Ok(output)) => (output, 0),
         Ok(Err(e)) => (format!("API fallback error: {e}"), 1),
-        Err(_) => (format!("[timed out after {}s]", CLAUDE_TIMEOUT.as_secs()), 124),
+        Err(_) => (
+            format!("[timed out after {}s]", CLAUDE_TIMEOUT.as_secs()),
+            124,
+        ),
     }
 }
 
@@ -636,8 +821,7 @@ async fn run_hermes_driver(
     task_env: &[(String, String)],
     workspace: &PathBuf,
 ) -> (String, i32) {
-    let acc_agent = std::env::current_exe()
-        .unwrap_or_else(|_| PathBuf::from("acc-agent"));
+    let acc_agent = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("acc-agent"));
     let query = format!(
         "{}\n\n{}",
         item["title"].as_str().unwrap_or(""),
@@ -673,7 +857,12 @@ async fn fetch_queue(_cfg: &Config, client: &Client) -> Result<Vec<serde_json::V
         .collect())
 }
 
-fn select_item<'a>(items: &'a [serde_json::Value], agent_name: &str, caps: &[String], online_peers: &[String]) -> Option<&'a serde_json::Value> {
+fn select_item<'a>(
+    items: &'a [serde_json::Value],
+    agent_name: &str,
+    caps: &[String],
+    online_peers: &[String],
+) -> Option<&'a serde_json::Value> {
     let priority_order = |p: &str| match p {
         "urgent" => 0u8,
         "high" => 1,
@@ -685,20 +874,24 @@ fn select_item<'a>(items: &'a [serde_json::Value], agent_name: &str, caps: &[Str
     let mut candidates: Vec<&serde_json::Value> = items
         .iter()
         .filter(|item| {
-            if item["status"].as_str() != Some("pending") { return false; }
+            if item["status"].as_str() != Some("pending") {
+                return false;
+            }
             let assignee = item["assignee"].as_str().unwrap_or("");
-            if assignee == "jkh" { return false; }
+            if assignee == "jkh" {
+                return false;
+            }
             if !assignee.is_empty() && assignee != "all" && assignee != agent_name {
                 return false;
             }
             // Hard capability gate
             if let Some(required) = item["required_executors"].as_array() {
                 if !required.is_empty() {
-                    let req_set: Vec<&str> = required.iter()
-                        .filter_map(|v| v.as_str())
-                        .collect();
+                    let req_set: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
                     let has_cap = req_set.iter().any(|r| caps.iter().any(|c| c == r));
-                    if !has_cap { return false; }
+                    if !has_cap {
+                        return false;
+                    }
                 }
             }
             // Collaboration gate: if a specific peer is preferred and online, let them handle it
@@ -740,7 +933,10 @@ async fn post_complete(cfg: &Config, client: &Client, item_id: &str, result: &st
 
 async fn post_fail(cfg: &Config, client: &Client, item_id: &str, reason: &str) {
     let truncated = &reason[..reason.len().min(2000)];
-    let _ = client.items().fail(item_id, &cfg.agent_name, truncated).await;
+    let _ = client
+        .items()
+        .fail(item_id, &cfg.agent_name, truncated)
+        .await;
 }
 
 async fn post_comment(cfg: &Config, client: &Client, item_id: &str, comment: &str) {
@@ -752,7 +948,9 @@ async fn post_comment(cfg: &Config, client: &Client, item_id: &str, comment: &st
 
 async fn post_heartbeat(cfg: &Config, client: &Client, note: &str, tasks_in_flight: u32) {
     let max_slots: u32 = std::env::var("AGENT_MAX_TASKS")
-        .ok().and_then(|v| v.parse().ok()).unwrap_or(2);
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
     let free_slots = max_slots.saturating_sub(tasks_in_flight);
     let req = HeartbeatRequest {
         ts: Some(chrono::Utc::now()),
@@ -787,7 +985,9 @@ async fn post_keepalive(cfg: &Config, client: &Client, item_id: &str, note: &str
 fn is_quenched(cfg: &Config) -> bool {
     let quench_file = cfg.quench_file();
     let content = std::fs::read_to_string(quench_file).unwrap_or_default();
-    if content.is_empty() { return false; }
+    if content.is_empty() {
+        return false;
+    }
     if let Ok(until) = chrono::DateTime::parse_from_rfc3339(content.trim()) {
         return chrono::Utc::now() < until;
     }
@@ -806,7 +1006,11 @@ fn is_hermes_task(item: &serde_json::Value) -> bool {
 fn detect_capabilities() -> Vec<String> {
     let from_env = std::env::var("AGENT_CAPABILITIES").unwrap_or_default();
     if !from_env.is_empty() {
-        return from_env.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        return from_env
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
     }
     let mut caps = Vec::new();
     if which_bin("claude").is_some() {
@@ -838,13 +1042,18 @@ fn which_bin(name: &str) -> Option<PathBuf> {
     std::env::var("PATH").ok().and_then(|path_var| {
         path_var.split(':').find_map(|dir| {
             let candidate = PathBuf::from(dir).join(name);
-            if candidate.exists() { Some(candidate) } else { None }
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
         })
     })
 }
 
 fn repo_url_from_item(item: &serde_json::Value) -> String {
-    item["repo"].as_str()
+    item["repo"]
+        .as_str()
         .or_else(|| item["repository"].as_str())
         .unwrap_or("")
         .to_string()
@@ -853,7 +1062,10 @@ fn repo_url_from_item(item: &serde_json::Value) -> String {
 fn build_task_env(item_id: &str, local: &PathBuf, agentfs: &str) -> Vec<(String, String)> {
     vec![
         ("TASK_ID".into(), item_id.to_string()),
-        ("TASK_WORKSPACE_LOCAL".into(), local.to_str().unwrap_or(".").to_string()),
+        (
+            "TASK_WORKSPACE_LOCAL".into(),
+            local.to_str().unwrap_or(".").to_string(),
+        ),
         ("TASK_WORKSPACE_AGENTFS".into(), agentfs.to_string()),
         ("TASK_BRANCH".into(), format!("task/{item_id}")),
     ]
@@ -863,7 +1075,10 @@ fn build_prompt(item: &serde_json::Value, workspace: &PathBuf) -> String {
     let mut parts = vec![
         format!("# Queue Item: {}", item["id"].as_str().unwrap_or("")),
         format!("**Title:** {}", item["title"].as_str().unwrap_or("")),
-        format!("**Priority:** {}", item["priority"].as_str().unwrap_or("normal")),
+        format!(
+            "**Priority:** {}",
+            item["priority"].as_str().unwrap_or("normal")
+        ),
         String::new(),
         "## Task Workspace".into(),
         format!("Your working directory is: `{}`", workspace.display()),
@@ -871,7 +1086,10 @@ fn build_prompt(item: &serde_json::Value, workspace: &PathBuf) -> String {
         "Do NOT run `git commit` or `git push` — the queue-worker handles that.".into(),
         String::new(),
         "## Description".into(),
-        item["description"].as_str().unwrap_or("(no description)").to_string(),
+        item["description"]
+            .as_str()
+            .unwrap_or("(no description)")
+            .to_string(),
     ];
     if let Some(notes) = item["notes"].as_str() {
         if !notes.is_empty() {
@@ -924,7 +1142,10 @@ async fn bus_subscriber(cfg: Config, client: Client, nudge: Arc<Notify>) {
         match subscribe_bus(&cfg, &client, &nudge).await {
             Ok(()) => {}
             Err(e) => {
-                log(&cfg, &format!("[bus] disconnected: {e}, reconnecting in 5s"));
+                log(
+                    &cfg,
+                    &format!("[bus] disconnected: {e}, reconnecting in 5s"),
+                );
                 sleep(Duration::from_secs(5)).await;
             }
         }
@@ -938,7 +1159,10 @@ async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>) -> Re
     while let Some(msg) = stream.next().await {
         let msg = msg.map_err(|e| e.to_string())?;
         let kind = msg.kind.as_deref().unwrap_or("");
-        if matches!(kind, "work.available" | "queue.item.created" | "project.arrived") {
+        if matches!(
+            kind,
+            "work.available" | "queue.item.created" | "project.arrived"
+        ) {
             log(cfg, &format!("SSE work signal: {kind}"));
             nudge.notify_one();
         } else if matches!(kind, "tasks:dispatch_nudge" | "tasks:dispatch_assigned") {
@@ -1012,7 +1236,10 @@ mod tests {
         ];
         // natasha is online — boris should skip this item
         let selected = select_item(&items, "boris", &[], &["natasha".to_string()]);
-        assert!(selected.is_none(), "must skip task when preferred peer is online");
+        assert!(
+            selected.is_none(),
+            "must skip task when preferred peer is online"
+        );
     }
 
     #[test]
@@ -1023,7 +1250,10 @@ mod tests {
         ];
         // natasha is NOT in online_peers — boris should take it
         let selected = select_item(&items, "boris", &[], &[]);
-        assert!(selected.is_some(), "must claim task when preferred peer is offline");
+        assert!(
+            selected.is_some(),
+            "must claim task when preferred peer is offline"
+        );
     }
 
     #[test]
@@ -1034,7 +1264,10 @@ mod tests {
         ];
         // I am the preferred executor — I should claim it
         let selected = select_item(&items, "boris", &[], &["natasha".to_string()]);
-        assert!(selected.is_some(), "must claim task when self is preferred executor");
+        assert!(
+            selected.is_some(),
+            "must claim task when self is preferred executor"
+        );
     }
 
     #[test]
@@ -1048,7 +1281,11 @@ mod tests {
 
     #[test]
     fn test_build_task_env() {
-        let env = build_task_env("wq-123", &PathBuf::from("/tmp/ws"), "ccc-hub/agents/tasks/wq-123/workspace");
+        let env = build_task_env(
+            "wq-123",
+            &PathBuf::from("/tmp/ws"),
+            "ccc-hub/agents/tasks/wq-123/workspace",
+        );
         let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         assert!(keys.contains(&"TASK_ID"));
         assert!(keys.contains(&"TASK_WORKSPACE_LOCAL"));
@@ -1097,7 +1334,8 @@ mod tests {
                    "assignee": "all", "priority": "normal", "created": "2026-01-01T00:00:00Z"}),
             json!({"id": "wq-2", "title": "Item 2", "status": "pending",
                    "assignee": "all", "priority": "urgent", "created": "2026-01-02T00:00:00Z"}),
-        ]).await;
+        ])
+        .await;
         let cfg_ = mock_cfg(&mock.url);
         let client = build_client(&cfg_);
         let items = fetch_queue(&mock_cfg(&mock.url), &client).await.unwrap();
@@ -1133,9 +1371,11 @@ mod tests {
     #[tokio::test]
     async fn test_claim_item_conflict_returns_false() {
         use crate::hub_mock::HubState;
-        let mock = crate::hub_mock::HubMock::with_state(
-            HubState { item_claim_status: 409, ..Default::default() }
-        ).await;
+        let mock = crate::hub_mock::HubMock::with_state(HubState {
+            item_claim_status: 409,
+            ..Default::default()
+        })
+        .await;
         let cfg_ = mock_cfg(&mock.url);
         let client = build_client(&cfg_);
         assert!(!claim_item(&mock_cfg(&mock.url), &client, "wq-222").await);
@@ -1174,7 +1414,8 @@ mod tests {
                    "priority": "low",    "created": "2026-01-01T00:00:00Z"}),
             json!({"id": "urgent", "status": "pending", "assignee": "all",
                    "priority": "urgent", "created": "2026-01-02T00:00:00Z"}),
-        ]).await;
+        ])
+        .await;
         let cfg_ = mock_cfg(&mock.url);
         let client = build_client(&cfg_);
         let items = fetch_queue(&mock_cfg(&mock.url), &client).await.unwrap();

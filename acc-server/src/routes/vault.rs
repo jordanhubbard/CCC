@@ -13,31 +13,33 @@ use std::{collections::HashMap, sync::Arc};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/vault/status",           get(vault_status))
-        .route("/api/vault/unlock",           post(vault_unlock))
-        .route("/api/vault/lock",             post(vault_lock))
-        .route("/api/vault/rotate",           post(vault_rotate))
-        .route("/api/vault/import",           post(vault_import))
+        .route("/api/vault/status", get(vault_status))
+        .route("/api/vault/unlock", post(vault_unlock))
+        .route("/api/vault/lock", post(vault_lock))
+        .route("/api/vault/rotate", post(vault_rotate))
+        .route("/api/vault/import", post(vault_import))
         .route("/api/vault/import-plaintext", post(vault_import_plaintext))
-        .route("/api/vault/export",           get(vault_export))
+        .route("/api/vault/export", get(vault_export))
 }
 
-async fn vault_status(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn vault_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let enabled = state.vault.is_enabled().await;
-    let locked  = state.vault.is_locked().await;
-    let count   = state.vault.count().await;
+    let locked = state.vault.is_locked().await;
+    let count = state.vault.count().await;
     Json(json!({
         "ok":      true,
         "enabled": enabled,
         "locked":  locked,
         "count":   count,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
@@ -51,20 +53,29 @@ async fn vault_unlock(
     Json(body): Json<UnlockBody>,
 ) -> impl IntoResponse {
     if !state.is_admin_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     match state.vault.unlock(body.password.as_bytes()).await {
         Ok(_) => Json(json!({"ok": true})).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
-async fn vault_lock(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn vault_lock(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_admin_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     state.vault.lock().await;
     Json(json!({"ok": true})).into_response()
@@ -82,14 +93,26 @@ async fn vault_rotate(
     Json(body): Json<RotateBody>,
 ) -> impl IntoResponse {
     if !state.is_admin_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
-    match state.vault.rotate_password(body.old_password.as_bytes(), body.new_password.as_bytes()).await {
+    match state
+        .vault
+        .rotate_password(body.old_password.as_bytes(), body.new_password.as_bytes())
+        .await
+    {
         Ok(_) => {
             flush_vault_to_db(&state).await;
             Json(json!({"ok": true})).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
@@ -104,7 +127,11 @@ async fn vault_import(
     Json(body): Json<ImportBody>,
 ) -> impl IntoResponse {
     if !state.is_admin_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     match state.vault.import(body.secrets).await {
         Ok(_) => {
@@ -112,16 +139,21 @@ async fn vault_import(
             let count = state.vault.count().await;
             Json(json!({"ok": true, "count": count})).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
     }
 }
 
-async fn vault_export(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
+async fn vault_export(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
     if !state.is_admin_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     let (salt, blobs) = state.vault.export().await;
     let salt_b64 = salt.map(|s| B64.encode(s));
@@ -129,7 +161,8 @@ async fn vault_export(
         "ok":      true,
         "salt":    salt_b64,
         "secrets": blobs,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 /// Bulk import plaintext key-value pairs, encrypting each via the vault.
@@ -141,10 +174,18 @@ async fn vault_import_plaintext(
     Json(body): Json<ImportBody>,
 ) -> impl IntoResponse {
     if !state.is_admin_authed(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
     if state.vault.is_enabled().await && state.vault.is_locked().await {
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "vault is locked"}))).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "vault is locked"})),
+        )
+            .into_response();
     }
     let mut ok = 0usize;
     let mut errs: Vec<String> = Vec::new();

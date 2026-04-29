@@ -681,15 +681,13 @@ fn maybe_set_meta_string(meta: &mut Value, key: &str, value: Option<&Value>) {
 }
 
 fn task_chain_id_from_metadata(metadata: &str) -> Option<String> {
-    serde_json::from_str::<Value>(metadata)
-        .ok()
-        .and_then(|m| {
-            m.get("chain_id")
-                .or_else(|| m.get("source_chain_id"))
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        })
+    serde_json::from_str::<Value>(metadata).ok().and_then(|m| {
+        m.get("chain_id")
+            .or_else(|| m.get("source_chain_id"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    })
 }
 
 async fn cancel_task(
@@ -1248,7 +1246,11 @@ async fn set_review_result(
     let _ = crate::routes::chains::mark_task_status(
         &db,
         &id,
-        if result == "rejected" { "rejected" } else { "review_approved" },
+        if result == "rejected" {
+            "rejected"
+        } else {
+            "review_approved"
+        },
     );
 
     drop(db);

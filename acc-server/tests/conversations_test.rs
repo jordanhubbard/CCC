@@ -2,29 +2,39 @@
 //! Tests operate on IDs returned from create — no count assertions.
 mod helpers;
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::json;
 
 fn no_auth_post(path: &str, body: &serde_json::Value) -> Request<Body> {
     Request::builder()
-        .method("POST").uri(path)
+        .method("POST")
+        .uri(path)
         .header("Content-Type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap()
 }
 
 fn no_auth_get(path: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(path).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap()
 }
 
 fn no_auth_delete(path: &str) -> Request<Body> {
-    Request::builder().method("DELETE").uri(path).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("DELETE")
+        .uri(path)
+        .body(Body::empty())
+        .unwrap()
 }
 
 fn no_auth_patch(path: &str, body: &serde_json::Value) -> Request<Body> {
     Request::builder()
-        .method("PATCH").uri(path)
+        .method("PATCH")
+        .uri(path)
         .header("Content-Type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap()
@@ -34,7 +44,8 @@ async fn create_conv(ts: &helpers::TestServer, channel: &str) -> serde_json::Val
     let resp = helpers::call(
         &ts.app,
         no_auth_post("/api/conversations", &json!({"channel": channel})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
     helpers::body_json(resp).await["conversation"].clone()
 }
@@ -57,7 +68,8 @@ async fn test_create_conversation_no_auth_needed() {
     let resp = helpers::call(
         &ts.app,
         no_auth_post("/api/conversations", &json!({"channel": "telegram"})),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
 }
 
@@ -82,7 +94,8 @@ async fn test_get_conversation_not_found() {
     let resp = helpers::call(
         &ts.app,
         no_auth_get("/api/conversations/conv-does-not-exist"),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -107,8 +120,12 @@ async fn test_patch_conversation() {
 
     let resp = helpers::call(
         &ts.app,
-        no_auth_patch(&format!("/api/conversations/{id}"), &json!({"tags": ["important"]})),
-    ).await;
+        no_auth_patch(
+            &format!("/api/conversations/{id}"),
+            &json!({"tags": ["important"]}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::OK);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -129,7 +146,8 @@ async fn test_add_message_to_conversation() {
             &format!("/api/conversations/{id}/messages"),
             &json!({"author": "agent-a", "text": "Hello!"}),
         ),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::CREATED);
     let body = helpers::body_json(resp).await;
     assert_eq!(body["ok"], true);
@@ -145,8 +163,12 @@ async fn test_add_message_requires_author_and_text() {
 
     let resp = helpers::call(
         &ts.app,
-        no_auth_post(&format!("/api/conversations/{id}/messages"), &json!({"author": "a"})),
-    ).await;
+        no_auth_post(
+            &format!("/api/conversations/{id}/messages"),
+            &json!({"author": "a"}),
+        ),
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -171,6 +193,7 @@ async fn test_delete_conversation_not_found() {
     let resp = helpers::call(
         &ts.app,
         no_auth_delete("/api/conversations/conv-does-not-exist-0"),
-    ).await;
+    )
+    .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

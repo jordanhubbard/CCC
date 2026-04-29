@@ -10,10 +10,14 @@ async fn main() {
     acc_tools::load_acc_env();
 
     let ccc_api = std::env::var("CCC_API").unwrap_or_else(|_| "http://localhost:8789".to_string());
-    let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
-    let minio_url = std::env::var("MINIO_ENDPOINT").unwrap_or_else(|_| "http://localhost:9000".to_string());
-    let tokenhub_url = std::env::var("TOKENHUB_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
-    let searxng_url = std::env::var("SEARXNG_URL").unwrap_or_else(|_| "http://localhost:8888".to_string());
+    let qdrant_url =
+        std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
+    let minio_url =
+        std::env::var("MINIO_ENDPOINT").unwrap_or_else(|_| "http://localhost:9000".to_string());
+    let tokenhub_url =
+        std::env::var("TOKENHUB_URL").unwrap_or_else(|_| "http://localhost:8090".to_string());
+    let searxng_url =
+        std::env::var("SEARXNG_URL").unwrap_or_else(|_| "http://localhost:8888".to_string());
     let qdrant_api_key = acc_tools::resolve_qdrant_api_key();
 
     let client = reqwest::Client::builder()
@@ -29,24 +33,81 @@ async fn main() {
 
     // 1. Core services
     let mut services: Vec<Value> = Vec::new();
-    services.push(probe(&client, "ccc-api", &format!("{ccc_api}/api/health"), None, Some("ok")).await);
-    services.push(probe(&client, "agentbus", &format!("{ccc_api}/api/health"), None, Some("ok")).await);
-    services.push(probe(
-        &client,
-        "qdrant",
-        &format!("{qdrant_url}/healthz"),
-        qdrant_api_key.as_deref().map(|k| ("api-key", k)),
-        None,
-    ).await);
-    services.push(probe(&client, "minio", &format!("{minio_url}/minio/health/live"), None, None).await);
-    services.push(probe(&client, "tokenhub", &format!("{tokenhub_url}/v1/models"), None, None).await);
-    services.push(probe(&client, "searxng", &format!("{searxng_url}/healthz"), None, None).await);
+    services.push(
+        probe(
+            &client,
+            "ccc-api",
+            &format!("{ccc_api}/api/health"),
+            None,
+            Some("ok"),
+        )
+        .await,
+    );
+    services.push(
+        probe(
+            &client,
+            "agentbus",
+            &format!("{ccc_api}/api/health"),
+            None,
+            Some("ok"),
+        )
+        .await,
+    );
+    services.push(
+        probe(
+            &client,
+            "qdrant",
+            &format!("{qdrant_url}/healthz"),
+            qdrant_api_key.as_deref().map(|k| ("api-key", k)),
+            None,
+        )
+        .await,
+    );
+    services.push(
+        probe(
+            &client,
+            "minio",
+            &format!("{minio_url}/minio/health/live"),
+            None,
+            None,
+        )
+        .await,
+    );
+    services.push(
+        probe(
+            &client,
+            "tokenhub",
+            &format!("{tokenhub_url}/v1/models"),
+            None,
+            None,
+        )
+        .await,
+    );
+    services.push(
+        probe(
+            &client,
+            "searxng",
+            &format!("{searxng_url}/healthz"),
+            None,
+            None,
+        )
+        .await,
+    );
 
     // Redis
     services.push(probe_redis());
 
     // AccFS gateway
-    services.push(probe(&client, "accfs-gateway", "http://127.0.0.1:9100/minio/health/live", None, None).await);
+    services.push(
+        probe(
+            &client,
+            "accfs-gateway",
+            "http://127.0.0.1:9100/minio/health/live",
+            None,
+            None,
+        )
+        .await,
+    );
 
     // AccFS FUSE mount
     let fuse_mounted = std::path::Path::new("/mnt/accfs").exists();
@@ -78,7 +139,10 @@ async fn main() {
     report["agents"] = json!(agent_results);
 
     // 4. Summary
-    let svc_ok = services.iter().filter(|s| s["ok"].as_bool().unwrap_or(false)).count();
+    let svc_ok = services
+        .iter()
+        .filter(|s| s["ok"].as_bool().unwrap_or(false))
+        .count();
     let svc_total = services.len();
     let failed_svcs: Vec<&str> = services
         .iter()
@@ -161,8 +225,7 @@ fn probe_redis() -> Value {
         .output();
     match r {
         Ok(out) => {
-            let ok = out.status.success()
-                && String::from_utf8_lossy(&out.stdout).contains("PONG");
+            let ok = out.status.success() && String::from_utf8_lossy(&out.stdout).contains("PONG");
             json!({
                 "name": "redis",
                 "url": "redis://127.0.0.1:6379",
@@ -191,10 +254,8 @@ fn check_docker_containers() -> Vec<Value> {
     match r {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
-            let running: std::collections::HashMap<&str, &str> = text
-                .lines()
-                .filter_map(|l| l.split_once('|'))
-                .collect();
+            let running: std::collections::HashMap<&str, &str> =
+                text.lines().filter_map(|l| l.split_once('|')).collect();
             expected
                 .iter()
                 .map(|c| {
@@ -353,11 +414,14 @@ fn check_remote_accfs() -> Vec<Value> {
     nodes
         .iter()
         .map(|(node, ip, user)| {
-            let cmd = "~/bin/mc ls accfs/accfs/ >/dev/null 2>&1 && echo ACCFS_OK || echo ACCFS_FAIL";
+            let cmd =
+                "~/bin/mc ls accfs/accfs/ >/dev/null 2>&1 && echo ACCFS_OK || echo ACCFS_FAIL";
             let r = std::process::Command::new("ssh")
                 .args([
-                    "-o", "ConnectTimeout=5",
-                    "-o", "StrictHostKeyChecking=no",
+                    "-o",
+                    "ConnectTimeout=5",
+                    "-o",
+                    "StrictHostKeyChecking=no",
                     &format!("{user}@{ip}"),
                     cmd,
                 ])

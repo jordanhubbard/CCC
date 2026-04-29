@@ -22,7 +22,6 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 fn verify_signature(secret: &str, body: &[u8], sig_header: &str) -> bool {
-    
     // sig_header is "sha256=<hex>"
     let Some(hex_sig) = sig_header.strip_prefix("sha256=") else {
         return false;
@@ -36,8 +35,8 @@ fn verify_signature(secret: &str, body: &[u8], sig_header: &str) -> bool {
 
 fn hmac_sha256_key(key: &[u8], msg: &[u8]) -> [u8; 32] {
     // Pure-Rust HMAC-SHA256 using the sha2 crate.
-    use sha2::Sha256;
     use hmac::{Hmac, Mac};
+    use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(key).expect("HMAC key length ok");
     mac.update(msg);
@@ -70,7 +69,11 @@ async fn handle_webhook(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         if !verify_signature(&secret, &body, sig) {
-            return (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid signature"}))).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "invalid signature"})),
+            )
+                .into_response();
         }
     }
 
@@ -81,7 +84,13 @@ async fn handle_webhook(
 
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid JSON"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid JSON"})),
+            )
+                .into_response()
+        }
     };
 
     if event_type != "issues" {
@@ -96,14 +105,23 @@ async fn handle_webhook(
         .unwrap_or("")
         .to_string();
     let number = issue.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
-    let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let title = issue
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    let dispatch_label = std::env::var("GITHUB_DISPATCH_LABEL")
-        .unwrap_or_else(|_| "agent-ready".to_string());
+    let dispatch_label =
+        std::env::var("GITHUB_DISPATCH_LABEL").unwrap_or_else(|_| "agent-ready".to_string());
 
     let bus_msg = match action {
         "opened" => {
-            tracing::info!("github webhook: issue opened {}#{} \"{}\"", repo, number, title);
+            tracing::info!(
+                "github webhook: issue opened {}#{} \"{}\"",
+                repo,
+                number,
+                title
+            );
             json!({
                 "type": "github:issue_opened",
                 "repo": repo,
@@ -117,17 +135,29 @@ async fn handle_webhook(
                 .pointer("/label/name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            tracing::info!("github webhook: {}#{} labeled {:?}", repo, number, label_name);
+            tracing::info!(
+                "github webhook: {}#{} labeled {:?}",
+                repo,
+                number,
+                label_name
+            );
             if label_name == dispatch_label {
                 // Trigger github-sync.py for this specific issue via bus nudge
-                let _ = state.bus_tx.send(json!({
-                    "type": "github:dispatch_label_added",
-                    "repo": repo,
-                    "number": number,
-                    "title": title,
-                    "label": label_name,
-                }).to_string());
-                tracing::info!("github webhook: dispatch nudge sent for {}#{}", repo, number);
+                let _ = state.bus_tx.send(
+                    json!({
+                        "type": "github:dispatch_label_added",
+                        "repo": repo,
+                        "number": number,
+                        "title": title,
+                        "label": label_name,
+                    })
+                    .to_string(),
+                );
+                tracing::info!(
+                    "github webhook: dispatch nudge sent for {}#{}",
+                    repo,
+                    number
+                );
             }
             json!({
                 "type": "github:issue_labeled",
@@ -154,7 +184,11 @@ async fn handle_webhook(
             })
         }
         _ => {
-            return (StatusCode::OK, Json(json!({"ok": true, "action": action, "skipped": true}))).into_response();
+            return (
+                StatusCode::OK,
+                Json(json!({"ok": true, "action": action, "skipped": true})),
+            )
+                .into_response();
         }
     };
 

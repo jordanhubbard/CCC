@@ -41,7 +41,11 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clone_status: Option<String>,
 
-    #[serde(default, rename = "slackChannels", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        rename = "slackChannels",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub slack_channels: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
