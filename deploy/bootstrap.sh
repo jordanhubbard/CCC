@@ -497,14 +497,14 @@ HPEOF
   # Register hermes-gateway with supervisord.
   # Try the conf.d drop-in directory first (preferred, idempotent per-file),
   # then fall back to appending to the monolithic conf.
-  HERMES_BIN="$(command -v hermes || echo "$HOME/.local/bin/hermes")"
+  HERMES_BIN="$(command -v acc-agent 2>/dev/null || echo "$HOME/.acc/bin/acc-agent")"
   HERMES_LOG="$HOME/.acc/logs/hermes-gateway.log"
   mkdir -p "$HOME/.acc/logs"
 
   _hermes_supervisor_block() {
     cat <<HCONF
 [program:hermes-gateway]
-command=${HERMES_BIN} gateway
+command=${HERMES_BIN} hermes --gateway
 user=$(whoami)
 environment=HOME="${HOME}"
 directory=${HOME}
@@ -553,7 +553,7 @@ HCONF
   fi
 
   if [[ "$_hermes_registered" == false ]]; then
-    warn "No supervisord config found — start hermes gateway manually: hermes gateway"
+    warn "No supervisord config found — start Hermes gateway manually: acc-agent hermes --gateway"
     warn "  Or add it to your process manager. Log: ${HERMES_LOG}"
   fi
 fi
@@ -697,5 +697,5 @@ echo ""
 echo "  CCC workspace:  ${CCC_WORKSPACE}"
 echo "  ACC env:        ${HOME}/.acc/.env"
 echo ""
-echo "  Next: hermes gateway   (starts the agent runtime)"
+echo "  Next: acc-agent hermes --gateway   (starts the channel gateway)"
 echo ""

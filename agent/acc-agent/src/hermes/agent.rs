@@ -149,6 +149,48 @@ impl HermesAgent {
         println!("{output}");
     }
 
+    pub async fn run_chat(&self) {
+        use std::io::{self, Write};
+
+        self.register_capabilities().await;
+        self.log("starting interactive chat");
+        eprintln!("Interactive Hermes chat. Type /exit to quit, /reset to clear local history.");
+
+        let mut history = ConversationHistory::new();
+        let system = self.system_prompt();
+
+        loop {
+            print!("hermes> ");
+            let _ = io::stdout().flush();
+
+            let mut input = String::new();
+            match io::stdin().read_line(&mut input) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("stdin error: {e}");
+                    break;
+                }
+            }
+
+            let message = input.trim();
+            if message.is_empty() {
+                continue;
+            }
+            if matches!(message, "/exit" | "/quit") {
+                break;
+            }
+            if message == "/reset" {
+                history = ConversationHistory::new();
+                println!("history reset");
+                continue;
+            }
+
+            let output = self.run_gateway_turn(&mut history, message, &system).await;
+            println!("{output}");
+        }
+    }
+
     pub async fn poll_tasks(&self) {
         self.register_capabilities().await;
         self.log(&format!(
@@ -220,6 +262,11 @@ impl HermesAgent {
         let system = self.system_prompt();
 
         // Attempt to resume from stored turns if we have a task ID.
+        // Older runs persisted assistant/tool turns but not the initial
+        // user prompt. Before calling Anthropic-compatible providers, ensure
+        // the payload ends with a user turn; otherwise Azure Anthropic rejects
+        // the request as assistant prefill.
+        let mut save_user_turn = false;
         let mut history = if let Some(ref id) = item_id {
             let stored_turns = self.load_turns(id).await;
             if !stored_turns.is_empty() {
@@ -227,10 +274,16 @@ impl HermesAgent {
                     "resuming from {} stored turns",
                     stored_turns.len()
                 ));
-                ConversationHistory::from_turns(&stored_turns)
+                let mut h = ConversationHistory::from_turns(&stored_turns);
+                if !h.ends_with_user() {
+                    h.push_user_text(&query);
+                    save_user_turn = true;
+                }
+                h
             } else {
                 let mut h = ConversationHistory::new();
                 h.push_user_text(&query);
+                save_user_turn = true;
                 h
             }
         } else {
@@ -238,6 +291,22 @@ impl HermesAgent {
             h.push_user_text(&query);
             h
         };
+
+        if save_user_turn {
+            if let Some(ref id) = item_id {
+                let user_content = json!([{"type": "text", "text": query}]);
+                self.save_turn(
+                    id,
+                    history.messages.len() as i64 - 1,
+                    "user",
+                    &user_content,
+                    0,
+                    0,
+                    "input",
+                )
+                .await;
+            }
+        }
 
         let tools_api = self.tools.to_api_format();
 
@@ -791,6 +860,7 @@ mod tests {
     use std::path::PathBuf;
     use std::pin::Pin;
     use std::sync::atomic::AtomicU32;
+    use std::sync::Mutex;
 
     fn test_cfg(url: &str) -> Config {
         Config {
@@ -904,6 +974,36 @@ mod tests {
         }
     }
 
+    struct LastRoleProvider {
+        last_role: Arc<Mutex<Option<String>>>,
+    }
+
+    impl LlmProvider for LastRoleProvider {
+        fn complete<'a>(
+            &'a self,
+            _system: &'a str,
+            messages: &'a [Value],
+            _tools: &'a [Value],
+            _max_tokens: u32,
+        ) -> Pin<Box<dyn Future<Output = super::super::provider::ProviderResult> + Send + 'a>>
+        {
+            let role = messages
+                .last()
+                .and_then(|m| m["role"].as_str())
+                .map(str::to_string);
+            let last_role = self.last_role.clone();
+            Box::pin(async move {
+                *last_role.lock().unwrap() = role;
+                Ok(super::super::provider::LlmResponse {
+                    content: vec![json!({"type": "text", "text": "resumed"})],
+                    stop_reason: "end_turn".to_string(),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                })
+            })
+        }
+    }
+
     fn make_agent(url: &str) -> HermesAgent {
         let cfg = test_cfg(url);
         let client = build_client(&cfg);
@@ -986,6 +1086,55 @@ mod tests {
         assert!(
             output.contains("Token budget exhausted"),
             "output must explain token exhaustion, got: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_conversation_resume_appends_user_when_stored_turns_end_assistant() {
+        let mock = HubMock::new().await;
+        let turns = {
+            let state = mock.state.read().await;
+            state.task_turns.clone()
+        };
+        turns.lock().await.insert(
+            "task-resume".to_string(),
+            vec![json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "previous attempt"}],
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "stop_reason": "end_turn"
+            })],
+        );
+
+        let cfg = test_cfg(&mock.url);
+        let client = build_client(&cfg);
+        let last_role = Arc::new(Mutex::new(None));
+        let agent = HermesAgent::new(
+            cfg,
+            client,
+            Box::new(LastRoleProvider {
+                last_role: last_role.clone(),
+            }),
+            ToolRegistry::default_tools(),
+        );
+
+        let (ok, output) = agent
+            .run_conversation(
+                Some("task-resume".to_string()),
+                None,
+                "continue".to_string(),
+            )
+            .await;
+
+        assert!(ok);
+        assert_eq!(output, "resumed");
+        assert_eq!(last_role.lock().unwrap().as_deref(), Some("user"));
+        let stored = turns.lock().await;
+        let task_turns = stored.get("task-resume").unwrap();
+        assert!(
+            task_turns.iter().any(|turn| turn["role"] == "user"),
+            "resume should persist the inserted user turn"
         );
     }
 

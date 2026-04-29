@@ -256,16 +256,16 @@ EOF
   fi
 
   # Register hermes-gateway (Hermes agent runtime — Slack, Telegram, etc.)
-  # bootstrap.sh writes ~/.hermes/config.yaml with the agent's tokens.
+  # bootstrap.sh writes ~/.acc/.env with the agent's tokens.
   # This block is idempotent: if bootstrap.sh already wrote a conf.d file for
   # hermes-gateway, the grep check here will still work via the main conf check.
-  HERMES_BIN="$(command -v hermes 2>/dev/null || echo "$HOME/.local/bin/hermes")"
+  HERMES_BIN="$(command -v acc-agent 2>/dev/null || echo "$HOME/.acc/bin/acc-agent")"
   HERMES_GW_LOG="$LOG_DIR/hermes-gateway.log"
   touch "$HERMES_GW_LOG"
   chown "$USER:$USER" "$HERMES_GW_LOG" 2>/dev/null || true
 
-  if ! command -v hermes &>/dev/null && [ ! -x "$HOME/.local/bin/hermes" ]; then
-    warn "hermes not installed — skipping hermes-gateway registration"
+  if ! command -v acc-agent &>/dev/null && [ ! -x "$HOME/.acc/bin/acc-agent" ]; then
+    warn "acc-agent not installed — skipping hermes-gateway registration"
     warn "  Run bootstrap.sh first, then re-run setup-container.sh"
   elif grep -q "\[program:hermes-gateway\]" "$SUPERVISORD_CONF" 2>/dev/null; then
     success "hermes-gateway already in supervisord.conf — skipping"
@@ -273,7 +273,7 @@ EOF
     sudo tee -a "$SUPERVISORD_CONF" > /dev/null << EOF
 
 [program:hermes-gateway]
-command=$HERMES_BIN gateway
+command=$HERMES_BIN hermes --gateway
 autostart=true
 autorestart=true
 startsecs=10
@@ -335,23 +335,23 @@ else
   fi
 
   # Hermes gateway (nohup fallback)
-  HERMES_BIN="$(command -v hermes 2>/dev/null || echo "$HOME/.local/bin/hermes")"
+  HERMES_BIN="$(command -v acc-agent 2>/dev/null || echo "$HOME/.acc/bin/acc-agent")"
   HERMES_GW_LOG="$LOG_DIR/hermes-gateway.log"
   if [ ! -x "$HERMES_BIN" ]; then
-    warn "hermes not installed — skipping hermes-gateway (run bootstrap.sh first)"
-  elif pgrep -f "hermes gateway" > /dev/null 2>&1; then
-    success "hermes gateway already running (PID: $(pgrep -f 'hermes gateway' | head -1))"
+    warn "acc-agent not installed — skipping hermes-gateway (run bootstrap.sh first)"
+  elif pgrep -f "acc-agent hermes --gateway" > /dev/null 2>&1; then
+    success "acc-agent hermes --gateway already running (PID: $(pgrep -f 'acc-agent hermes --gateway' | head -1))"
   else
     touch "$HERMES_GW_LOG"
-    nohup "$HERMES_BIN" gateway >> "$HERMES_GW_LOG" 2>&1 &
+    nohup "$HERMES_BIN" hermes --gateway >> "$HERMES_GW_LOG" 2>&1 &
     HGW_PID=$!
     sleep 2
     if kill -0 "$HGW_PID" 2>/dev/null; then
-      success "hermes gateway started via nohup (PID: $HGW_PID)"
+      success "acc-agent hermes --gateway started via nohup (PID: $HGW_PID)"
       echo "$HGW_PID" > "$CCC_DIR/hermes-gateway.pid"
     else
-      warn "hermes gateway may have exited — check $HERMES_GW_LOG"
-      warn "  Ensure ~/.hermes/config.yaml has SLACK_BOT_TOKEN / SLACK_APP_TOKEN"
+      warn "acc-agent hermes --gateway may have exited — check $HERMES_GW_LOG"
+      warn "  Ensure ~/.acc/.env has SLACK_BOT_TOKEN / SLACK_APP_TOKEN"
     fi
   fi
 fi

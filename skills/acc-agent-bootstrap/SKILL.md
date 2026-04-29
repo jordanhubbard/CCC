@@ -1,7 +1,7 @@
 ---
 name: acc-agent-bootstrap
-description: Verify and install hermes on an ACC agent node. Use when onboarding a new agent, confirming hermes is operational, or diagnosing why an agent isn't executing tasks.
-version: 1.1.0
+description: Verify and install the native ACC agent runtime on an ACC node. Use when onboarding a new agent, confirming `acc-agent hermes` is operational, or diagnosing why an agent isn't executing tasks.
+version: 1.2.0
 platforms: [linux, macos]
 metadata:
   hermes:
@@ -14,92 +14,73 @@ metadata:
 ## Why PATH detection is unreliable over SSH
 
 Non-interactive SSH sessions do **not** source `~/.bashrc` or `~/.profile`.
-`which hermes` or `command -v hermes` will return nothing even when hermes is
-installed, because `~/.local/bin` is only added to PATH in interactive shells.
+`command -v acc-agent` can return nothing even when the runtime is installed,
+because `~/.acc/bin` is only added to PATH in interactive shells.
 
-**Never use `which` to check for hermes over SSH.** Use `find` instead:
+**Never rely on `which` alone over SSH.** Check the canonical path first:
 
 ```bash
 ssh -o StrictHostKeyChecking=no USER@HOST \
-  'find ~/.local/bin /usr/local/bin ~/.cargo/bin ~/Src -name hermes -type f 2>/dev/null | head -5'
+  'test -x ~/.acc/bin/acc-agent && ~/.acc/bin/acc-agent hermes --query "health check"'
 ```
 
 ---
 
-## Step 1 — Check if hermes is already installed
+## Step 1 — Check if acc-agent is already installed
 
 ```bash
 # Reliable: search known locations
 ssh -o StrictHostKeyChecking=no USER@HOST \
-  'find ~/.local/bin ~/.acc/bin /usr/local/bin -name hermes -type f 2>/dev/null'
+  'find ~/.acc/bin /usr/local/bin ~/.cargo/bin -name acc-agent -type f 2>/dev/null'
 
-# Also check for source installs
+# Also check the workspace source
 ssh -o StrictHostKeyChecking=no USER@HOST \
-  'find ~/Src ~/.hermes -name hermes -type f 2>/dev/null | head -5'
+  'test -d ~/.acc/workspace && cd ~/.acc/workspace && git rev-parse --short HEAD'
 ```
 
-If found, note the path. Verify it runs:
+If found, verify the native Hermes subcommand:
 
 ```bash
-ssh -o StrictHostKeyChecking=no USER@HOST '~/.local/bin/hermes --version 2>&1'
+ssh -o StrictHostKeyChecking=no USER@HOST '~/.acc/bin/acc-agent hermes --query "hello"'
 ```
 
-A broken interpreter line (e.g. `bad interpreter: python3.11: No such file or directory`)
-means the venv was built for a different Python. Reinstall.
+For interactive host debugging:
+
+```bash
+ssh -t USER@HOST '~/.acc/bin/acc-agent hermes --chat'
+```
 
 ---
 
-## Step 2 — Check the Python version
+## Step 2 — Install or refresh acc-agent
 
-Hermes requires Python 3.10+. The venv must be built with the system Python.
+The native runtime is built from the ACC workspace and installed to
+`~/.acc/bin/acc-agent`:
 
 ```bash
-ssh -o StrictHostKeyChecking=no USER@HOST 'python3 --version && which python3'
+ssh -o StrictHostKeyChecking=no USER@HOST \
+  'cd ~/.acc/workspace && git fetch origin && git reset --hard origin/main && bash deploy/restart-agent.sh'
 ```
 
-Note the version. The venv rebuild must use this exact interpreter.
+This is also the preferred repair path for stale Slack gateways because it kills
+old `hermes gateway` processes and restarts `acc-agent hermes --gateway`.
 
 ---
 
-## Step 3 — Install or reinstall hermes
+## Step 3 — Verify gateway and worker modes
 
-The workspace has a `hermes-agent` source tree at `~/.acc/workspace/` (or check
-`~/Src/hermes-agent` if present). Install from source using the system Python:
+Gateway:
 
 ```bash
-ssh -o StrictHostKeyChecking=no USER@HOST '
-  PYTHON=$(which python3)
-  HERMES_SRC=""
+ssh -o StrictHostKeyChecking=no USER@HOST \
+  'pgrep -af "acc-agent hermes --gateway" || true'
+```
 
-  # Find source tree
-  for candidate in ~/.acc/workspace/hermes-agent ~/Src/hermes-agent ~/.hermes/hermes-agent; do
-    if [[ -f "$candidate/setup.py" || -f "$candidate/pyproject.toml" ]]; then
-      HERMES_SRC="$candidate"
-      break
-    fi
-  done
+Worker:
 
-  if [[ -z "$HERMES_SRC" ]]; then
-    echo "ERROR: hermes-agent source not found — clone it first"
-    exit 1
-  fi
-
-  echo "Source: $HERMES_SRC"
-  echo "Python: $($PYTHON --version)"
-
-  # Build a fresh venv with system Python
-  rm -rf ~/.hermes/hermes-venv
-  "$PYTHON" -m venv ~/.hermes/hermes-venv
-  ~/.hermes/hermes-venv/bin/pip install -q --upgrade pip
-  ~/.hermes/hermes-venv/bin/pip install -q -e "$HERMES_SRC"
-
-  # Install launcher to ~/.local/bin
-  mkdir -p ~/.local/bin
-  ln -sf ~/.hermes/hermes-venv/bin/hermes ~/.local/bin/hermes
-
-  # Verify
-  ~/.local/bin/hermes --version
-'
+```bash
+ssh -o StrictHostKeyChecking=no USER@HOST \
+  'pgrep -af "acc-agent (bus|tasks|hermes --poll|supervise)" || true'
 ```
 
 ---
@@ -196,21 +177,20 @@ ssh -o StrictHostKeyChecking=no USER@HOST '
 
 ## Quick reference: per-agent known paths
 
-| Agent | Init | hermes path | AgentFS |
+| Agent | Init | runtime path | AgentFS |
 |---|---|---|---|
-| rocky | systemd (system) | `~/.local/bin/hermes` | `/srv/accfs/shared` (local) |
-| natasha | systemd (user) | `~/.local/bin/hermes` | `~/.acc/shared` (CIFS) |
-| bullwinkle | launchd (macOS) | `~/.local/bin/hermes` | `~/.acc/shared` (CIFS) |
-| ollama | systemd (system) | `~/.local/bin/hermes` | `~/.acc/shared` (CIFS) |
-| boris | supervisord (K8s) | `~/.local/bin/hermes` | `~/.acc/shared` (PVC needed) |
+| rocky | systemd (system) | `~/.acc/bin/acc-agent` | `/srv/accfs/shared` (local) |
+| natasha | systemd (user) | `~/.acc/bin/acc-agent` | `~/.acc/shared` (CIFS) |
+| bullwinkle | launchd (macOS) | `~/.acc/bin/acc-agent` | `~/.acc/shared` (CIFS) |
+| ollama | systemd (system) | `~/.acc/bin/acc-agent` | `~/.acc/shared` (CIFS) |
+| boris | supervisord (K8s) | `~/.acc/bin/acc-agent` | `~/.acc/shared` (PVC needed) |
 
 Always verify against the live agent — these can drift.
 
 ## Common mistakes
 
-- **`which hermes` over SSH returns nothing**: Non-interactive SSH doesn't load `~/.bashrc`. Use `find` instead.
-- **`bad interpreter: python3.11`**: The venv Python was removed or upgraded. Rebuild the venv with the current system Python (`python3 --version` to check).
-- **hermes found in `~/Src` but not in `~/.local/bin`**: It's a dev install, not the production one. Create the `~/.local/bin/hermes` symlink.
+- **`which acc-agent` over SSH returns nothing**: Non-interactive SSH doesn't load `~/.bashrc`. Use `~/.acc/bin/acc-agent` directly.
+- **Legacy `hermes gateway` is running**: Run `bash ~/.acc/workspace/deploy/restart-agent.sh` to replace it with `acc-agent hermes --gateway`.
 - **`ANTHROPIC_BASE_URL` not set**: Hermes calls will go to the public Anthropic API (wrong billing, wrong routing). Always set this to the local Tokenhub proxy.
 - **AgentFS stale after samba reconfiguration**: Unmount and remount. Do NOT just retry `ls` — the mount handle is broken and must be refreshed.
 - **AgentFS `ls` fails on macOS over SSH**: macOS TCC blocks SSH from listing CIFS mounts. The mount is live if `mount | grep accfs` shows it. Check with `stat` instead of `ls`.

@@ -51,6 +51,7 @@ async fn native_run(args: &[String]) {
     let mut query: Option<String> = None;
     let mut poll = false;
     let mut poll_queue_legacy = false;
+    let mut chat = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -69,6 +70,7 @@ async fn native_run(args: &[String]) {
             }
             "--poll" => poll = true,
             "--poll-queue" => poll_queue_legacy = true,
+            "--chat" | "--repl" => chat = true,
             _ => {}
         }
         i += 1;
@@ -96,6 +98,8 @@ async fn native_run(args: &[String]) {
         hermes.poll_tasks().await;
     } else if poll_queue_legacy {
         hermes.poll_queue_legacy().await;
+    } else if chat {
+        hermes.run_chat().await;
     } else if let Some(id) = task_id {
         let q = query.unwrap_or_default();
         hermes.run_task(id, q).await;
@@ -105,7 +109,9 @@ async fn native_run(args: &[String]) {
     } else if let Some(q) = query {
         hermes.run_query(q).await;
     } else {
-        eprintln!("[hermes-rust] one of --poll, --poll-queue, --task, --item, or --query required");
+        eprintln!(
+            "[hermes-rust] one of --poll, --poll-queue, --chat, --task, --item, or --query required"
+        );
         std::process::exit(1);
     }
 }

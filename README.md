@@ -34,7 +34,7 @@ Full walkthrough: [GETTING_STARTED.md](GETTING_STARTED.md)
 | `ccc-queue-worker` | Legacy queue compatibility worker | — |
 | `ccc-bus-listener` | AgentBus SSE receiver | — |
 | `ccc-exec-listen` | Remote exec handler (sandboxed) | — |
-| `hermes gateway` | Channel gateway (Slack, Telegram) — per-agent | — |
+| `acc-agent hermes --gateway` | Channel gateway (Slack, Telegram) — per-agent | — |
 | TokenHub | LLM routing proxy (OpenAI-compatible) | 8090 |
 | MinIO | S3-compatible object storage | 9000 |
 | Qdrant | Vector database | 6333 |
@@ -49,6 +49,14 @@ work and the bus listener by default:
 ```bash
 acc-agent tasks               # durable work from /api/tasks
 acc-agent bus                 # AgentBus listener and operator exec handling
+```
+
+For direct host debugging, use the native Hermes subcommand:
+
+```bash
+acc-agent hermes --chat              # interactive local conversation
+acc-agent hermes --query "hello"     # one-shot prompt
+acc-agent hermes --gateway           # Slack/Telegram gateway
 ```
 
 Optional processes are explicit opt-ins: `ACC_ENABLE_LEGACY_QUEUE=true` for the

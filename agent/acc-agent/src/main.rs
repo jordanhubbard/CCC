@@ -106,8 +106,11 @@ fn print_help() {
     eprintln!("  --once       poll once and exit");
     eprintln!();
     eprintln!("HERMES:");
+    eprintln!("  --chat | --repl              interactive local debugging chat");
     eprintln!("  --task <id> --query <text>   run hermes for a fleet task");
     eprintln!("  --item <id> --query <text>   run hermes for a legacy queue item");
+    eprintln!("  --query <text>               run one ad-hoc prompt and print the reply");
+    eprintln!("  --gateway [--workspace X]    run Slack/Telegram gateway");
     eprintln!("  --poll                       poll /api/tasks continuously for hermes work");
     eprintln!("  --poll-queue                 legacy mode: poll /api/queue continuously");
     eprintln!();

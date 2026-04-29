@@ -38,6 +38,14 @@ impl ConversationHistory {
         }));
     }
 
+    pub fn ends_with_user(&self) -> bool {
+        self.messages
+            .last()
+            .and_then(|m| m["role"].as_str())
+            .map(|role| role == "user")
+            .unwrap_or(false)
+    }
+
     pub fn from_turns(turns: &[serde_json::Value]) -> Self {
         let mut history = Self::new();
         for turn in turns {
@@ -162,5 +170,19 @@ mod tests {
         assert_eq!(h.messages[1]["role"], "assistant");
         assert_eq!(h.messages[2]["role"], "user");
         assert_eq!(h.messages[3]["role"], "assistant");
+    }
+
+    #[test]
+    fn ends_with_user_tracks_last_role() {
+        let mut h = ConversationHistory::new();
+        assert!(!h.ends_with_user());
+        h.push_user_text("hello");
+        assert!(h.ends_with_user());
+        h.push_assistant_content(vec![json!({"type":"text","text":"hi"})]);
+        assert!(!h.ends_with_user());
+        h.push_tool_results(vec![
+            json!({"type":"tool_result","tool_use_id":"t1","content":"ok"}),
+        ]);
+        assert!(h.ends_with_user());
     }
 }

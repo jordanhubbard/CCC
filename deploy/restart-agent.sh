@@ -357,8 +357,31 @@ fi
 echo "[restart-agent] Reloading daemon manager with new binary in place..."
 reload_launchd_after_binary_swap
 
+cleanup_gateway_processes() {
+    # Remove native gateway children and legacy Python `hermes gateway`
+    # processes before daemon-manager restart. Older migrations left both
+    # orphaned on some hosts, causing duplicate Slack Socket Mode consumers.
+    declare -a gateway_pids=()
+    while IFS= read -r p; do
+        [ -n "$p" ] && gateway_pids+=("$p")
+    done < <(pgrep -f 'acc-agent +hermes +--gateway|hermes +gateway' 2>/dev/null || true)
+
+    [ "${#gateway_pids[@]}" -gt 0 ] || return 0
+
+    echo "[restart-agent] Stopping stale gateway process(es): ${gateway_pids[*]}"
+    kill -TERM "${gateway_pids[@]}" 2>/dev/null || true
+    sleep 2
+    for p in "${gateway_pids[@]}"; do
+        if kill -0 "$p" 2>/dev/null; then
+            echo "[restart-agent] gateway pid=$p survived SIGTERM — sending SIGKILL"
+            kill -KILL "$p" 2>/dev/null || true
+        fi
+    done
+}
+
 # ── Kill and wait for respawn ──────────────────────────────────────────────
 echo "[restart-agent] Stopping running acc-agent so the daemon manager respawns with the new binary"
+cleanup_gateway_processes
 
 # Hub nodes (Rocky): acc-server.service owns the acc-agent workers.
 # Kill the workers and the Rust supervisor in acc-server will respawn them
