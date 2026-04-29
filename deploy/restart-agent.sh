@@ -17,6 +17,13 @@
 #
 #   The rocky-remote path is documented in ~/.acc/.env as ROCKY_TAILSCALE_IP
 #   and ROCKY_TAILSCALE_USER (defaults: 100.89.199.14 / jkh).
+#
+# macOS launchd notes
+# -------------------
+# `launchctl load/unload` before the binary swap can leave launchd racing on
+# stale binaries. On Darwin, this script writes the LaunchAgent plist during
+# preflight, but defers actual launchd registration/reload until after the new
+# binary is atomically installed.
 set -euo pipefail
 
 ACC_DIR="${ACC_DIR:-$HOME/.acc}"
@@ -49,6 +56,10 @@ source "${ACC_DIR}/.env" 2>/dev/null || true
 ROCKY_IP="${ROCKY_TAILSCALE_IP:-100.89.199.14}"
 ROCKY_USER="${ROCKY_TAILSCALE_USER:-jkh}"
 ROCKY_REPO="${ROCKY_TAILSCALE_REPO:-Src/ACC}"
+
+# Darwin launchd action to perform after the binary swap:
+# "none" | "register" | "reload"
+_LAUNCHD_ACTION="none"
 
 # ── DNS preflight ─────────────────────────────────────────────────────────────
 #
@@ -102,27 +113,20 @@ ensure_daemon_configured() {
         rendered=$(sed "s|AGENT_HOME|${HOME}|g" "${PLIST_SRC}")
 
         if [ ! -f "${PLIST_DST}" ]; then
-            echo "[restart-agent] LaunchAgent not installed — installing now"
+            echo "[restart-agent] LaunchAgent not installed — writing plist (will register after binary swap)"
             echo "${rendered}" > "${PLIST_DST}"
-            launchctl load "${PLIST_DST}" 2>/dev/null || true
-            echo "[restart-agent] ✓ LaunchAgent installed"
+            _LAUNCHD_ACTION="register"
         else
             local installed
             installed=$(cat "${PLIST_DST}")
             if [ "${rendered}" != "${installed}" ]; then
-                echo "[restart-agent] LaunchAgent is stale — updating"
-                launchctl unload "${PLIST_DST}" 2>/dev/null || true
+                echo "[restart-agent] LaunchAgent is stale — updating plist (will reload after binary swap)"
                 echo "${rendered}" > "${PLIST_DST}"
-                launchctl load "${PLIST_DST}" 2>/dev/null || true
-                echo "[restart-agent] ✓ LaunchAgent updated"
+                _LAUNCHD_ACTION="reload"
             else
                 echo "[restart-agent] LaunchAgent is current"
+                _LAUNCHD_ACTION="none"
             fi
-        fi
-
-        # Verify launchd will keep it alive
-        if ! launchctl list 2>/dev/null | grep -q "com.acc.agent"; then
-            echo "[restart-agent] WARNING: com.acc.agent not visible in launchctl list — may not auto-restart" >&2
         fi
 
     elif command -v systemctl &>/dev/null; then
@@ -178,6 +182,35 @@ ensure_daemon_configured() {
         echo "[restart-agent] WARNING: no daemon manager detected (not macOS launchd, not systemd)" >&2
         echo "    The agent will NOT automatically restart after this script kills it." >&2
         echo "    Start manually after: nohup ${AGENT_DEST} supervise &" >&2
+    fi
+}
+
+reload_launchd_after_binary_swap() {
+    [[ "$(uname)" != "Darwin" ]] && return 0
+    [[ "${_LAUNCHD_ACTION}" == "none" ]] && return 0
+
+    local PLIST_DST="${HOME}/Library/LaunchAgents/com.acc.agent.plist"
+    local GUI_TARGET="gui/$(id -u)"
+
+    if launchctl bootout "${GUI_TARGET}" "${PLIST_DST}" 2>/dev/null; then
+        echo "[restart-agent] launchctl bootout succeeded"
+        sleep 1
+        if launchctl bootstrap "${GUI_TARGET}" "${PLIST_DST}" 2>/dev/null; then
+            echo "[restart-agent] ✓ LaunchAgent bootstrapped (new plist + new binary)"
+        else
+            echo "[restart-agent] WARNING: launchctl bootstrap failed; attempting legacy load" >&2
+            launchctl load "${PLIST_DST}" 2>/dev/null || true
+        fi
+    else
+        echo "[restart-agent] launchctl bootout unavailable or service not loaded — using legacy load"
+        launchctl unload "${PLIST_DST}" 2>/dev/null || true
+        launchctl load "${PLIST_DST}" 2>/dev/null || true
+    fi
+
+    if ! launchctl list 2>/dev/null | grep -q "com.acc.agent"; then
+        echo "[restart-agent] WARNING: com.acc.agent not visible in launchctl list — may not auto-restart" >&2
+    else
+        echo "[restart-agent] ✓ com.acc.agent confirmed in launchctl list"
     fi
 }
 
@@ -320,6 +353,9 @@ if ! $SKIP_INSTALL; then
     chmod +x "$tmp"
     mv "$tmp" "$AGENT_DEST"
 fi
+
+echo "[restart-agent] Reloading daemon manager with new binary in place..."
+reload_launchd_after_binary_swap
 
 # ── Kill and wait for respawn ──────────────────────────────────────────────
 echo "[restart-agent] Stopping running acc-agent so the daemon manager respawns with the new binary"
