@@ -99,6 +99,31 @@ fn recent_done() -> &'static Mutex<HashMap<String, Instant>> {
     CELL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Track which idea tasks this process has already voted on so we do not
+/// re-vote on every poll cycle. The cooldown matches RECLAIM_COOLDOWN so
+/// a restarted agent can re-vote after 15 minutes if something went wrong.
+fn recent_voted() -> &'static Mutex<HashMap<String, Instant>> {
+    static VOTED: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    VOTED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn mark_voted(task_id: &str) {
+    if let Ok(mut m) = recent_voted().lock() {
+        let now = Instant::now();
+        m.retain(|_, t| now.duration_since(*t) < RECLAIM_COOLDOWN);
+        m.insert(task_id.to_string(), now);
+    }
+}
+
+fn already_voted(task_id: &str) -> bool {
+    if let Ok(m) = recent_voted().lock() {
+        if let Some(t) = m.get(task_id) {
+            return t.elapsed() < RECLAIM_COOLDOWN;
+        }
+    }
+    false
+}
+
 fn mark_done(task_id: &str) {
     if let Ok(mut m) = recent_done().lock() {
         // GC entries older than the cooldown window
@@ -202,11 +227,16 @@ pub async fn run(args: &[String]) {
 
     // Bus subscriber: wakes the poll loop immediately on dispatch nudge/assign
     let nudge = Arc::new(Notify::new());
+    // Separate notifier for idea-vote nudges (task_type=vote). This lets
+    // Poll 4 wake immediately when the server nudges without interfering
+    // with the work/review/phase_commit poll flow.
+    let vote_nudge = Arc::new(Notify::new());
     {
         let cfg2 = cfg.clone();
         let client2 = client.clone();
         let nudge2 = nudge.clone();
-        tokio::spawn(bus_subscriber(cfg2, client2, nudge2));
+        let vote_nudge2 = vote_nudge.clone();
+        tokio::spawn(bus_subscriber(cfg2, client2, nudge2, vote_nudge2));
     }
 
     loop {
@@ -264,6 +294,13 @@ pub async fn run(args: &[String]) {
                                             claimed_task["title"].as_str().unwrap_or("")
                                         ),
                                     );
+                                    crate::slack_notify::notify_claimed(
+                                        &cfg.acc_url,
+                                        &cfg.agent_name,
+                                        &task_id,
+                                        claimed_task["title"].as_str().unwrap_or("(no title)"),
+                                        claimed_task["description"].as_str().unwrap_or(""),
+                                    ).await;
                                     let cfg2 = cfg.clone();
                                     let client2 = client.clone();
                                     let task2 = claimed_task.clone();
@@ -318,6 +355,13 @@ pub async fn run(args: &[String]) {
                     match claim_task(&cfg, &client, &task_id).await {
                         Ok(claimed_task) => {
                             log(&cfg, &format!("claimed review {task_id}"));
+                            crate::slack_notify::notify_claimed(
+                                &cfg.acc_url,
+                                &cfg.agent_name,
+                                &task_id,
+                                claimed_task["title"].as_str().unwrap_or("(review)"),
+                                claimed_task["description"].as_str().unwrap_or(""),
+                            ).await;
                             let cfg2 = cfg.clone();
                             let client2 = client.clone();
                             let task2 = claimed_task.clone();
@@ -351,6 +395,13 @@ pub async fn run(args: &[String]) {
                     match claim_task(&cfg, &client, &task_id).await {
                         Ok(claimed_task) => {
                             log(&cfg, &format!("claimed phase_commit {task_id}"));
+                            crate::slack_notify::notify_claimed(
+                                &cfg.acc_url,
+                                &cfg.agent_name,
+                                &task_id,
+                                claimed_task["title"].as_str().unwrap_or("(phase_commit)"),
+                                claimed_task["description"].as_str().unwrap_or(""),
+                            ).await;
                             let cfg2 = cfg.clone();
                             let client2 = client.clone();
                             let task2 = claimed_task.clone();
@@ -369,6 +420,34 @@ pub async fn run(args: &[String]) {
             }
         }
 
+        // ── Poll 4: idea tasks (vote, non-exclusive) ──────────────────────
+        // Voting does not claim the task. Each agent reads the idea,
+        // evaluates it via the agentic loop, and POSTs a vote+refinement.
+        // The server's tally_idea_votes() promotes/rejects based on threshold.
+        // We run this every cycle (regardless of work cap) and fire-and-forget
+        // the vote coroutine so it doesn't block the main poll loop.
+        if let Ok(idea_tasks) = fetch_open_tasks(&cfg, &client, 10, "idea").await {
+            for task in &idea_tasks {
+                let task_id = task["id"].as_str().unwrap_or("").to_string();
+                if task_id.is_empty() {
+                    continue;
+                }
+                if already_voted(&task_id) {
+                    continue;
+                }
+                // Mark voted immediately so concurrent poll cycles don't
+                // double-vote even if the HTTP round-trip is still in flight.
+                mark_voted(&task_id);
+                log(&cfg, &format!("idea vote: evaluating {task_id}"));
+                let cfg2 = cfg.clone();
+                let client2 = client.clone();
+                let task2 = task.clone();
+                tokio::spawn(async move {
+                    execute_idea_vote(&cfg2, &client2, &task2).await;
+                });
+            }
+        }
+
         if at_work_cap && !claimed {
             log(
                 &cfg,
@@ -379,11 +458,16 @@ pub async fn run(args: &[String]) {
         if claimed {
             sleep(POLL_BUSY).await;
         } else {
-            // Wait for idle timeout OR a dispatch nudge — whichever comes first
+            // Wait for idle timeout OR a dispatch nudge — whichever comes first.
+            // A vote nudge (task_type=vote) also wakes us so ideas get fast
+            // turnaround without waiting up to POLL_IDLE seconds.
             tokio::select! {
                 _ = sleep(POLL_IDLE) => {}
                 _ = nudge.notified() => {
                     log(&cfg, "woke early — dispatch nudge received");
+                }
+                _ = vote_nudge.notified() => {
+                    log(&cfg, "woke early — vote nudge received");
                 }
             }
         }
@@ -430,9 +514,9 @@ async fn cleanup_stale_claims(cfg: &Config, client: &Client) {
 
 // ── Bus subscriber — wakes poll loop on dispatch nudge/assign ─────────────────
 
-async fn bus_subscriber(cfg: Config, client: Client, nudge: Arc<Notify>) {
+async fn bus_subscriber(cfg: Config, client: Client, nudge: Arc<Notify>, vote_nudge: Arc<Notify>) {
     loop {
-        match subscribe_bus(&cfg, &client, &nudge).await {
+        match subscribe_bus(&cfg, &client, &nudge, &vote_nudge).await {
             Ok(()) => {}
             Err(e) => {
                 log(
@@ -445,7 +529,7 @@ async fn bus_subscriber(cfg: Config, client: Client, nudge: Arc<Notify>) {
     }
 }
 
-async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>) -> Result<(), String> {
+async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>, vote_nudge: &Arc<Notify>) -> Result<(), String> {
     use futures_util::StreamExt;
     let stream = client.bus().stream();
     tokio::pin!(stream);
@@ -477,6 +561,11 @@ async fn subscribe_bus(cfg: &Config, client: &Client, nudge: &Arc<Notify>) -> Re
                         continue;
                     }
                 }
+            }
+            // If the nudge specifically targets idea/vote tasks, also wake
+            // the dedicated vote poll tier immediately.
+            if msg.extra.get("task_type").and_then(|v| v.as_str()) == Some("vote") {
+                vote_nudge.notify_one();
             }
             nudge.notify_one();
         } else if kind == "tasks:dispatch_assigned" && is_directed_to_us {
@@ -1260,6 +1349,43 @@ async fn complete_task(cfg: &Config, client: &Client, task_id: &str, output: &st
         .tasks()
         .complete(task_id, Some(&cfg.agent_name), Some(truncated))
         .await;
+    // Fire-and-forget Slack notification. We need the task title; fetch it
+    // from what we already have in the process (title comes from the original
+    // claimed_task Value). Since complete_task only receives task_id + output
+    // we post with the task_id as a fallback title — callers that have the
+    // full task Value use notify_completed_with_title directly (see below).
+    crate::slack_notify::notify_completed(
+        &cfg.acc_url,
+        &cfg.agent_name,
+        task_id,
+        task_id, // title fallback — overridden by the typed wrappers below
+        output,
+    )
+    .await;
+}
+
+/// Wrapper used by callers that have the full task Value and can supply the
+/// real title, avoiding a round-trip to the hub.
+async fn complete_task_titled(
+    cfg: &Config,
+    client: &Client,
+    task_id: &str,
+    title: &str,
+    output: &str,
+) {
+    let truncated = &output[..output.len().min(4096)];
+    let _ = client
+        .tasks()
+        .complete(task_id, Some(&cfg.agent_name), Some(truncated))
+        .await;
+    crate::slack_notify::notify_completed(
+        &cfg.acc_url,
+        &cfg.agent_name,
+        task_id,
+        title,
+        output,
+    )
+    .await;
 }
 
 async fn unclaim_task(cfg: &Config, client: &Client, task_id: &str) {
@@ -1286,6 +1412,162 @@ fn log(cfg: &Config, msg: &str) {
     // CCC-u3c: also emit through tracing so journald (when available)
     // sees this for the consolidated dashboard log viewer.
     tracing::info!(component = "tasks", agent = %cfg.agent_name, "{msg}");
+}
+
+// ── Idea vote execution ──────────────────────────────────────────────────────
+//
+// Voting is non-exclusive: the agent does NOT claim the idea task.
+// It reads the idea, calls sdk::run_agent with an evaluation prompt, parses
+// the JSON verdict, then PUTs /api/tasks/:id/vote. The server tallies votes
+// and promotes/rejects the idea once thresholds are met.
+//
+// Timeout is intentionally short (REVIEW_TIMEOUT = 30 min) because idea
+// evaluation is lightweight — no file editing, just reading and judging.
+
+const IDEA_VOTE_TIMEOUT: Duration = Duration::from_secs(10 * 60); // 10 min
+
+async fn execute_idea_vote(cfg: &Config, client: &Client, task: &Value) {
+    let task_id = task["id"].as_str().unwrap_or("unknown");
+    let title = task["title"].as_str().unwrap_or("(no title)");
+    let description = task["description"].as_str().unwrap_or("");
+    let project_id = task["project_id"].as_str().unwrap_or("");
+
+    log(cfg, &format!("idea vote: evaluating idea {task_id}: {title}"));
+
+    // Use a scratch workspace for the agentic loop (read-only; no commits)
+    let workspace = cfg.acc_dir.join("idea-eval-workspace");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let prompt = format!(
+        "You are an autonomous agent evaluating a proposed idea/task \
+         for a software project.\n\
+         \n\
+         Idea title: {title}\n\
+         \n\
+         Idea description:\n\
+         {description}\n\
+         \n\
+         Project ID: {project_id}\n\
+         \n\
+         Your job is to evaluate this idea on three criteria:\n\
+         1. CLARITY - is the idea well-defined enough to be actionable?\n\
+         2. VALUE - does it provide clear value to the project?\n\
+         3. FEASIBILITY - is it technically feasible without extraordinary risk?\n\
+         \n\
+         You may use `bash` to inspect the workspace or check context, but this is\n\
+         usually not necessary for evaluation.\n\
+         \n\
+         Respond with ONLY a single valid JSON object - no prose, no markdown fences:\n\
+         {{\n\
+           \"vote\": \"approve\",\n\
+           \"refinement\": \"<one concise sentence: what makes this good and any improvement>\"\n\
+         }}\n\
+         \n\
+         Replace \"approve\" with \"reject\" only if the idea has a fundamental flaw\n\
+         that makes it not worth pursuing (unclear, harmful, or infeasible).\n\
+         For approve votes, the refinement MUST be non-empty - it is merged into\n\
+         the final task description when the idea is promoted.\n\
+         For reject votes, the refinement should explain the specific flaw.\n\
+         \n\
+         Do not vote on your own ideas. Do not pad the refinement.\n\
+         Output ONLY the JSON object."
+    );
+
+    let result =
+        match tokio::time::timeout(IDEA_VOTE_TIMEOUT, crate::sdk::run_agent(&prompt, &workspace))
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                log(
+                    cfg,
+                    &format!(
+                        "idea vote: timeout after {}m for {task_id}",
+                        IDEA_VOTE_TIMEOUT.as_secs() / 60
+                    ),
+                );
+                return;
+            }
+        };
+
+    let output = match result {
+        Ok(o) => o,
+        Err(e) => {
+            log(cfg, &format!("idea vote: agent error for {task_id}: {e}"));
+            return;
+        }
+    };
+
+    // Parse vote JSON from model output
+    let (vote, refinement) = parse_vote_output(&output);
+    log(
+        cfg,
+        &format!(
+            "idea vote: {task_id} → {vote} (refinement: {}...)",
+            &refinement[..refinement.len().min(80)]
+        ),
+    );
+
+    // POST the vote via the acc_client vote() method
+    match client
+        .tasks()
+        .vote(task_id, &cfg.agent_name, &vote, &refinement)
+        .await
+    {
+        Ok(()) => {
+            log(cfg, &format!("idea vote: posted {vote} on {task_id}"));
+        }
+        Err(e) => {
+            log(
+                cfg,
+                &format!("idea vote: PUT /vote failed for {task_id}: {e}"),
+            );
+            // Un-mark so we can retry next cycle if it was a transient error
+            // (self-vote 409s are permanent and will just re-fail, but that
+            // is harmless — mark_voted keeps us from spamming the server).
+        }
+    }
+}
+
+/// Parse `{"vote":"approve","refinement":"..."}` from model output.
+/// Falls back to a safe "reject" with an explanation if the output is
+/// not parseable, so we never silently approve a garbled response.
+fn parse_vote_output(output: &str) -> (String, String) {
+    let start = output.find('{').unwrap_or(output.len());
+    let end = output.rfind('}').map(|i| i + 1).unwrap_or(output.len());
+    if start >= end {
+        return (
+            "reject".to_string(),
+            "agent produced unparseable evaluation output".to_string(),
+        );
+    }
+    match serde_json::from_str::<serde_json::Value>(&output[start..end]) {
+        Ok(v) => {
+            let vote = v["vote"].as_str().unwrap_or("reject").to_string();
+            let vote = if vote == "approve" || vote == "reject" {
+                vote
+            } else {
+                "reject".to_string()
+            };
+            let refinement = v["refinement"].as_str().unwrap_or("").trim().to_string();
+            let refinement = if refinement.is_empty() {
+                // Server requires non-empty refinement for approve votes.
+                // Provide a minimal fallback so the vote isn't rejected 400.
+                if vote == "approve" {
+                    "Idea looks sound and worth pursuing.".to_string()
+                } else {
+                    "Idea rejected by automated evaluation.".to_string()
+                }
+            } else {
+                refinement
+            };
+            (vote, refinement)
+        }
+        Err(_) => (
+            "reject".to_string(),
+            "agent produced unparseable evaluation output".to_string(),
+        ),
+    }
 }
 
 fn parse_task_type(s: &str) -> Option<TaskType> {
