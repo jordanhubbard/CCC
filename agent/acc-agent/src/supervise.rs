@@ -16,17 +16,21 @@
 //! the initial migration pass is buffered by the kernel and handled after upgrade
 //! returns, rather than hitting the default (terminate) action.
 
+use acc_client::Client;
+use acc_model::HeartbeatRequest;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 use tokio::sync::watch;
 
 use crate::config::Config;
+use crate::session_registry;
 use crate::upgrade::UpgradeOptions;
 
 const HEALTHY_UPTIME: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+const SUPERVISOR_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
 // ── Static child spec (compile-time default set) ──────────────────────────────
 
@@ -206,6 +210,41 @@ mod tests {
         std::env::remove_var("ACC_ENABLE_LEGACY_QUEUE");
         std::env::remove_var("ACC_ENABLE_HERMES_POLL");
     }
+
+    #[test]
+    fn supervisor_heartbeat_base_request_reports_idle_capacity() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("AGENT_MAX_TASKS");
+        std::env::set_var("ACC_MAX_TASKS_PER_AGENT", "3");
+        let cfg = Config {
+            acc_dir: std::env::temp_dir(),
+            acc_url: "http://example.test".into(),
+            acc_token: "tok".into(),
+            agent_name: "agent".into(),
+            agentbus_token: "bus".into(),
+            pair_programming: true,
+            host: "host".into(),
+            ssh_user: "user".into(),
+            ssh_host: "ssh.example.test".into(),
+            ssh_port: 2222,
+        };
+
+        let req = build_supervisor_heartbeat_request(&cfg);
+
+        assert_eq!(req.status.as_deref(), Some("ok"));
+        assert_eq!(req.note.as_deref(), Some("supervisor idle"));
+        assert_eq!(req.host.as_deref(), Some("host"));
+        assert_eq!(req.ssh_user.as_deref(), Some("user"));
+        assert_eq!(req.ssh_host.as_deref(), Some("ssh.example.test"));
+        assert_eq!(req.ssh_port, Some(2222));
+        assert_eq!(req.tasks_in_flight, Some(0));
+        assert_eq!(req.estimated_free_slots, Some(3));
+        assert!(req.ccc_version.is_none());
+        assert!(req.executors.is_empty());
+        assert!(req.sessions.is_empty());
+
+        std::env::remove_var("ACC_MAX_TASKS_PER_AGENT");
+    }
 }
 
 pub async fn run(args: &[String]) {
@@ -311,6 +350,7 @@ pub async fn run(args: &[String]) {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let mut join_handles = Vec::new();
+    join_handles.push(spawn_supervisor_heartbeat(cfg.clone(), shutdown_rx.clone()));
     for (name, child_exe, child_args, _direct) in processes {
         let child_name = name;
         let rx = shutdown_rx.clone();
@@ -344,6 +384,80 @@ pub async fn run(args: &[String]) {
 
     let _ = std::fs::remove_file(&pid_path);
     log(&cfg, "stopped");
+}
+
+fn spawn_supervisor_heartbeat(
+    cfg: Config,
+    mut shutdown: watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let client = match Client::new(cfg.acc_url.clone(), &cfg.acc_token) {
+            Ok(client) => client,
+            Err(err) => {
+                log(
+                    &cfg,
+                    &format!("WARNING: heartbeat client setup failed: {err}"),
+                );
+                return;
+            }
+        };
+
+        log(&cfg, "supervisor heartbeat started");
+        post_supervisor_heartbeat(&cfg, &client).await;
+
+        let mut interval = tokio::time::interval(SUPERVISOR_HEARTBEAT_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    post_supervisor_heartbeat(&cfg, &client).await;
+                }
+                _ = shutdown.changed() => break,
+            }
+        }
+
+        log(&cfg, "supervisor heartbeat stopped");
+    })
+}
+
+async fn post_supervisor_heartbeat(cfg: &Config, client: &Client) {
+    let mut req = build_supervisor_heartbeat_request(cfg);
+    session_registry::augment_heartbeat(cfg, &mut req).await;
+
+    match tokio::time::timeout(
+        Duration::from_secs(15),
+        client.items().heartbeat(&cfg.agent_name, &req),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => log(cfg, &format!("WARNING: supervisor heartbeat failed: {err}")),
+        Err(_) => log(cfg, "WARNING: supervisor heartbeat timed out"),
+    }
+}
+
+fn build_supervisor_heartbeat_request(cfg: &Config) -> HeartbeatRequest {
+    HeartbeatRequest {
+        ts: Some(chrono::Utc::now()),
+        status: Some("ok".into()),
+        note: Some("supervisor idle".into()),
+        host: Some(cfg.host.clone()),
+        ssh_user: Some(cfg.ssh_user.clone()),
+        ssh_host: Some(cfg.ssh_host.clone()),
+        ssh_port: Some(cfg.ssh_port as u64),
+        tasks_in_flight: Some(0),
+        estimated_free_slots: Some(cfg.max_tasks_per_agent()),
+        free_session_slots: None,
+        max_sessions: None,
+        session_spawn_denied_reason: None,
+        ccc_version: None,
+        workspace_revision: None,
+        runtime_version: None,
+        executors: vec![],
+        sessions: vec![],
+    }
 }
 
 async fn await_signal(sigterm: &mut Signal, sigint: &mut Signal, sigusr1: &mut Signal) -> bool {
