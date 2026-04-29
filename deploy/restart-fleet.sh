@@ -29,16 +29,23 @@ if [ -z "$TOKEN" ]; then
 fi
 
 PARALLEL="${PARALLEL:-false}"
+PREFER_TAILSCALE="${PREFER_TAILSCALE:-true}"
 
 echo "[restart-fleet] Querying ${ACC_URL}/api/agents?online=true"
 AGENTS_JSON=$(curl -sSf -H "Authorization: Bearer $TOKEN" "${ACC_URL}/api/agents?online=true")
 
-# Extract rows: name\tuser\thost\tport
+# Extract rows: name\tuser\thost\tport\ttailscale_ip
 mapfile -t TARGETS < <(echo "$AGENTS_JSON" | jq -r '
   (.agents // .) |
   .[] |
   select(.ssh_user != null and .ssh_user != "" and .ssh_host != null and .ssh_host != "") |
-  [(.name // "?"), .ssh_user, .ssh_host, (.ssh_port // 22)] |
+  [
+    (.name // "?"),
+    .ssh_user,
+    .ssh_host,
+    (.ssh_port // 22),
+    (if (.tailscale_ip | type) == "string" and .tailscale_ip != "" then .tailscale_ip else "-" end)
+  ] |
   @tsv')
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
@@ -48,8 +55,12 @@ fi
 
 echo "[restart-fleet] ${#TARGETS[@]} target(s):"
 for row in "${TARGETS[@]}"; do
-    IFS=$'\t' read -r name user host port <<< "$row"
-    echo "  - ${name} (${user}@${host}:${port})"
+    IFS=$'\t' read -r name user host port tailscale_ip <<< "$row"
+    ssh_host="$host"
+    if [ "$PREFER_TAILSCALE" = "true" ] && [ "$tailscale_ip" != "-" ]; then
+        ssh_host="$tailscale_ip"
+    fi
+    echo "  - ${name} (${user}@${ssh_host}:${port})"
 done
 echo ""
 
@@ -80,7 +91,8 @@ FAILED=0
 if [ "$PARALLEL" = "true" ]; then
     declare -a PIDS=()
     for row in "${TARGETS[@]}"; do
-        IFS=$'\t' read -r name user host port <<< "$row"
+        IFS=$'\t' read -r name user host port tailscale_ip <<< "$row"
+        if [ "$PREFER_TAILSCALE" = "true" ] && [ "$tailscale_ip" != "-" ]; then host="$tailscale_ip"; fi
         restart_one "$name" "$user" "$host" "$port" &
         PIDS+=($!)
     done
@@ -89,7 +101,8 @@ if [ "$PARALLEL" = "true" ]; then
     done
 else
     for row in "${TARGETS[@]}"; do
-        IFS=$'\t' read -r name user host port <<< "$row"
+        IFS=$'\t' read -r name user host port tailscale_ip <<< "$row"
+        if [ "$PREFER_TAILSCALE" = "true" ] && [ "$tailscale_ip" != "-" ]; then host="$tailscale_ip"; fi
         restart_one "$name" "$user" "$host" "$port" || FAILED=$((FAILED+1))
     done
 fi
