@@ -193,17 +193,17 @@ echo "  Run deploy/run-migrations.sh --only=0019 to set up the mount on this nod
 echo ""
 echo -e "${BOLD}Step 5: Communication Channels${NC}"
 echo ""
-echo "  Select which channels to enable (comma-separated, or press enter for SquirrelChat only):"
+echo "  Select which channels to enable (comma-separated, or press enter for AgentChat only):"
 echo ""
-echo "    squirrelchat  — Self-hosted chat (ships with CCC, always available)"
+echo "    agentchat     — Self-hosted chat (ships with CCC, always available)"
 echo "    slack          — Slack workspace integration"
 echo "    telegram       — Telegram bot integration"
 echo ""
-echo "  Examples:  slack,telegram    or    slack    or    (blank for SquirrelChat only)"
+echo "  Examples:  slack,telegram    or    slack    or    (blank for AgentChat only)"
 echo ""
-ask "Channels [squirrelchat]: "
+ask "Channels [agentchat]: "
 read -r CHANNEL_SELECTION
-CHANNEL_SELECTION="${CHANNEL_SELECTION:-squirrelchat}"
+CHANNEL_SELECTION="${CHANNEL_SELECTION:-agentchat}"
 
 # Parse channel selection
 SLACK_BOT_TOKEN=""
@@ -225,9 +225,9 @@ if echo "$CHANNEL_SELECTION" | grep -qi "telegram"; then
   prompt TELEGRAM_TOKEN "Telegram bot token (from @BotFather)" ""
 fi
 
-if [ "$CHANNEL_SELECTION" = "squirrelchat" ] || [ -z "$CHANNEL_SELECTION" ]; then
+if [ "$CHANNEL_SELECTION" = "agentchat" ] || [ -z "$CHANNEL_SELECTION" ]; then
   echo ""
-  success "SquirrelChat will be your default communication channel."
+  success "AgentChat will be your default communication channel."
   echo "  It starts automatically with the CCC stack — no external accounts needed."
 fi
 
