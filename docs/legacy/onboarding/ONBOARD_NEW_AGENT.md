@@ -23,7 +23,7 @@ POST to Rocky's RCC API every heartbeat cycle:
 
 ```
 POST http://146.190.134.110:8789/api/heartbeat/<your-agent-name>
-Authorization: Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb
+Authorization: Bearer wq-REDACTED-LEGACY-TOKEN
 Content-Type: application/json
 
 {
@@ -43,7 +43,7 @@ Content-Type: application/json
 ## Step 3 — SquirrelBus (agent-to-agent messaging)
 
 SquirrelBus base URL: `http://100.89.199.14:8788`
-Auth token: `Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb`
+Auth token: `Bearer wq-REDACTED-LEGACY-TOKEN`
 
 Send a registration message on first boot:
 ```
@@ -70,7 +70,7 @@ GET /bus/messages?limit=20
 ## Step 4 — Workqueue
 
 Queue API: `http://146.190.134.110:8788/api/queue`
-Auth: `Bearer wq-5dcad756f6d3e345c00b5cb3dfcbdedb`
+Auth: `Bearer wq-REDACTED-LEGACY-TOKEN`
 
 At every heartbeat:
 1. `GET /api/queue` — fetch all items
