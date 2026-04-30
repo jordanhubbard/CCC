@@ -10,6 +10,7 @@ mod hub_mock;
 mod json;
 mod log_init;
 mod migrate;
+mod nap;
 mod peers;
 mod proxy;
 mod queue;
@@ -47,6 +48,7 @@ fn main() {
         "hermes" => tokio_run(hermes::run(rest)),
         "proxy" => tokio_run(proxy::run(rest)),
         "tasks" => tokio_run(tasks::run(rest)),
+        "nap" => tokio_run(nap::run(rest)),
         "slack-ingest" => tokio_run(slack_ingest::run(rest)),
         "supervise" => tokio_run(supervise::run(rest)),
         "upgrade" => tokio_run(upgrade::run_cli(rest)),
@@ -77,6 +79,7 @@ fn print_help() {
     eprintln!("  acc-agent hermes  (hermes session driver)");
     eprintln!("  acc-agent proxy   (long-running daemon: NVIDIA header-strip proxy)");
     eprintln!("  acc-agent tasks     [--max=N]    (long-running daemon: fleet task worker)");
+    eprintln!("  acc-agent nap       [--schedule] (nightly memory nap: summarise→Qdrant)");
     eprintln!(
         "  acc-agent slack-ingest [--once]  (long-running daemon: Slack→Qdrant memory ingest)"
     );

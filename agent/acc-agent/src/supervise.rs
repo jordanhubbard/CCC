@@ -258,6 +258,12 @@ static CHILDREN: &[ChildSpec] = &[
         direct_exe: false,
         enabled: nvidia_enabled,
     },
+    ChildSpec {
+        name: "nap",
+        args: &["nap", "--schedule"],
+        direct_exe: false,
+        enabled: always,
+    },
 ];
 
 #[cfg(test)]
