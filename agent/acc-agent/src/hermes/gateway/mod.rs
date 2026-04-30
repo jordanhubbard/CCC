@@ -234,12 +234,28 @@ async fn resolve_slack_tokens(
     };
 
     let suffix = workspace
-        .map(|w| format!("_{}", w.to_uppercase()))
+        .map(|w| {
+            format!(
+                "_{}",
+                w.to_uppercase()
+                    .chars()
+                    .map(|c| if c == '-' { '_' } else { c })
+                    .collect::<String>()
+            )
+        })
         .unwrap_or_default();
+    let legacy_suffix = if suffix == "_OFFTERA" {
+        Some("_OFTERRA")
+    } else {
+        None
+    };
 
     if bot_token.is_none() {
         bot_token = std::env::var(format!("SLACK_BOT_TOKEN{suffix}"))
             .ok()
+            .or_else(|| {
+                legacy_suffix.and_then(|s| std::env::var(format!("SLACK_BOT_TOKEN{s}")).ok())
+            })
             .or_else(|| {
                 if suffix.is_empty() {
                     std::env::var("SLACK_OMGJKH_TOKEN").ok()
@@ -252,6 +268,9 @@ async fn resolve_slack_tokens(
     if app_token.is_none() {
         app_token = std::env::var(format!("SLACK_APP_TOKEN{suffix}"))
             .ok()
+            .or_else(|| {
+                legacy_suffix.and_then(|s| std::env::var(format!("SLACK_APP_TOKEN{s}")).ok())
+            })
             .filter(|t| t.starts_with("xapp-"));
     }
 

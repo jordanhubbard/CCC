@@ -41,6 +41,7 @@ pub fn run(args: &[String]) {
 }
 
 fn nav<'a>(val: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let path = path.strip_prefix('.').unwrap_or(path);
     if path.is_empty() {
         return Some(val);
     }
@@ -140,6 +141,12 @@ mod tests {
     fn test_nav_simple() {
         let v = json!({"a": {"b": "hello"}});
         assert_eq!(nav(&v, "a.b"), Some(&json!("hello")));
+    }
+
+    #[test]
+    fn test_nav_leading_dot() {
+        let v = json!({"a": {"b": "hello"}});
+        assert_eq!(nav(&v, ".a.b"), Some(&json!("hello")));
     }
 
     #[test]

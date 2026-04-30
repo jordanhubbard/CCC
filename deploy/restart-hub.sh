@@ -27,6 +27,25 @@ if [ -z "$WORKSPACE" ] || [ ! -f "${WORKSPACE}/Cargo.toml" ]; then
     exit 1
 fi
 
+# Load and refresh secrets before the systemd restart so EnvironmentFile and
+# ~/.acc/acc.json reflect all workspace gateways.
+# shellcheck disable=SC1090
+source "${ACC_DIR}/.env" 2>/dev/null || true
+
+if [ -x "${WORKSPACE}/deploy/secrets-sync.sh" ]; then
+    echo "[restart-hub] Syncing secrets into ${ACC_DIR}/.env"
+    ACC_DIR="${ACC_DIR}" bash "${WORKSPACE}/deploy/secrets-sync.sh" --force || \
+        echo "[restart-hub] WARNING: secrets sync failed — continuing with cached .env" >&2
+    # shellcheck disable=SC1090
+    source "${ACC_DIR}/.env" 2>/dev/null || true
+fi
+
+if [ -x "${WORKSPACE}/deploy/reconcile-hub-supervisor.sh" ]; then
+    echo "[restart-hub] Reconciling hub supervisor process list"
+    ACC_DIR="${ACC_DIR}" bash "${WORKSPACE}/deploy/reconcile-hub-supervisor.sh" || \
+        echo "[restart-hub] WARNING: hub supervisor reconciliation failed" >&2
+fi
+
 SERVER_BIN="${WORKSPACE}/target/release/acc-server"
 AGENT_BIN="${WORKSPACE}/target/release/acc-agent"
 SERVER_DEST="/usr/local/bin/acc-server"

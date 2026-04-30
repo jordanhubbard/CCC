@@ -57,6 +57,33 @@ install_hermes_alias() {
 # shellcheck disable=SC1090
 source "${ACC_DIR}/.env" 2>/dev/null || true
 
+sync_secrets_if_available() {
+    if [ -x "${WORKSPACE}/deploy/secrets-sync.sh" ]; then
+        echo "[restart-agent] Syncing secrets into ${ACC_DIR}/.env"
+        ACC_DIR="${ACC_DIR}" bash "${WORKSPACE}/deploy/secrets-sync.sh" --force || \
+            echo "[restart-agent] WARNING: secrets sync failed — continuing with cached .env" >&2
+        # shellcheck disable=SC1090
+        source "${ACC_DIR}/.env" 2>/dev/null || true
+    fi
+}
+
+hub_supervisor_active() {
+    [[ "$(uname)" != "Darwin" ]] && command -v systemctl &>/dev/null \
+        && systemctl is-active acc-server.service &>/dev/null 2>&1
+}
+
+reconcile_hub_supervisor_if_available() {
+    hub_supervisor_active || return 0
+    if [ -x "${WORKSPACE}/deploy/reconcile-hub-supervisor.sh" ]; then
+        echo "[restart-agent] Reconciling hub supervisor process list"
+        ACC_DIR="${ACC_DIR}" bash "${WORKSPACE}/deploy/reconcile-hub-supervisor.sh" || \
+            echo "[restart-agent] WARNING: hub supervisor reconciliation failed" >&2
+    fi
+}
+
+sync_secrets_if_available
+reconcile_hub_supervisor_if_available
+
 # Rocky Tailscale coordinates (override in ~/.acc/.env if needed)
 ROCKY_IP="${ROCKY_TAILSCALE_IP:-100.89.199.14}"
 ROCKY_USER="${ROCKY_TAILSCALE_USER:-jkh}"
@@ -392,14 +419,37 @@ cleanup_gateway_processes
 # Hub nodes (Rocky): acc-server.service owns the acc-agent workers.
 # Kill the workers and the Rust supervisor in acc-server will respawn them
 # with the new binary. No separate supervise process to look for.
-if [[ "$(uname)" != "Darwin" ]] && command -v systemctl &>/dev/null \
-    && systemctl is-active acc-server.service &>/dev/null 2>&1; then
+if hub_supervisor_active; then
     # Resolve PIDs upfront then signal by PID. The earlier
     # `pkill -f "acc-agent (bus|queue|tasks|hermes|proxy)"` form silently
     # left `hermes --gateway` and `slack-ingest` running on the previous
     # binary in production (they kept their old PIDs across restart),
     # so the new binary's tools never reached the gateway. PID-based
     # kill + verify + SIGKILL escalation is the robust path.
+    if sudo -n systemctl restart acc-server.service 2>/dev/null; then
+        for _ in 1 2 3 4 5 6; do
+            sleep 2
+            systemctl is-active acc-server.service &>/dev/null 2>&1 && break
+        done
+        if ! systemctl is-active acc-server.service &>/dev/null 2>&1; then
+            echo "[restart-agent] ✗ acc-server.service did not become active after restart" >&2
+            exit 1
+        fi
+        new_worker=""
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 2
+            new_worker=$(pgrep -f "acc-agent (bus|queue|tasks)" | head -1 || true)
+            [ -n "$new_worker" ] && break
+        done
+        if [ -n "$new_worker" ]; then
+            echo "[restart-agent] ✓ acc-server.service restarted and acc-agent workers respawned"
+            exit 0
+        fi
+        echo "[restart-agent] ✗ workers did not respawn within 20s — check: journalctl -u acc-server.service" >&2
+        exit 1
+    fi
+
+    echo "[restart-agent] WARNING: could not restart acc-server.service via sudo -n; falling back to child restart" >&2
     declare -a child_pids=()
     while IFS= read -r p; do
         [ -n "$p" ] && child_pids+=("$p")

@@ -92,6 +92,66 @@ declare -A KEY_MAP=(
   ["peers/natasha_url"]="NATASHA_URL"
 )
 
+agent_secret_slug() {
+  local name="${AGENT_NAME:-${CCC_AGENT_NAME:-$(hostname -s 2>/dev/null || hostname)}}"
+  printf '%s' "$name" | tr '[:upper:]' '[:lower:]'
+}
+
+workspace_suffix() {
+  local workspace="$1"
+  workspace="$(printf '%s' "$workspace" | tr '[:lower:]-' '[:upper:]_')"
+  printf '_%s' "$workspace"
+}
+
+env_keys_for_secret() {
+  local secret_key="$1"
+  local mapped="${KEY_MAP[$secret_key]:-}"
+  if [[ -n "$mapped" ]]; then
+    printf '%s\n' "$mapped"
+    return 0
+  fi
+
+  # Structured Slack workspace keys are stored per bot:
+  #   slack/<workspace>/<agent>/<type>
+  # Sync only the current agent's keys so every host gets its own app/bot token.
+  if [[ "$secret_key" =~ ^slack/([^/]+)/([^/]+)/(app-token|bot-token|signing-secret|user-token|webhook-url|watch-channel|client-id|client-secret|client-signing-secret|client-user-token)$ ]]; then
+    local workspace="${BASH_REMATCH[1]}"
+    local agent="${BASH_REMATCH[2]}"
+    local kind="${BASH_REMATCH[3]}"
+    local current_agent
+    current_agent="$(agent_secret_slug)"
+    agent="$(printf '%s' "$agent" | tr '[:upper:]' '[:lower:]')"
+    [[ "$agent" == "$current_agent" ]] || return 0
+
+    local base=""
+    case "$kind" in
+      app-token)              base="SLACK_APP_TOKEN" ;;
+      bot-token)              base="SLACK_BOT_TOKEN" ;;
+      signing-secret)         base="SLACK_SIGNING_SECRET" ;;
+      user-token)             base="SLACK_USER_TOKEN" ;;
+      webhook-url)            base="SLACK_WEBHOOK_URL" ;;
+      watch-channel)          base="SLACK_WATCH_CHANNEL" ;;
+      client-id)              base="SLACK_CLIENT_ID" ;;
+      client-secret)          base="SLACK_CLIENT_SECRET" ;;
+      client-signing-secret)  base="SLACK_CLIENT_SIGNING_SECRET" ;;
+      client-user-token)      base="SLACK_CLIENT_USER_TOKEN" ;;
+    esac
+    [[ -n "$base" ]] || return 0
+
+    local env_key="$base"
+    if [[ "$workspace" != "omgjkh" && "$workspace" != "default" ]]; then
+      env_key="${base}$(workspace_suffix "$workspace")"
+    fi
+    printf '%s\n' "$env_key"
+
+    # Historical typo compatibility. Older nodes used OFTERRA in env names;
+    # write both while all gateway paths are being converged on OFFTERA.
+    if [[ "$workspace" == "offtera" && "$env_key" == *"_OFFTERA" ]]; then
+      printf '%s\n' "${env_key/_OFFTERA/_OFTERRA}"
+    fi
+  fi
+}
+
 updated=0
 unchanged=0
 
@@ -120,9 +180,9 @@ set_env_key() {
 while IFS= read -r secret_key; do
   [[ -z "$secret_key" ]] && continue
 
-  # Look up the .env var name
-  env_key="${KEY_MAP[$secret_key]:-}"
-  if [[ -z "$env_key" ]]; then
+  # Look up the .env var name(s)
+  mapfile -t env_keys < <(env_keys_for_secret "$secret_key")
+  if [[ "${#env_keys[@]}" -eq 0 ]]; then
     # Unknown secret — skip (don't blindly write unknown keys to .env)
     continue
   fi
@@ -136,17 +196,21 @@ while IFS= read -r secret_key; do
     continue
   fi
 
-  # Check current value
-  current_val=$(grep "^${env_key}=" "$ENV_FILE" | head -1 | cut -d'=' -f2- || echo "")
+  for env_key in "${env_keys[@]}"; do
+    [[ -z "$env_key" ]] && continue
 
-  if [[ "$current_val" == "$SECRET_VAL" ]] && ! $FORCE; then
-    unchanged=$((unchanged + 1))
-    continue
-  fi
+    # Check current value
+    current_val=$(grep "^${env_key}=" "$ENV_FILE" | head -1 | cut -d'=' -f2- || echo "")
 
-  echo "  UPDATE  $env_key"
-  set_env_key "$env_key" "$SECRET_VAL"
-  updated=$((updated + 1))
+    if [[ "$current_val" == "$SECRET_VAL" ]] && ! $FORCE; then
+      unchanged=$((unchanged + 1))
+      continue
+    fi
+
+    echo "  UPDATE  $env_key"
+    set_env_key "$env_key" "$SECRET_VAL"
+    updated=$((updated + 1))
+  done
 done <<< "$KEYS"
 
 echo "Secrets sync done: $updated updated, $unchanged unchanged."
