@@ -653,7 +653,7 @@ async fn adopt_assigned_tasks(cfg: &Config, client: &Client, online_peers: &[Str
     let mut adopted = 0;
     for task in tasks {
         let task_id = task["id"].as_str().unwrap_or("");
-        if task_id.is_empty() || in_cooldown(task_id) {
+        if task_id.is_empty() {
             continue;
         }
         if spawn_claimed_task(
