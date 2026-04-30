@@ -198,8 +198,8 @@ while IFS= read -r secret_key; do
   [[ -z "$secret_key" ]] && continue
 
   # Look up the .env var name(s)
-  mapfile -t env_keys < <(env_keys_for_secret "$secret_key")
-  if [[ "${#env_keys[@]}" -eq 0 ]]; then
+  env_keys="$(env_keys_for_secret "$secret_key")"
+  if [[ -z "$env_keys" ]]; then
     # Unknown secret — skip (don't blindly write unknown keys to .env)
     continue
   fi
@@ -213,7 +213,7 @@ while IFS= read -r secret_key; do
     continue
   fi
 
-  for env_key in "${env_keys[@]}"; do
+  while IFS= read -r env_key; do
     [[ -z "$env_key" ]] && continue
 
     # Check current value
@@ -227,7 +227,7 @@ while IFS= read -r secret_key; do
     echo "  UPDATE  $env_key"
     set_env_key "$env_key" "$SECRET_VAL"
     updated=$((updated + 1))
-  done
+  done <<< "$env_keys"
 done <<< "$KEYS"
 
 echo "Secrets sync done: $updated updated, $unchanged unchanged."
