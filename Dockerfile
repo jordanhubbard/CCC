@@ -16,14 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Cache deps first
-COPY acc-server/Cargo.toml acc-server/Cargo.lock ./
-RUN mkdir -p src && echo 'fn main(){}' > src/main.rs
-RUN cargo build --release --bin acc-server 2>/dev/null || true
-
-# Full source
-COPY acc-server/src ./src
-RUN touch src/main.rs && cargo build --release --bin acc-server
+# Full source. The server is a member of the root workspace, so the lockfile
+# lives at the repository root; .dockerignore keeps local build artifacts out of
+# the context.
+COPY . .
+RUN cargo fetch --locked
+RUN cargo build --locked --release -p acc-server
 
 # ── Stage 2: final image ─────────────────────────────────────────────────
 FROM debian:bookworm-slim

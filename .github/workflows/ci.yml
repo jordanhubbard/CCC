@@ -64,11 +64,19 @@ jobs:
 
       - name: Syntax-check all Python files
         run: |
-          find . -name '*.py' \
-            -not -path './.git/*' \
-            -not -path './agent/*/target/*' \
-            -not -path './acc-server/target/*' \
-            | xargs python3 -m py_compile && echo "All Python files syntax OK"
+          mapfile -d '' files < <(
+            find . -name '*.py' \
+              -not -path './.git/*' \
+              -not -path './agent/*/target/*' \
+              -not -path './acc-server/target/*' \
+              -print0
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Python files found"
+          else
+            python3 -m py_compile "${files[@]}"
+            echo "All Python files syntax OK"
+          fi
 
   shell-check:
     name: Shell scripts (syntax check)
