@@ -126,6 +126,14 @@ pub async fn run(args: &[String]) {
                 continue;
             }
 
+            // Fire-and-forget Slack notification: agent claimed a queue item.
+            crate::slack_notify::notify_claimed(
+                &cfg.acc_url,
+                &cfg.agent_name,
+                &item_id,
+                item["title"].as_str().unwrap_or("(no title)"),
+                item["description"].as_str().unwrap_or(""),
+            ).await;
             let in_flight = active_tasks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             post_heartbeat(&cfg, &client, "working", in_flight).await;
             execute_item(&cfg, &client, &item).await;
@@ -228,7 +236,14 @@ async fn execute_item(cfg: &Config, client: &Client, item: &serde_json::Value) {
         } else {
             format!("{output}\n\n---\ngit: {git_result}")
         };
-        post_complete(cfg, client, &item_id, &full_result).await;
+        post_complete_titled(
+            cfg,
+            client,
+            &item_id,
+            item["title"].as_str().unwrap_or("(queue item)"),
+            &full_result,
+        )
+        .await;
         log(cfg, &format!("[{item_id}] completed OK"));
     } else {
         abandon_workspace(cfg, &item_id, &workspace_local, &workspace_agentfs).await;
@@ -924,11 +939,31 @@ async fn claim_item(cfg: &Config, client: &Client, item_id: &str) -> bool {
 }
 
 async fn post_complete(cfg: &Config, client: &Client, item_id: &str, result: &str) {
+    post_complete_titled(cfg, client, item_id, item_id, result).await;
+}
+
+/// Variant used by callers that already have the item title.
+async fn post_complete_titled(
+    cfg: &Config,
+    client: &Client,
+    item_id: &str,
+    title: &str,
+    result: &str,
+) {
     let truncated = &result[..result.len().min(4000)];
     let _ = client
         .items()
         .complete(item_id, &cfg.agent_name, Some(truncated), Some(truncated))
         .await;
+    // Fire-and-forget Slack notification: queue item completed.
+    crate::slack_notify::notify_completed(
+        &cfg.acc_url,
+        &cfg.agent_name,
+        item_id,
+        title,
+        result,
+    )
+    .await;
 }
 
 async fn post_fail(cfg: &Config, client: &Client, item_id: &str, reason: &str) {

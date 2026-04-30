@@ -19,6 +19,7 @@ mod services;
 mod session_discovery;
 mod session_registry;
 mod slack_ingest;
+mod slack_notify;
 mod supervise;
 mod tasks;
 mod tmux;
