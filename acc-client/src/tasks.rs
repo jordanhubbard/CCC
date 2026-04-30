@@ -131,6 +131,28 @@ impl<'a> TasksApi<'a> {
             .await?;
         check_ok(resp).await
     }
+
+    pub async fn vote(
+        self,
+        id: &str,
+        agent: &str,
+        vote: &str,
+        refinement: &str,
+    ) -> Result<()> {
+        let body = serde_json::json!({
+            "agent": agent,
+            "vote": vote,
+            "refinement": refinement,
+        });
+        let resp = self
+            .client
+            .http()
+            .put(self.client.url(&format!("/api/tasks/{id}/vote")))
+            .json(&body)
+            .send()
+            .await?;
+        check_ok(resp).await
+    }
 }
 
 /// Builder for GET /api/tasks. Construct via [`TasksApi::list`].

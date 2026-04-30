@@ -108,6 +108,28 @@ fn running_tasks() -> &'static Mutex<HashMap<String, Instant>> {
     CELL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn recent_voted() -> &'static Mutex<HashMap<String, Instant>> {
+    static VOTED: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    VOTED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn mark_voted(task_id: &str) {
+    if let Ok(mut m) = recent_voted().lock() {
+        let now = Instant::now();
+        m.retain(|_, t| now.duration_since(*t) < RECLAIM_COOLDOWN);
+        m.insert(task_id.to_string(), now);
+    }
+}
+
+fn already_voted(task_id: &str) -> bool {
+    if let Ok(m) = recent_voted().lock() {
+        if let Some(t) = m.get(task_id) {
+            return t.elapsed() < RECLAIM_COOLDOWN;
+        }
+    }
+    false
+}
+
 fn mark_done(task_id: &str) {
     if let Ok(mut m) = recent_done().lock() {
         // GC entries older than the cooldown window
