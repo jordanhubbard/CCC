@@ -424,7 +424,16 @@ fi
 AGENTFS_HOST="${AGENTFS_HOST:-100.89.199.14}"
 AGENTFS_SHARE="accfs"
 AGENTFS_USER="${AGENTFS_USER:-jkh}"
-AGENTFS_MOUNT="${AGENTFS_MOUNT:-$HOME/.acc/shared}"
+# On macOS use /Volumes/accfs as the real mount point so the path falls under
+# the 'Network Volumes' TCC category rather than 'Files & Folders'. The
+# Network Volumes grant is per-user (not per-binary), so it survives every
+# acc-agent rebuild without re-prompting.  ~/.acc/shared is then a symlink to
+# the mount so all existing code continues to resolve paths correctly.
+if [[ "$PLATFORM" == "macos" ]]; then
+  AGENTFS_MOUNT="${AGENTFS_MOUNT:-/Volumes/accfs}"
+else
+  AGENTFS_MOUNT="${AGENTFS_MOUNT:-$HOME/.acc/shared}"
+fi
 AGENTFS_CREDS="/etc/samba/smbcredentials"
 
 info "Checking AgentFS mount..."
@@ -566,7 +575,7 @@ EOF"
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>mkdir -p ${AGENTFS_MOUNT} &amp;&amp; /sbin/mount_smbfs //${_pw_fragment}${AGENTFS_HOST}/${AGENTFS_SHARE} ${AGENTFS_MOUNT} 2&gt;&gt; $HOME/.acc/logs/accfs-mount.log || true</string>
+        <string>mkdir -p ${AGENTFS_MOUNT} &amp;&amp; /sbin/mount_smbfs //${_pw_fragment}${AGENTFS_HOST}/${AGENTFS_SHARE} ${AGENTFS_MOUNT} 2&gt;&gt; $HOME/.acc/logs/accfs-mount.log &amp;&amp; ln -sfn ${AGENTFS_MOUNT} $HOME/.acc/shared || true</string>
     </array>
     <key>RunAtLoad</key>   <true/>
     <key>KeepAlive</key>   <false/>
@@ -581,9 +590,11 @@ EOF
       else
         success "AgentFS LaunchAgent already present"
       fi
-      # Verify (note: ls may fail from SSH due to macOS TCC; use mount + stat)
+      # Wire the symlink on first run / after mount. Idempotent: ln -sfn
+      # replaces a stale symlink or no-op if it already points correctly.
       if _agentfs_mounted; then
-        success "AgentFS mounted at $AGENTFS_MOUNT (macOS TCC may block ls from SSH — normal)"
+        ln -sfn "$AGENTFS_MOUNT" "$HOME/.acc/shared" 2>/dev/null || true
+        success "AgentFS mounted at $AGENTFS_MOUNT; ~/.acc/shared → $AGENTFS_MOUNT"
       else
         warn "AgentFS not mounted — check ~/Library/LaunchAgents/com.acc.accfs-mount.plist and logs"
       fi

@@ -9,7 +9,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>mkdir -p AGENT_HOME/.acc/shared &amp;&amp; /sbin/mount_smbfs //AGENT_SMB_USER@AGENT_SMB_HOST/AGENT_SMB_SHARE AGENT_HOME/.acc/shared 2&gt;&gt; AGENT_HOME/.acc/logs/accfs-mount.log || true</string>
+        <string>mkdir -p /Volumes/accfs &amp;&amp; /sbin/mount_smbfs //AGENT_SMB_USER@AGENT_SMB_HOST/AGENT_SMB_SHARE /Volumes/accfs 2&gt;&gt; AGENT_HOME/.acc/logs/accfs-mount.log &amp;&amp; ln -sfn /Volumes/accfs AGENT_HOME/.acc/shared || true</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
