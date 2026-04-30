@@ -27,7 +27,7 @@ const POLL_BUSY: Duration = Duration::from_secs(5);
 
 /// Hard cap on a single review's agentic loop. Without this, a stuck
 /// model call can hold a claim indefinitely (observed: 4h+ claims that
-/// never complete, blocking the whole fleet via `count_active_tasks`).
+/// never complete, blocking the whole fleet via active task capacity).
 const REVIEW_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Hard cap on a work task's agentic loop. Longer than reviews because
@@ -103,6 +103,11 @@ fn recent_done() -> &'static Mutex<HashMap<String, Instant>> {
     CELL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn running_tasks() -> &'static Mutex<HashMap<String, Instant>> {
+    static CELL: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn mark_done(task_id: &str) {
     if let Ok(mut m) = recent_done().lock() {
         // GC entries older than the cooldown window
@@ -119,6 +124,23 @@ fn in_cooldown(task_id: &str) -> bool {
         }
     }
     false
+}
+
+fn try_mark_running(task_id: &str) -> bool {
+    if let Ok(mut m) = running_tasks().lock() {
+        if m.contains_key(task_id) {
+            return false;
+        }
+        m.insert(task_id.to_string(), Instant::now());
+        return true;
+    }
+    false
+}
+
+fn mark_not_running(task_id: &str) {
+    if let Ok(mut m) = running_tasks().lock() {
+        m.remove(task_id);
+    }
 }
 
 fn preferred_agent(task: &Value) -> Option<&str> {
@@ -279,17 +301,25 @@ pub async fn run(args: &[String]) {
             continue;
         }
 
-        let active = count_active_tasks(&cfg, &client).await;
-        let at_work_cap = active >= max_concurrent;
+        let active_work = count_active_work_tasks(&cfg, &client).await;
+        let at_work_cap = active_work >= max_concurrent;
 
         // Fetch online peers once per cycle (used by all three polls)
         let online_peers = peers::list_peers(&cfg, &client).await;
         let mut claimed = false;
 
+        // The server-side dispatcher may explicitly assign a task by moving
+        // it straight to claimed and publishing tasks:dispatch_assigned. Adopt
+        // those rows here; otherwise they never appear in the open-task polls.
+        let adopted = adopt_assigned_tasks(&cfg, &client, &online_peers).await;
+        if adopted > 0 {
+            claimed = true;
+        }
+
         // ── Poll 1: work tasks (skipped when at capacity) ───────────────────
         // Also polls feature/bug/task which are work-equivalent task types.
-        if !at_work_cap {
-            let fetch_limit = ((max_concurrent - active) * 5).max(10);
+        if !claimed && !at_work_cap {
+            let fetch_limit = ((max_concurrent - active_work) * 5).max(10);
             'work_poll: for task_type_str in &["work", "feature", "bug", "task"] {
                 match fetch_open_tasks(&cfg, &client, fetch_limit, task_type_str).await {
                     Err(e) => {
@@ -327,15 +357,15 @@ pub async fn run(args: &[String]) {
                                             claimed_task["title"].as_str().unwrap_or("")
                                         ),
                                     );
-                                    let cfg2 = cfg.clone();
-                                    let client2 = client.clone();
-                                    let task2 = claimed_task.clone();
-                                    let peers2 = online_peers.clone();
-                                    tokio::spawn(async move {
-                                        execute_task(&cfg2, &client2, &task2, &peers2).await;
-                                    });
-                                    claimed = true;
-                                    break 'work_poll;
+                                    if spawn_claimed_task(
+                                        cfg.clone(),
+                                        client.clone(),
+                                        claimed_task.clone(),
+                                        online_peers.clone(),
+                                    ) {
+                                        claimed = true;
+                                        break 'work_poll;
+                                    }
                                 }
                                 Err(409) | Err(423) => { /* already claimed or blocked, try next */
                                 }
@@ -381,14 +411,15 @@ pub async fn run(args: &[String]) {
                     match claim_task(&cfg, &client, &task_id).await {
                         Ok(claimed_task) => {
                             log(&cfg, &format!("claimed review {task_id}"));
-                            let cfg2 = cfg.clone();
-                            let client2 = client.clone();
-                            let task2 = claimed_task.clone();
-                            tokio::spawn(async move {
-                                execute_review_task(&cfg2, &client2, &task2).await;
-                            });
-                            claimed = true;
-                            break;
+                            if spawn_claimed_task(
+                                cfg.clone(),
+                                client.clone(),
+                                claimed_task.clone(),
+                                online_peers.clone(),
+                            ) {
+                                claimed = true;
+                                break;
+                            }
                         }
                         Err(409) | Err(423) => {}
                         Err(e) => {
@@ -414,14 +445,15 @@ pub async fn run(args: &[String]) {
                     match claim_task(&cfg, &client, &task_id).await {
                         Ok(claimed_task) => {
                             log(&cfg, &format!("claimed phase_commit {task_id}"));
-                            let cfg2 = cfg.clone();
-                            let client2 = client.clone();
-                            let task2 = claimed_task.clone();
-                            tokio::spawn(async move {
-                                execute_phase_commit_task(&cfg2, &client2, &task2).await;
-                            });
-                            claimed = true;
-                            break;
+                            if spawn_claimed_task(
+                                cfg.clone(),
+                                client.clone(),
+                                claimed_task.clone(),
+                                online_peers.clone(),
+                            ) {
+                                claimed = true;
+                                break;
+                            }
                         }
                         Err(409) | Err(423) => {}
                         Err(e) => {
@@ -435,7 +467,10 @@ pub async fn run(args: &[String]) {
         if at_work_cap && !claimed {
             log(
                 &cfg,
-                &format!("at work capacity ({}/{}), waiting", active, max_concurrent),
+                &format!(
+                    "at work capacity ({}/{}), waiting",
+                    active_work, max_concurrent
+                ),
             );
         }
 
@@ -573,7 +608,104 @@ async fn fetch_open_tasks(
     Ok(tasks.into_iter().map(to_value).collect())
 }
 
-async fn count_active_tasks(cfg: &Config, client: &Client) -> usize {
+async fn fetch_assigned_active_tasks(
+    cfg: &Config,
+    client: &Client,
+    limit: usize,
+) -> Result<Vec<Value>, String> {
+    let mut out = Vec::new();
+    for status in [TaskStatus::Claimed, TaskStatus::InProgress] {
+        let tasks = client
+            .tasks()
+            .list()
+            .status(status)
+            .agent(cfg.agent_name.clone())
+            .limit(limit.max(1) as u32)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        out.extend(tasks.into_iter().filter_map(|t| {
+            if t.claimed_by.as_deref() == Some(cfg.agent_name.as_str()) {
+                Some(to_value(t))
+            } else {
+                None
+            }
+        }));
+    }
+    Ok(out)
+}
+
+async fn adopt_assigned_tasks(cfg: &Config, client: &Client, online_peers: &[String]) -> usize {
+    let tasks = match fetch_assigned_active_tasks(
+        cfg,
+        client,
+        cfg.max_tasks_per_agent() as usize + 4,
+    )
+    .await
+    {
+        Ok(tasks) => tasks,
+        Err(e) => {
+            log(cfg, &format!("assigned task fetch failed: {e}"));
+            return 0;
+        }
+    };
+
+    let mut adopted = 0;
+    for task in tasks {
+        let task_id = task["id"].as_str().unwrap_or("");
+        if task_id.is_empty() || in_cooldown(task_id) {
+            continue;
+        }
+        if spawn_claimed_task(
+            cfg.clone(),
+            client.clone(),
+            task.clone(),
+            online_peers.to_vec(),
+        ) {
+            log(
+                cfg,
+                &format!(
+                    "adopted assigned {} {task_id}: {}",
+                    task["task_type"].as_str().unwrap_or("work"),
+                    task["title"].as_str().unwrap_or("")
+                ),
+            );
+            adopted += 1;
+        }
+    }
+    adopted
+}
+
+fn spawn_claimed_task(cfg: Config, client: Client, task: Value, online_peers: Vec<String>) -> bool {
+    let task_id = task["id"].as_str().unwrap_or("").to_string();
+    if task_id.is_empty() || !try_mark_running(&task_id) {
+        return false;
+    }
+    let task_type = task["task_type"].as_str().unwrap_or("work").to_string();
+    match task_type.as_str() {
+        "review" => {
+            tokio::spawn(async move {
+                execute_review_task(&cfg, &client, &task).await;
+                mark_not_running(&task_id);
+            });
+        }
+        "phase_commit" => {
+            tokio::spawn(async move {
+                execute_phase_commit_task(&cfg, &client, &task).await;
+                mark_not_running(&task_id);
+            });
+        }
+        _ => {
+            tokio::spawn(async move {
+                execute_task(&cfg, &client, &task, &online_peers).await;
+                mark_not_running(&task_id);
+            });
+        }
+    }
+    true
+}
+
+async fn count_active_work_tasks(cfg: &Config, client: &Client) -> usize {
     let mut active = 0;
     for status in [TaskStatus::Claimed, TaskStatus::InProgress] {
         match client
@@ -584,11 +716,20 @@ async fn count_active_tasks(cfg: &Config, client: &Client) -> usize {
             .send()
             .await
         {
-            Ok(tasks) => active += tasks.len(),
+            Ok(tasks) => {
+                active += tasks
+                    .into_iter()
+                    .filter(|t| counts_toward_work_capacity(t.task_type))
+                    .count()
+            }
             Err(_) => {}
         }
     }
     active
+}
+
+fn counts_toward_work_capacity(task_type: TaskType) -> bool {
+    !matches!(task_type, TaskType::Review | TaskType::PhaseCommit)
 }
 
 async fn claim_task(cfg: &Config, client: &Client, task_id: &str) -> Result<Value, u16> {
@@ -1464,31 +1605,65 @@ mod tests {
         assert!(result.is_err(), "unreachable hub must return Err");
     }
 
-    // ── count_active_tasks ────────────────────────────────────────────────────
+    // ── active task accounting ────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn test_count_active_tasks_returns_claimed_and_in_progress_count() {
+    async fn test_count_active_work_tasks_ignores_reviews_and_phase_commits() {
         let mock = HubMock::with_state(HubState {
             tasks: vec![
-                json!({"id": "c1", "status": "claimed"}),
-                json!({"id": "c2", "status": "claimed"}),
-                json!({"id": "i1", "status": "in_progress"}),
-                json!({"id": "o1", "status": "open"}),
+                json!({"id": "c1", "status": "claimed", "claimed_by": "test-agent", "task_type": "work"}),
+                json!({"id": "c2", "status": "claimed", "claimed_by": "test-agent", "task_type": "review"}),
+                json!({"id": "i1", "status": "in_progress", "claimed_by": "test-agent", "task_type": "bug"}),
+                json!({"id": "p1", "status": "claimed", "claimed_by": "test-agent", "task_type": "phase_commit"}),
+                json!({"id": "o1", "status": "open", "task_type": "work"}),
             ],
             ..Default::default()
         })
         .await;
         let client = test_client(&mock.url);
-        let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
-        assert_eq!(count, 3);
+        let count = count_active_work_tasks(&test_cfg(&mock.url), &client).await;
+        assert_eq!(count, 2);
     }
 
     #[tokio::test]
-    async fn test_count_active_tasks_zero_when_none_claimed() {
+    async fn test_count_active_work_tasks_zero_when_none_claimed() {
         let mock = HubMock::with_tasks(vec![json!({"id": "o1", "status": "open"})]).await;
         let client = test_client(&mock.url);
-        let count = count_active_tasks(&test_cfg(&mock.url), &client).await;
+        let count = count_active_work_tasks(&test_cfg(&mock.url), &client).await;
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_assigned_active_tasks_returns_own_claimed_rows() {
+        let mock = HubMock::with_state(HubState {
+            tasks: vec![
+                json!({"id": "own-claimed", "status": "claimed", "claimed_by": "test-agent", "task_type": "work"}),
+                json!({"id": "own-progress", "status": "in_progress", "claimed_by": "test-agent", "task_type": "review"}),
+                json!({"id": "other", "status": "claimed", "claimed_by": "other-agent", "task_type": "work"}),
+                json!({"id": "open-assigned", "status": "open", "metadata": {"assigned_agent": "test-agent"}, "task_type": "work"}),
+            ],
+            ..Default::default()
+        })
+        .await;
+        let client = test_client(&mock.url);
+        let tasks = fetch_assigned_active_tasks(&test_cfg(&mock.url), &client, 10)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = tasks.iter().filter_map(|t| t["id"].as_str()).collect();
+        assert_eq!(ids, vec!["own-claimed", "own-progress"]);
+    }
+
+    #[test]
+    fn test_running_task_guard_prevents_duplicate_execution() {
+        let id = format!(
+            "guard-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
+        assert!(try_mark_running(&id));
+        assert!(!try_mark_running(&id));
+        mark_not_running(&id);
+        assert!(try_mark_running(&id));
+        mark_not_running(&id);
     }
 
     // ── claim_task ────────────────────────────────────────────────────────────

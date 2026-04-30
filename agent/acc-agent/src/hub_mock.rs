@@ -194,6 +194,7 @@ async fn task_list(
     let s = st.read().await;
     let status_filter = params.get("status").cloned().unwrap_or_default();
     let type_filter = params.get("task_type").cloned().unwrap_or_default();
+    let agent_filter = params.get("agent").cloned().unwrap_or_default();
     let matched: Vec<&Value> = s
         .tasks
         .iter()
@@ -202,7 +203,10 @@ async fn task_list(
                 status_filter.is_empty() || t["status"].as_str() == Some(&status_filter);
             let type_ok =
                 type_filter.is_empty() || t["task_type"].as_str().unwrap_or("work") == type_filter;
-            status_ok && type_ok
+            let agent_ok = agent_filter.is_empty()
+                || t["claimed_by"].as_str() == Some(&agent_filter)
+                || t["metadata"]["assigned_agent"].as_str() == Some(&agent_filter);
+            status_ok && type_ok && agent_ok
         })
         .collect();
     let count = matched.len() as u64;
