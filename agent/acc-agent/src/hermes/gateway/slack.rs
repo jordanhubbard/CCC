@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -36,7 +37,8 @@ pub struct SlackAdapter {
     workspace: String,
     sessions: Arc<SessionStore>,
     agent: Arc<HermesAgent>,
-    active: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>>,
+    active: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    seen_replies: Arc<Mutex<HashSet<String>>>,
 }
 
 impl SlackAdapter {
@@ -93,7 +95,8 @@ impl SlackAdapter {
             workspace,
             sessions,
             agent,
-            active: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            active: Arc::new(Mutex::new(HashMap::new())),
+            seen_replies: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -220,6 +223,8 @@ impl SlackAdapter {
         if raw_text.is_empty() && event_type == "message" {
             return;
         }
+        let mention = format!("<@{}>", self.bot_user_id);
+        let mentions_self = raw_text.contains(&mention);
 
         let root_ts = thread_ts.clone().unwrap_or_else(|| msg_ts.clone());
         let chain_id = slack_chain_id(&self.workspace, &channel, &root_ts);
@@ -268,7 +273,7 @@ impl SlackAdapter {
         )
         .await;
 
-        if event["bot_id"].is_string() {
+        if event["bot_id"].is_string() && !mentions_self {
             return;
         }
 
@@ -276,7 +281,14 @@ impl SlackAdapter {
         let (should_respond, clean_text) = match event_type {
             "app_mention" => {
                 // Strip the @mention prefix.
-                let mention = format!("<@{}>", self.bot_user_id);
+                let clean = raw_text.replace(&mention, "").trim().to_string();
+                (true, clean)
+            }
+            "message" if raw_text.contains(&mention) => {
+                // Some Slack app configurations receive only the channel
+                // message event for mentions. Treat an explicit mention of
+                // this bot as actionable even without a separate app_mention
+                // event.
                 let clean = raw_text.replace(&mention, "").trim().to_string();
                 (true, clean)
             }
@@ -288,6 +300,9 @@ impl SlackAdapter {
         };
 
         if !should_respond || clean_text.is_empty() {
+            return;
+        }
+        if !self.claim_reply_once(&channel, &msg_ts).await {
             return;
         }
 
@@ -370,6 +385,19 @@ impl SlackAdapter {
                 }
             }),
         ).await;
+    }
+
+    async fn claim_reply_once(&self, channel: &str, msg_ts: &str) -> bool {
+        let key = format!("{}:{channel}:{msg_ts}:{}", self.workspace, self.bot_user_id);
+        let mut seen = self.seen_replies.lock().await;
+        if seen.contains(&key) {
+            return false;
+        }
+        if seen.len() > 2_000 {
+            seen.clear();
+        }
+        seen.insert(key);
+        true
     }
 
     async fn handle_reaction(&self, event: &Value) {
